@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import difflib
+import hashlib
 import io
 import tarfile
 import tempfile
@@ -23,6 +24,7 @@ from activities.models import DiffSignals
 # ---------------------------------------------------------------------------
 
 MAX_DOWNLOAD_BYTES = 20 * 1024 * 1024  # 20 MB
+MAX_EXTRACT_BYTES = 100 * 1024 * 1024  # 100 MB — zip bomb guard
 MAX_DIFF_BYTES = 100 * 1024  # 100 KB
 
 NOISE_DIRS = {".dist-info", "__pycache__", ".egg-info"}
@@ -39,6 +41,7 @@ HIGH_SIGNAL_NAMES = {
     "postinstall.js",
     "preinstall.js",
 }
+HIGH_SIGNAL_SUFFIXES = {".pth"}  # Python path config files — silent code-exec vector
 
 
 # ---------------------------------------------------------------------------
@@ -60,12 +63,12 @@ async def compute(ecosystem: str, package: str, old_version: str, new_version: s
         if old_info is None or new_info is None:
             return DiffSignals(diff_summary="[sdist not available]", diff_size_bytes=0)
 
-        old_url, old_filename = old_info
-        new_url, new_filename = new_info
+        old_url, old_filename, old_sha256 = old_info
+        new_url, new_filename, new_sha256 = new_info
 
         old_bytes, new_bytes = await asyncio.gather(
-            _download(client, old_url),
-            _download(client, new_url),
+            _download(client, old_url, old_sha256),
+            _download(client, new_url, new_sha256),
         )
 
     if old_bytes is None or new_bytes is None:
@@ -91,8 +94,8 @@ async def compute(ecosystem: str, package: str, old_version: str, new_version: s
 
 async def _get_sdist_url(
     client: httpx.AsyncClient, package: str, version: str
-) -> tuple[str, str] | None:
-    """Return (url, filename) for the best available archive, or None."""
+) -> tuple[str, str, str] | None:
+    """Return (url, filename, sha256) for the best available archive, or None."""
     url = f"https://pypi.org/pypi/{package}/{version}/json"
     resp = await client.get(url)
     if resp.status_code == 404:
@@ -109,13 +112,13 @@ async def _get_sdist_url(
     for pkg_type in ("sdist", "bdist_wheel"):
         for entry in urls:
             if entry.get("packagetype") == pkg_type:
-                return entry["url"], entry["filename"]
+                return entry["url"], entry["filename"], entry.get("digests", {}).get("sha256", "")
 
     return None
 
 
-async def _download(client: httpx.AsyncClient, url: str) -> bytes | None:
-    """Download *url* and return bytes, or None if larger than MAX_DOWNLOAD_BYTES."""
+async def _download(client: httpx.AsyncClient, url: str, expected_sha256: str) -> bytes | None:
+    """Download *url*, verify SHA256, return bytes or None if oversized."""
     chunks: list[bytes] = []
     total = 0
     async with client.stream("GET", url) as resp:
@@ -125,7 +128,17 @@ async def _download(client: httpx.AsyncClient, url: str) -> bytes | None:
             if total > MAX_DOWNLOAD_BYTES:
                 return None
             chunks.append(chunk)
-    return b"".join(chunks)
+    data = b"".join(chunks)
+
+    if expected_sha256:
+        actual = hashlib.sha256(data).hexdigest()
+        if actual != expected_sha256:
+            raise ApplicationError(
+                f"SHA256 mismatch for {url}: expected {expected_sha256}, got {actual}",
+                non_retryable=True,
+            )
+
+    return data
 
 
 # ---------------------------------------------------------------------------
@@ -152,15 +165,37 @@ def _extract_and_diff(
 def _extract_to_dir(archive_bytes: bytes, filename: str, dest: str) -> None:
     """Extract *archive_bytes* (named *filename*) into *dest*."""
     buf = io.BytesIO(archive_bytes)
+    dest_path = Path(dest).resolve()
     lower = filename.lower()
     if lower.endswith((".tar.gz", ".tar.bz2", ".tgz")):
         with tarfile.open(fileobj=buf) as tf:
-            tf.extractall(dest, filter="data")
+            tf.extractall(dest, filter="data")  # filter="data" blocks path traversal
     elif lower.endswith((".whl", ".zip")):
         with zipfile.ZipFile(buf) as zf:
-            zf.extractall(dest)
+            _safe_zip_extractall(zf, dest_path)
     else:
         raise ValueError(f"Unsupported archive format: {filename}")
+
+
+def _safe_zip_extractall(zf: zipfile.ZipFile, dest: Path) -> None:
+    """Extract a zip file with path traversal protection and extraction size cap."""
+    total_extracted = 0
+    for member in zf.infolist():
+        # Normalize and check for path traversal
+        member_path = (dest / member.filename).resolve()
+        if not str(member_path).startswith(str(dest)):
+            raise ApplicationError(
+                f"Zip path traversal attempt: {member.filename}",
+                non_retryable=True,
+            )
+        # Guard against zip bombs
+        total_extracted += member.file_size
+        if total_extracted > MAX_EXTRACT_BYTES:
+            raise ApplicationError(
+                "Zip extraction size limit exceeded (possible zip bomb)",
+                non_retryable=True,
+            )
+        zf.extract(member, dest)
 
 
 def _is_noise(rel: str) -> bool:
@@ -178,6 +213,8 @@ def _is_noise(rel: str) -> bool:
         return True
     if Path(name).suffix in NOISE_SUFFIXES:
         return True
+    if Path(name).suffix in HIGH_SIGNAL_SUFFIXES:
+        return False  # explicitly keep high-signal suffixes like .pth
     return False
 
 
@@ -232,7 +269,7 @@ def _build_diff(old_map: dict[str, Path], new_map: dict[str, Path]) -> str:
         if old_text == new_text:
             continue
         name = Path(rel).name
-        if name in HIGH_SIGNAL_NAMES:
+        if name in HIGH_SIGNAL_NAMES or Path(name).suffix in HIGH_SIGNAL_SUFFIXES:
             patch = _unified_diff(old_text, new_text, rel)
             high_signal_changed.append((rel, patch))
         else:

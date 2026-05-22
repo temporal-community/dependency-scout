@@ -100,6 +100,7 @@ def _classifier(classification: str):
             confidence=0.95,
             reasoning=f"fixture:{classification}",
             flags=[],
+            release_age_hours=720.0,
         )
     return classify
 
@@ -133,6 +134,12 @@ def _label():
     @activity.defn(name="activities.github.label")
     async def label(*_): pass
     return label
+
+
+def _close_pr():
+    @activity.defn(name="activities.github.close_pr")
+    async def close_pr(*_): pass
+    return close_pr
 
 
 # ---------------------------------------------------------------------------
@@ -183,7 +190,7 @@ async def _run_scenario(
     acts = [
         _pypi(), _socket(), _osv(), _diff(), _maintainer(), _release_age(),
         _classifier(classification), _repo_config(config),
-        _comment(), _merge(), _review(), _label(),
+        _comment(), _merge(), _review(), _label(), _close_pr(),
     ]
     async with Worker(
         env.client,
@@ -199,14 +206,9 @@ async def _run_scenario(
         )
 
         if human_signal is not None:
-            # Send the signal immediately — Temporal buffers it on the server
-            # and delivers it to the workflow task when it next executes.
-            # By the time the workflow reaches wait_condition, the signal
-            # handler has already set _human_decision, so the condition is
-            # satisfied instantly. This avoids races with the time-skipping
-            # server, which advances time whenever a workflow is parked at a
-            # wait point and would otherwise trigger an execution timeout.
-            await handle.signal(PRActionWorkflow.submit_decision, human_signal)
+            # Send signal with approver matching config.reviewers so the
+            # authorization check in the workflow passes.
+            await handle.signal(PRActionWorkflow.submit_decision, args=[human_signal, "alice"])
         await handle.result()
 
         history = await handle.fetch_history()

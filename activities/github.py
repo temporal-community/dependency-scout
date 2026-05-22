@@ -72,6 +72,15 @@ async def merge_pr(pr: PRContext) -> None:
                 non_retryable=True,
             )
 
+        # Verify the PR hasn't been modified since triage started — prevents
+        # merging a PR that had extra commits pushed after analysis completed.
+        if pr.head_sha and pr_data["head"]["sha"] != pr.head_sha:
+            raise ApplicationError(
+                f"PR #{pr.pr_number} HEAD SHA changed since triage began "
+                f"(expected {pr.head_sha}, got {pr_data['head']['sha']}) — re-triage required",
+                non_retryable=True,
+            )
+
         merge_resp = await client.put(
             f"{_repo_url(pr)}/pulls/{pr.pr_number}/merge",
             headers=headers,
@@ -123,6 +132,34 @@ async def label(pr: PRContext, label_name: str) -> None:
         )
         resp.raise_for_status()
     activity.logger.info(f"Added label '{label_name}' to {pr.repo}#{pr.pr_number}")
+
+
+@activity.defn(name="activities.github.close_pr")
+async def close_pr(pr: PRContext, reason: str) -> None:
+    body = f"**Dependabot Triage Agent — closing this PR.**\n\n{reason}"
+    if _dry_run():
+        activity.logger.info(f"[dry-run] Would close {pr.repo}#{pr.pr_number}: {reason}")
+        return
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        # Post a closing comment first so humans know why it was closed
+        comment_resp = await client.post(
+            f"{_repo_url(pr)}/issues/{pr.pr_number}/comments",
+            headers=await _get_headers(pr.installation_id),
+            json={"body": body},
+        )
+        comment_resp.raise_for_status()
+        close_resp = await client.patch(
+            f"{_repo_url(pr)}/pulls/{pr.pr_number}",
+            headers=await _get_headers(pr.installation_id),
+            json={"state": "closed"},
+        )
+        if close_resp.status_code == 422:
+            raise ApplicationError(
+                f"PR #{pr.pr_number} could not be closed: {close_resp.json().get('message')}",
+                non_retryable=True,
+            )
+        close_resp.raise_for_status()
+    activity.logger.info(f"Closed {pr.repo}#{pr.pr_number}: {reason}")
 
 
 @activity.defn(name="activities.github.get_pr")

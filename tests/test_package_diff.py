@@ -7,11 +7,9 @@ io.BytesIO. ActivityEnvironment provides the Temporal activity context.
 from __future__ import annotations
 
 import io
-import json
 import tarfile
 
 import httpx
-import pytest
 import respx
 from temporalio.testing import ActivityEnvironment
 

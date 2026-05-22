@@ -22,11 +22,11 @@ async def check(ecosystem: str, package: str, old_version: str, new_version: str
 
     urls = data.get("urls", [])
     if not urls:
-        return ReleaseAgeSignals(release_age_hours=0.0)
+        return ReleaseAgeSignals(release_age_hours=None)
 
     raw = urls[0].get("upload_time_iso_8601") or urls[0].get("upload_time", "")
     if not raw:
-        return ReleaseAgeSignals(release_age_hours=0.0)
+        return ReleaseAgeSignals(release_age_hours=None)
 
     upload_time = _parse_upload_time(raw)
     hours = (datetime.now(timezone.utc) - upload_time).total_seconds() / 3600

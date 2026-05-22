@@ -12,7 +12,9 @@ import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Header, HTTPException, Request
+from packaging.utils import canonicalize_name
 from temporalio.client import Client
+from temporalio.common import WorkflowIDReusePolicy
 from temporalio.contrib.pydantic import pydantic_data_converter
 
 from activities.models import PRContext
@@ -84,6 +86,7 @@ async def webhook(
     installation_id = payload.get("installation", {}).get("id", 0)
     repo = payload["repository"]["full_name"]
     pr_number = payload["pull_request"]["number"]
+    head_sha = payload["pull_request"]["head"]["sha"]
 
     pr_context = PRContext(
         repo=repo,
@@ -91,9 +94,10 @@ async def webhook(
         pr_author=pr_author,
         installation_id=installation_id,
         ecosystem=parsed.ecosystem,
-        package_name=parsed.package,
+        package_name=canonicalize_name(parsed.package),  # normalize: Requests == requests
         old_version=parsed.old_version,
         new_version=parsed.new_version,
+        head_sha=head_sha,
     )
 
     workflow_id = f"pr-action-{repo.replace('/', '-')}-{pr_number}"
@@ -102,6 +106,7 @@ async def webhook(
         pr_context,
         id=workflow_id,
         task_queue=os.environ.get("TEMPORAL_TASK_QUEUE", "dependency-triage"),
+        id_reuse_policy=WorkflowIDReusePolicy.ALLOW_DUPLICATE_FAILED_ONLY,
     )
 
     return {"status": "started", "workflow_id": workflow_id}

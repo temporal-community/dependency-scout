@@ -11,6 +11,7 @@ class PRContext(BaseModel):
     package_name: str
     old_version: str
     new_version: str
+    head_sha: str = ""                  # PR branch HEAD SHA at webhook receipt time
 
 
 class RepoConfig(BaseModel):
@@ -18,9 +19,8 @@ class RepoConfig(BaseModel):
     auto_merge_enabled: bool = False
     reviewers: list[str] = []
     min_release_age_hours: int = 168        # 7 days
-    allowed_ecosystems: list[str] = ["pip", "npm"]
     auto_merge_classifications: list[str] = ["green"]
-    block_classifications: list[str] = []   # e.g. ["red"] to force-close suspicious PRs
+    block_classifications: list[str] = []   # e.g. ["red"] to close suspicious PRs
 
 
 # Partial signal models — one per signal activity, merged into PackageSignals in the workflow.
@@ -50,7 +50,7 @@ class MaintainerSignals(BaseModel):
 
 
 class ReleaseAgeSignals(BaseModel):
-    release_age_hours: float
+    release_age_hours: float | None   # None when upload_time is missing from PyPI metadata
 
 
 class PackageSignals(BaseModel):
@@ -58,7 +58,7 @@ class PackageSignals(BaseModel):
     package_name: str
     old_version: str
     new_version: str
-    release_age_hours: float
+    release_age_hours: float | None
     is_major_bump: bool
     socket_score: int | None
     socket_alerts: list[str]
@@ -75,3 +75,4 @@ class Verdict(BaseModel):
     confidence: float
     reasoning: str
     flags: list[str]
+    release_age_hours: float | None = None  # passed through for per-repo age gate enforcement

@@ -25,6 +25,8 @@ def _sign(body: bytes, secret: str = TEST_SECRET) -> str:
     return "sha256=" + hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
 
 
+TEST_HEAD_SHA = "abc123def456" * 3  # realistic-looking SHA
+
 def _dependabot_payload(
     action: str = "opened",
     title: str = "Bump requests from 2.31.0 to 2.32.0",
@@ -39,6 +41,7 @@ def _dependabot_payload(
             "title": title,
             "body": "",
             "user": {"login": author},
+            "head": {"sha": TEST_HEAD_SHA},
         },
         "repository": {"full_name": TEST_REPO},
         "installation": {"id": installation_id},
@@ -129,6 +132,7 @@ async def test_pr_context_fields_correct(client):
     assert pr_context.old_version == "2.31.0"
     assert pr_context.new_version == "2.32.0"
     assert pr_context.installation_id == 99999
+    assert pr_context.head_sha == TEST_HEAD_SHA
 
 
 # ---------------------------------------------------------------------------

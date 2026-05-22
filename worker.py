@@ -37,6 +37,7 @@ async def main() -> None:
             github.merge_pr,
             github.request_review,
             github.label,
+            github.close_pr,
             github.get_pr,
         ],
     )

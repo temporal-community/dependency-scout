@@ -1,5 +1,20 @@
 import os
+import re
 from activities.models import PRContext, PackageSignals, Verdict
+
+_MAX_REASONING_LEN = 500
+
+
+def _sanitize_reasoning(text: str) -> str:
+    """Strip Markdown links and cap length — reasoning is LLM output influenced by
+    attacker-controlled diff content and must not render arbitrary links in PR comments."""
+    # Replace [text](url) with just the text
+    text = re.sub(r"\[([^\]]*)\]\([^)]*\)", r"\1", text)
+    # Strip bare URLs
+    text = re.sub(r"https?://\S+", "[url removed]", text)
+    if len(text) > _MAX_REASONING_LEN:
+        text = text[:_MAX_REASONING_LEN] + "…"
+    return text
 
 _BADGE = {
     "green": "🟢 GREEN",
@@ -21,7 +36,7 @@ def format_comment(pr: PRContext, verdict: Verdict, signals: PackageSignals | No
         "",
         f"**Confidence:** {verdict.confidence:.0%}",
         "",
-        f"> {verdict.reasoning}",
+        f"> {_sanitize_reasoning(verdict.reasoning)}",
         "",
     ]
 
@@ -32,7 +47,7 @@ def format_comment(pr: PRContext, verdict: Verdict, signals: PackageSignals | No
         lines += [
             "| Signal | Value |",
             "|--------|-------|",
-            f"| Release age | {signals.release_age_hours:.0f}h |",
+            f"| Release age | {signals.release_age_hours:.0f}h |" if signals.release_age_hours is not None else "| Release age | unknown |",
             f"| Weekly downloads | {signals.weekly_downloads:,} |" if signals.weekly_downloads else "| Weekly downloads | unknown |",
             f"| Socket score | {signals.socket_score}/100 |" if signals.socket_score is not None else "| Socket score | unavailable |",
             f"| CVEs | {len(signals.osv_vulnerabilities)} |",

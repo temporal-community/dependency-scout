@@ -19,17 +19,27 @@ class PRActionWorkflow:
 
     def __init__(self) -> None:
         self._human_decision: str | None = None
+        self._approver: str = ""
 
     @workflow.signal
-    def submit_decision(self, decision: str) -> None:
-        """Send 'approve' to merge, anything else to reject."""
+    def submit_decision(self, decision: str, approver: str = "") -> None:
+        """Send 'approve' to merge, anything else to reject.
+
+        approver should be the GitHub username of the person making the decision.
+        The workflow validates it against config.reviewers before honoring it.
+        Setting approver is not cryptographically enforced (anyone who can reach
+        Temporal can claim any username) — the proper fix is to source this signal
+        exclusively from HMAC-verified GitHub webhook review events.
+        """
         self._human_decision = decision
+        self._approver = approver
 
     @workflow.query
     def status(self) -> dict:
         return {
             "awaiting_human": self._human_decision is None,
             "human_decision": self._human_decision,
+            "approver": self._approver,
         }
 
     @workflow.run
@@ -50,6 +60,22 @@ class PRActionWorkflow:
             result_type=Verdict,
         )
 
+        # Hard gate: enforce min_release_age_hours per repo policy regardless of LLM verdict.
+        # The shared PackageTriageWorkflow verdict may have been produced for a different repo
+        # with a different age policy, or the LLM may have ignored the age signal.
+        if (
+            verdict.classification == "green"
+            and verdict.release_age_hours is not None
+            and verdict.release_age_hours < config.min_release_age_hours
+        ):
+            verdict = verdict.model_copy(update={
+                "classification": "yellow",
+                "flags": verdict.flags + [
+                    f"release too fresh: {verdict.release_age_hours:.0f}h "
+                    f"< {config.min_release_age_hours}h minimum for this repo"
+                ],
+            })
+
         await workflow.execute_activity(
             "activities.github.comment", args=[pr, verdict], **opts
         )
@@ -57,6 +83,13 @@ class PRActionWorkflow:
         if verdict.classification in config.block_classifications:
             await workflow.execute_activity(
                 "activities.github.label", args=[pr, "supply-chain-suspicious"], **opts
+            )
+            reason = (
+                f"Triage agent classified this as **{verdict.classification.upper()}**. "
+                f"Reason: {', '.join(verdict.flags) or verdict.reasoning[:200]}"
+            )
+            await workflow.execute_activity(
+                "activities.github.close_pr", args=[pr, reason], **opts
             )
             return f"blocked-{verdict.classification}"
 
@@ -71,7 +104,22 @@ class PRActionWorkflow:
             await workflow.execute_activity(
                 "activities.github.request_review", args=[pr, config.reviewers], **opts
             )
-            await workflow.wait_condition(lambda: self._human_decision is not None)
+
+            # Wait for a decision from an authorized reviewer.
+            # Re-check authorization each time a signal arrives in case an
+            # unauthorized signal arrived first.
+            while True:
+                await workflow.wait_condition(lambda: self._human_decision is not None)
+                if not config.reviewers or self._approver in config.reviewers:
+                    break
+                # Unauthorized signal — log and keep waiting
+                workflow.logger.warning(
+                    f"submit_decision from '{self._approver}' who is not in "
+                    f"config.reviewers {config.reviewers} — ignoring"
+                )
+                self._human_decision = None
+                self._approver = ""
+
             if self._human_decision == "approve":
                 await workflow.execute_activity(
                     "activities.github.merge_pr", args=[pr], **opts

@@ -7,7 +7,7 @@ refreshed automatically when within 5 minutes of expiry.
 """
 import os
 import time
-from datetime import datetime, timezone
+from datetime import datetime
 
 import httpx
 import jwt
@@ -56,6 +56,7 @@ async def get_installation_token(installation_id: int) -> str:
         )
 
     if resp.status_code == 401:
+        _token_cache.pop(installation_id, None)  # evict stale entry so next call retries
         raise ApplicationError(
             "GitHub App JWT rejected — check GITHUB_APP_ID and private key",
             non_retryable=True,
