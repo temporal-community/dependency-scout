@@ -204,7 +204,7 @@ See [CLAUDE.md](CLAUDE.md) for architecture details and [HANDOFF.md](HANDOFF.md)
 - [x] Socket.dev integration
 - [x] Package diff activity (sdist download + diff)
 - [x] Per-repo config fetched from `.github/triage-agent.yml`
-- [ ] GitHub App auth (replaces PAT)
+- [x] GitHub App auth (replaces PAT)
 - [x] FastAPI webhook receiver (live on real Dependabot events)
 - [ ] Replay test fixtures
 - [ ] Public deployment + GitHub App registration
