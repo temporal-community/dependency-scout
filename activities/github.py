@@ -17,6 +17,10 @@ def _headers() -> dict:
     }
 
 
+def _dry_run() -> bool:
+    return not os.environ.get("GITHUB_TOKEN")
+
+
 def _repo_url(pr: PRContext) -> str:
     return f"https://api.github.com/repos/{pr.repo}"
 
@@ -24,6 +28,9 @@ def _repo_url(pr: PRContext) -> str:
 @activity.defn(name="activities.github.comment")
 async def comment(pr: PRContext, verdict: Verdict) -> None:
     body = format_comment(pr, verdict)
+    if _dry_run():
+        activity.logger.info(f"[dry-run] Would post on {pr.repo}#{pr.pr_number}:\n{body}")
+        return
     async with httpx.AsyncClient(timeout=15.0) as client:
         resp = await client.post(
             f"{_repo_url(pr)}/issues/{pr.pr_number}/comments",
@@ -38,6 +45,9 @@ async def comment(pr: PRContext, verdict: Verdict) -> None:
 
 @activity.defn(name="activities.github.merge_pr")
 async def merge_pr(pr: PRContext) -> None:
+    if _dry_run():
+        activity.logger.info(f"[dry-run] Would squash-merge {pr.repo}#{pr.pr_number}")
+        return
     async with httpx.AsyncClient(timeout=15.0) as client:
         # Fetch current PR state and head SHA
         pr_resp = await client.get(
@@ -82,6 +92,9 @@ async def merge_pr(pr: PRContext) -> None:
 
 @activity.defn(name="activities.github.request_review")
 async def request_review(pr: PRContext, reviewers: list[str]) -> None:
+    if _dry_run():
+        activity.logger.info(f"[dry-run] Would request review on {pr.repo}#{pr.pr_number} from {reviewers}")
+        return
     async with httpx.AsyncClient(timeout=15.0) as client:
         resp = await client.post(
             f"{_repo_url(pr)}/pulls/{pr.pr_number}/requested_reviewers",
@@ -94,6 +107,9 @@ async def request_review(pr: PRContext, reviewers: list[str]) -> None:
 
 @activity.defn(name="activities.github.label")
 async def label(pr: PRContext, label_name: str) -> None:
+    if _dry_run():
+        activity.logger.info(f"[dry-run] Would add label '{label_name}' to {pr.repo}#{pr.pr_number}")
+        return
     async with httpx.AsyncClient(timeout=15.0) as client:
         resp = await client.post(
             f"{_repo_url(pr)}/issues/{pr.pr_number}/labels",
