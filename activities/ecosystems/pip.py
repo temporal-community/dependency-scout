@@ -216,10 +216,11 @@ class PipProvider:
             fetch_tag_signature(owner, repo, version, token),
             fetch_tag_signature(owner, repo, old_version, token),
         )
-        return (
-            build_release_signals(release, registry_time, new_sig, old_sig)
-            if release else ReleaseSignals()
-        )
+        if release:
+            return build_release_signals(release, registry_time, new_sig, old_sig).model_copy(
+                update={"metadata_repo": owner_repo}
+            )
+        return ReleaseSignals(metadata_repo=owner_repo)
 
     def extract_archive(self, archive_bytes: bytes, filename: str, dest: str) -> None:
         buf = io.BytesIO(archive_bytes)

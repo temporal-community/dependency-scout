@@ -154,6 +154,49 @@ async def test_pypi_release_not_found_on_github():
 
 
 @respx.mock
+async def test_pypi_metadata_repo_populated_with_release():
+    respx.get(f"{PYPI_BASE}/requests/2.32.0/json").mock(
+        return_value=httpx.Response(200, json=_pypi_json("requests", "2.32.0", "https://github.com/psf/requests"))
+    )
+    respx.get(f"{GH_API}/psf/requests/releases/tags/v2.32.0").mock(
+        return_value=httpx.Response(200, json=_gh_release())
+    )
+
+    env = ActivityEnvironment()
+    result = await env.run(release_check, "pip", "requests", "2.31.0", "2.32.0")
+    assert result.metadata_repo == "psf/requests"
+
+
+@respx.mock
+async def test_pypi_metadata_repo_populated_without_release():
+    """metadata_repo should be set even when no GitHub release exists."""
+    respx.get(f"{PYPI_BASE}/pkg/1.1.0/json").mock(
+        return_value=httpx.Response(200, json=_pypi_json("pkg", "1.1.0", "https://github.com/owner/pkg"))
+    )
+    respx.get(f"{GH_API}/owner/pkg/releases/tags/v1.1.0").mock(return_value=httpx.Response(404))
+    respx.get(f"{GH_API}/owner/pkg/releases/tags/1.1.0").mock(return_value=httpx.Response(404))
+
+    env = ActivityEnvironment()
+    result = await env.run(release_check, "pip", "pkg", "1.0.0", "1.1.0")
+    assert result.github_release_exists is False
+    assert result.metadata_repo == "owner/pkg"
+
+
+@respx.mock
+async def test_pypi_metadata_repo_none_when_no_github_url():
+    respx.get(f"{PYPI_BASE}/mypkg/1.1.0/json").mock(
+        return_value=httpx.Response(200, json={
+            "info": {"name": "mypkg", "version": "1.1.0", "project_urls": {}, "home_page": ""},
+            "urls": [],
+        })
+    )
+
+    env = ActivityEnvironment()
+    result = await env.run(release_check, "pip", "mypkg", "1.0.0", "1.1.0")
+    assert result.metadata_repo is None
+
+
+@respx.mock
 async def test_pypi_registry_404():
     respx.get(f"{PYPI_BASE}/missing/1.1.0/json").mock(return_value=httpx.Response(404))
 

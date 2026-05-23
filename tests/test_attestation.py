@@ -531,6 +531,110 @@ async def test_npm_attestation_populates_slsa_chain_fields():
     assert result.build_invocation_id == inv_id
 
 
+# ---------------------------------------------------------------------------
+# Repo mismatch (Critical #4 + #7) — metadata_repo vs publisher_repo cross-check
+# ---------------------------------------------------------------------------
+
+def _signals_with_attestation(**overrides):
+    """Minimal PackageSignals with attestation for classifier rule tests."""
+    from activities.models import PackageSignals
+    base = dict(
+        ecosystem="pip",
+        package_name="pkg",
+        old_version="1.0.0",
+        new_version="1.1.0",
+        release_age_hours=500.0,
+        is_major_bump=False,
+        socket_score=None,
+        socket_alerts=[],
+        osv_vulnerabilities=[],
+        diff_summary="[no significant changes detected]",
+        diff_size_bytes=0,
+        maintainer_changed=False,
+        weekly_downloads=100_000,
+        has_attestation=True,
+        publisher_repo="psf/requests",
+        metadata_repo="psf/requests",
+    )
+    base.update(overrides)
+    return PackageSignals(**base)
+
+
+def test_rule_based_repo_mismatch_is_red():
+    """publisher_repo != metadata_repo with attestation → automatic RED."""
+    from activities.classifier import _rule_based
+    signals = _signals_with_attestation(
+        publisher_repo="attacker/evil-fork",
+        metadata_repo="psf/requests",
+    )
+    verdict = _rule_based(signals)
+    assert verdict.classification == "red"
+    assert verdict.confidence >= 0.90
+    assert any("mismatch" in f for f in verdict.flags)
+    assert "attacker/evil-fork" in " ".join(verdict.flags)
+    assert "psf/requests" in " ".join(verdict.flags)
+
+
+def test_rule_based_repo_mismatch_case_insensitive():
+    """Comparison ignores case — same repo spelled differently is not a mismatch."""
+    from activities.classifier import _rule_based
+    signals = _signals_with_attestation(
+        publisher_repo="PSF/Requests",
+        metadata_repo="psf/requests",
+    )
+    verdict = _rule_based(signals)
+    assert verdict.classification != "red" or not any("mismatch" in f for f in verdict.flags)
+
+
+def test_rule_based_no_mismatch_when_metadata_repo_none():
+    """No mismatch flag when metadata_repo is absent (no GitHub URL in registry metadata)."""
+    from activities.classifier import _rule_based
+    signals = _signals_with_attestation(metadata_repo=None)
+    verdict = _rule_based(signals)
+    assert not any("mismatch" in f for f in verdict.flags)
+
+
+def test_rule_based_no_mismatch_when_no_attestation():
+    """Mismatch check is skipped when has_attestation=False — no provenance to compare against."""
+    from activities.classifier import _rule_based
+    signals = _signals_with_attestation(
+        has_attestation=False,
+        publisher_repo=None,
+        metadata_repo="psf/requests",
+    )
+    verdict = _rule_based(signals)
+    assert not any("mismatch" in f for f in verdict.flags)
+
+
+def test_rule_based_non_tag_source_ref_is_yellow():
+    """source_ref pointing to a branch (not a tag) with attestation → YELLOW flag."""
+    from activities.classifier import _rule_based
+    signals = _signals_with_attestation(source_ref="refs/heads/main")
+    verdict = _rule_based(signals)
+    assert verdict.classification == "yellow"
+    assert any("source_ref" in f for f in verdict.flags)
+    assert any("tag" in f for f in verdict.flags)
+
+
+def test_rule_based_tag_source_ref_not_flagged():
+    """Proper refs/tags/... source_ref should not be flagged."""
+    from activities.classifier import _rule_based
+    signals = _signals_with_attestation(source_ref="refs/tags/v1.1.0")
+    verdict = _rule_based(signals)
+    assert not any("source_ref" in f for f in verdict.flags)
+
+
+def test_rule_based_non_tag_source_ref_no_flag_without_attestation():
+    """source_ref check is skipped when has_attestation=False."""
+    from activities.classifier import _rule_based
+    signals = _signals_with_attestation(
+        has_attestation=False,
+        source_ref="refs/heads/main",
+    )
+    verdict = _rule_based(signals)
+    assert not any("source_ref" in f for f in verdict.flags)
+
+
 @respx.mock
 async def test_publisher_changed_false_when_only_commit_sha_differs():
     """publisher_changed must not fire when the same repo built different commits (the normal case)."""

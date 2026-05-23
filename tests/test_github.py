@@ -17,9 +17,11 @@ from activities.github import (
     label,
     close_pr,
     get_pr,
+    check_pr_files,
     _dry_run,
+    _is_ci_infra_file,
 )
-from activities.models import PRContext, Verdict
+from activities.models import PRContext, PRFilesSignals, Verdict
 
 
 # ---------------------------------------------------------------------------
@@ -382,3 +384,122 @@ async def test_get_pr_checks_not_passed_when_mergeable_state_not_clean(pr, with_
     env = ActivityEnvironment()
     result = await env.run(get_pr, pr)
     assert result["checks_passed"] is False
+
+
+# ---------------------------------------------------------------------------
+# _is_ci_infra_file (unit tests — no HTTP)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("path", [
+    ".github/workflows/ci.yml",
+    ".github/workflows/release.yaml",
+    ".github/actions/setup/action.yml",
+    ".gitlab-ci.yml",
+    ".gitlab-ci.yaml",
+    "Jenkinsfile",
+    ".circleci/config.yml",
+    ".buildkite/pipeline.yml",
+    ".travis.yml",
+    ".travis.yaml",
+    "bitbucket-pipelines.yml",
+    ".drone.yml",
+    "appveyor.yml",
+    "Dockerfile",
+    "Dockerfile.prod",
+    "dockerfile",
+    "docker-compose.yml",
+    "docker-compose.override.yaml",
+    ".dockerignore",
+    "Makefile",
+    "makefile",
+    "GNUmakefile",
+    "scripts/deploy.sh",
+    "deploy.bash",
+    "build.ps1",
+    "install.bat",
+    "run.cmd",
+])
+def test_is_ci_infra_file_detects_suspicious(path):
+    assert _is_ci_infra_file(path) is True
+
+
+@pytest.mark.parametrize("path", [
+    "requirements.txt",
+    "package.json",
+    "package-lock.json",
+    "Gemfile",
+    "Gemfile.lock",
+    "pyproject.toml",
+    "setup.py",
+    "setup.cfg",
+    "src/main.py",
+    "lib/utils.js",
+    "README.md",
+    "CHANGELOG.md",
+])
+def test_is_ci_infra_file_passes_dep_files(path):
+    assert _is_ci_infra_file(path) is False
+
+
+# ---------------------------------------------------------------------------
+# check_pr_files
+# ---------------------------------------------------------------------------
+
+@respx.mock
+async def test_check_pr_files_dry_run_returns_empty(pr, dry_run):
+    env = ActivityEnvironment()
+    result = await env.run(check_pr_files, pr)
+    assert result == PRFilesSignals()
+    assert result.unexpected_files == []
+
+
+@respx.mock
+async def test_check_pr_files_clean_pr_returns_empty(pr, with_pat):
+    respx.get(f"{BASE_URL}/pulls/{PR_NUM}/files").mock(
+        return_value=httpx.Response(200, json=[
+            {"filename": "requirements.txt"},
+            {"filename": "requirements-dev.txt"},
+        ])
+    )
+    env = ActivityEnvironment()
+    result = await env.run(check_pr_files, pr)
+    assert result.unexpected_files == []
+
+
+@respx.mock
+async def test_check_pr_files_detects_workflow_file(pr, with_pat):
+    respx.get(f"{BASE_URL}/pulls/{PR_NUM}/files").mock(
+        return_value=httpx.Response(200, json=[
+            {"filename": "requirements.txt"},
+            {"filename": ".github/workflows/ci.yml"},
+        ])
+    )
+    env = ActivityEnvironment()
+    result = await env.run(check_pr_files, pr)
+    assert result.unexpected_files == [".github/workflows/ci.yml"]
+
+
+@respx.mock
+async def test_check_pr_files_detects_multiple_suspicious_files(pr, with_pat):
+    respx.get(f"{BASE_URL}/pulls/{PR_NUM}/files").mock(
+        return_value=httpx.Response(200, json=[
+            {"filename": "package.json"},
+            {"filename": "Dockerfile"},
+            {"filename": "deploy.sh"},
+            {"filename": ".github/workflows/release.yml"},
+        ])
+    )
+    env = ActivityEnvironment()
+    result = await env.run(check_pr_files, pr)
+    assert set(result.unexpected_files) == {"Dockerfile", "deploy.sh", ".github/workflows/release.yml"}
+
+
+@respx.mock
+async def test_check_pr_files_401_raises_non_retryable(pr, with_pat):
+    respx.get(f"{BASE_URL}/pulls/{PR_NUM}/files").mock(
+        return_value=httpx.Response(401)
+    )
+    env = ActivityEnvironment()
+    with pytest.raises(ApplicationError) as exc_info:
+        await env.run(check_pr_files, pr)
+    assert exc_info.value.non_retryable is True

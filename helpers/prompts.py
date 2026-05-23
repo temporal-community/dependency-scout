@@ -44,7 +44,7 @@ RED — likely supply chain attack. ANY of:
 
 SLSA/Sigstore attestation signals (has_attestation, publisher_kind, publisher_repo,
 publisher_changed, old_publisher_repo, publisher_account_age_days, source_ref,
-source_commit_sha, build_invocation_id):
+source_commit_sha, build_invocation_id, metadata_repo):
 - has_attestation=false is NOT itself a red/yellow flag — most packages don't use
   trusted publishers yet. It simply means there's no cryptographic provenance.
 - has_attestation=true is a mild positive trust signal: the artifact was built by a
@@ -57,9 +57,18 @@ source_commit_sha, build_invocation_id):
   A very young account (<30 days) combined with any other red/yellow signal is a strong
   red flag. Under 90 days alone warrants yellow. Established accounts (>1 year) are
   a mild positive signal when combined with has_attestation=true.
+- metadata_repo: the "owner/repo" extracted from the package's registry metadata
+  (PyPI project_urls, npm repository field, RubyGems source_code_uri). This is the
+  repository the *package author declared*. Null when no GitHub URL was found in metadata.
+- CRITICAL cross-check — when has_attestation=true AND both publisher_repo and
+  metadata_repo are present AND they differ: this is a strong red flag. The SLSA
+  attestation proves the artifact was built from a *different* repository than the one
+  the package claims. Treat as RED unless publisher_repo is a known legitimate org
+  migration of metadata_repo (e.g. "requests-archive/requests" → "psf/requests").
 - source_ref: git ref the build ran against (e.g. "refs/tags/v1.2.3"). When present and
   has_attestation=true, confirms the artifact was built from a tagged release commit.
-  A non-tag ref (branch, SHA) for a release version is mildly suspicious.
+  A non-tag ref (e.g. refs/heads/main, a bare SHA) for a version release is a YELLOW
+  flag — legitimate releases are almost always built from a version tag, not a branch.
 - source_commit_sha: the exact git commit SHA the artifact was built from. Null when no
   attestation exists. When present, cross-referencing with the repository's tag history
   can confirm the build matched a public commit.

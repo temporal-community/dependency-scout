@@ -1,10 +1,11 @@
+import asyncio
 from datetime import timedelta
 from temporalio import workflow
 from temporalio.common import RetryPolicy
 from temporalio.workflow import ParentClosePolicy
 
 with workflow.unsafe.imports_passed_through():
-    from activities.models import PRContext, RepoConfig, Verdict
+    from activities.models import PRContext, PRFilesSignals, RepoConfig, Verdict
     from workflows.package_triage_workflow import PackageTriageWorkflow
 
 
@@ -55,14 +56,42 @@ class PRActionWorkflow:
         # The date suffix provides a 24-hour TTL — each UTC day produces a fresh verdict,
         # so a stale GREEN from yesterday cannot persist indefinitely. Within a day, all
         # repos seeing the same bump still share one triage run.
+        #
+        # check_pr_files runs in parallel: it's a fast per-PR check that looks for CI
+        # workflows, Dockerfiles, or scripts in the PR — files that should never appear
+        # in a routine dep-bump. No reason to block triage while waiting for it.
         date_key = workflow.now().strftime("%Y-%m-%d")
-        verdict: Verdict = await workflow.execute_child_workflow(
-            PackageTriageWorkflow.run,
-            args=[pr.ecosystem, pr.package_name, pr.old_version, pr.new_version],
-            id=f"triage-{pr.ecosystem}-{pr.package_name}-{pr.new_version}-{date_key}",
-            parent_close_policy=ParentClosePolicy.ABANDON,
-            result_type=Verdict,
+        verdict, pr_files = await asyncio.gather(
+            workflow.execute_child_workflow(
+                PackageTriageWorkflow.run,
+                args=[pr.ecosystem, pr.package_name, pr.old_version, pr.new_version],
+                id=f"triage-{pr.ecosystem}-{pr.package_name}-{pr.new_version}-{date_key}",
+                parent_close_policy=ParentClosePolicy.ABANDON,
+                result_type=Verdict,
+            ),
+            workflow.execute_activity(
+                "activities.github.check_pr_files",
+                pr,
+                result_type=PRFilesSignals,
+                **opts,
+            ),
         )
+
+        # Hard escalation: unexpected CI/infra/script files in a dep-bump PR override
+        # the triage verdict. Package-level analysis can't see the consuming-repo PR diff;
+        # this is the only place that check happens.
+        if pr_files.unexpected_files:
+            verdict = Verdict(
+                classification="red",
+                confidence=0.95,
+                reasoning=(
+                    "CRITICAL: Non-dependency files changed alongside this dependency bump — "
+                    "possible supply chain attack or repository compromise."
+                ),
+                flags=[f"unexpected file in PR: {f}" for f in pr_files.unexpected_files]
+                + verdict.flags,
+                release_age_hours=verdict.release_age_hours,
+            )
 
         # Hard gate: enforce min_release_age_hours per repo policy regardless of LLM verdict.
         # The shared PackageTriageWorkflow verdict may have been produced for a different repo

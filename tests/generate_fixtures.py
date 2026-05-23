@@ -22,6 +22,7 @@ from activities.models import (
     MaintainerSignals,
     OSVSignals,
     PRContext,
+    PRFilesSignals,
     PyPISignals,
     ReleaseAgeSignals,
     ReleaseSignals,
@@ -162,6 +163,13 @@ def _close_pr():
     return close_pr
 
 
+def _check_pr_files(unexpected: list[str] | None = None):
+    @activity.defn(name="activities.github.check_pr_files")
+    async def check_pr_files(*_):
+        return PRFilesSignals(unexpected_files=unexpected or [])
+    return check_pr_files
+
+
 # ---------------------------------------------------------------------------
 # Scenarios: (fixture_name, verdict_class, repo_config, human_signal | None)
 # ---------------------------------------------------------------------------
@@ -210,7 +218,7 @@ async def _run_scenario(
     acts = [
         _pypi(), _socket(), _osv(), _diff(), _maintainer(), _release_age(),
         _attestation(), _release_notes(), _classifier(classification), _repo_config(config),
-        _comment(), _merge(), _review(), _label(), _close_pr(),
+        _comment(), _merge(), _review(), _label(), _close_pr(), _check_pr_files(),
     ]
     async with Worker(
         env.client,

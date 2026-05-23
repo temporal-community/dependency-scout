@@ -41,6 +41,7 @@ async def main() -> None:
             github.label,
             github.close_pr,
             github.get_pr,
+            github.check_pr_files,
         ],
     )
     print(f"Worker started on task queue: {task_queue}")

@@ -4,8 +4,46 @@ import httpx
 from temporalio import activity
 from temporalio.exceptions import ApplicationError
 
-from activities.models import PRContext, Verdict
+from activities.models import PRContext, PRFilesSignals, Verdict
 from helpers.comment_formatter import format_comment
+
+# ---------------------------------------------------------------------------
+# CI/infra file detection — paths that should never change in a dep-bump PR
+# ---------------------------------------------------------------------------
+
+_CI_INFRA_EXACT: frozenset[str] = frozenset({
+    ".gitlab-ci.yml", ".gitlab-ci.yaml",
+    "Jenkinsfile",
+    ".travis.yml", ".travis.yaml",
+    "bitbucket-pipelines.yml", "bitbucket-pipelines.yaml",
+    ".drone.yml", ".drone.yaml",
+    "appveyor.yml", "appveyor.yaml",
+    ".dockerignore",
+    "Makefile", "makefile", "GNUmakefile",
+})
+_CI_INFRA_PATH_PREFIXES: tuple[str, ...] = (
+    ".github/workflows/",
+    ".github/actions/",
+    ".circleci/",
+    ".buildkite/",
+)
+_CI_INFRA_SCRIPT_SUFFIXES: tuple[str, ...] = (
+    ".sh", ".bash", ".zsh", ".fish",
+    ".ps1", ".psm1", ".psd1",
+    ".bat", ".cmd",
+)
+
+
+def _is_ci_infra_file(path: str) -> bool:
+    name = path.rsplit("/", 1)[-1]
+    if name in _CI_INFRA_EXACT:
+        return True
+    if any(path.startswith(p) for p in _CI_INFRA_PATH_PREFIXES):
+        return True
+    name_lower = name.lower()
+    if name_lower.startswith("dockerfile") or name_lower.startswith("docker-compose"):
+        return True
+    return any(name_lower.endswith(s) for s in _CI_INFRA_SCRIPT_SUFFIXES)
 
 
 def _dry_run() -> bool:
@@ -182,3 +220,25 @@ async def get_pr(pr: PRContext) -> dict:
         "mergeable": data.get("mergeable"),
         "checks_passed": data.get("mergeable_state") == "clean",
     }
+
+
+@activity.defn(name="activities.github.check_pr_files")
+async def check_pr_files(pr: PRContext) -> PRFilesSignals:
+    """Return paths of CI/infra/script files unexpectedly changed in this dependency-bump PR.
+
+    A routine dep-bump should only touch lockfiles and manifests. Finding CI workflows,
+    Dockerfiles, or shell scripts in the same PR is a strong supply-chain attack indicator.
+    """
+    if _dry_run():
+        return PRFilesSignals()
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        resp = await client.get(
+            f"{_repo_url(pr)}/pulls/{pr.pr_number}/files",
+            headers=await _get_headers(pr.installation_id),
+            params={"per_page": 100},
+        )
+        if resp.status_code == 401:
+            raise ApplicationError("GitHub auth failed", non_retryable=True)
+        resp.raise_for_status()
+    unexpected = [f["filename"] for f in resp.json() if _is_ci_infra_file(f["filename"])]
+    return PRFilesSignals(unexpected_files=unexpected)

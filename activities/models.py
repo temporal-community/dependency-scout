@@ -47,6 +47,10 @@ class DiffSignals(BaseModel):
     install_script_changed: bool = False
 
 
+class PRFilesSignals(BaseModel):
+    unexpected_files: list[str] = []  # CI/infra/script paths that shouldn't appear in a dep-bump PR
+
+
 class MaintainerSignals(BaseModel):
     maintainer_changed: bool
 
@@ -64,6 +68,7 @@ class ReleaseSignals(BaseModel):
     release_body: str | None = None             # release notes, truncated to 3 000 chars
     tag_signature_verified: bool | None = None  # None = no annotated tag; True/False = GH verification result
     tag_was_previously_signed: bool = False     # old version had a verified signed tag; new one doesn't
+    metadata_repo: str | None = None            # "owner/repo" extracted from package registry metadata (project_urls / repository / source_code_uri)
 
 
 class AttestationSignals(BaseModel):
@@ -112,6 +117,7 @@ class PackageSignals(BaseModel):
     source_ref: str | None = None
     source_commit_sha: str | None = None
     build_invocation_id: str | None = None
+    metadata_repo: str | None = None            # from ReleaseSignals — registry-declared GitHub repo
 
 
 class Verdict(BaseModel):

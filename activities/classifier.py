@@ -126,6 +126,35 @@ def _rule_based(signals: PackageSignals) -> Verdict:
     if signals.publisher_changed:
         old = f" (was {signals.old_publisher_repo})" if signals.old_publisher_repo else ""
         flags.append(f"trusted publisher changed{old}")
+    if (
+        signals.has_attestation
+        and signals.publisher_repo
+        and signals.metadata_repo
+        and signals.publisher_repo.lower() != signals.metadata_repo.lower()
+    ):
+        return Verdict(
+            classification="red",
+            confidence=0.95,
+            reasoning=(
+                f"SLSA attestation publisher repo ({signals.publisher_repo}) does not match "
+                f"the repository declared in package metadata ({signals.metadata_repo}) — "
+                "strong indicator of a supply chain attack."
+            ),
+            flags=[
+                f"provenance repo mismatch: attestation={signals.publisher_repo}, "
+                f"metadata={signals.metadata_repo}"
+            ],
+            release_age_hours=signals.release_age_hours,
+        )
+    if (
+        signals.has_attestation
+        and signals.source_ref
+        and not signals.source_ref.startswith("refs/tags/")
+    ):
+        flags.append(
+            f"SLSA source_ref is not a tag ({signals.source_ref!r}) — "
+            "release should be built from a tagged commit"
+        )
     if signals.publisher_account_age_days is not None and signals.publisher_account_age_days < 90:
         flags.append(f"publisher GitHub account is only {signals.publisher_account_age_days} days old")
     if signals.tag_was_previously_signed:
