@@ -4,9 +4,9 @@ You have 47 unreviewed Dependabot PRs. You're going to merge most of them anyway
 
 **This bot gives every dependency PR a real second opinion before it merges.**
 
-It checks six independent signals in parallel — CVEs, supply chain score, package diff, release age, maintainer changes, download trends — classifies the risk as green/yellow/red, and posts a verdict comment to the PR. You decide what happens next.
+It checks seven independent signals in parallel — CVEs, supply chain score, package diff, release age, maintainer changes, download trends, SLSA/Sigstore attestations — classifies the risk as green/yellow/red, and posts a verdict comment to the PR. You decide what happens next.
 
-> **Status:** Experimental — works locally and with personal GitHub App installs. Public deployment coming soon.
+> **Status:** Experimental — works locally and with personal GitHub App installs. Supports pip, npm, and RubyGems. Public deployment coming soon.
 
 ---
 
@@ -14,7 +14,7 @@ It checks six independent signals in parallel — CVEs, supply chain score, pack
 
 When a Dependabot or Renovate PR opens, the Scout:
 
-1. **Fetches signals** from public APIs (PyPI/npm, OSV, Socket.dev, pypistats) — no API keys required for most signals
+1. **Fetches signals** from public APIs (PyPI/npm/RubyGems, OSV, Socket.dev, pypistats, SLSA provenance) — no API keys required for most signals
 2. **Downloads and diffs** the package archive to see what code actually changed
 3. **Classifies risk** as GREEN, YELLOW, or RED using Claude (or a rule-based fallback if you don't have an API key)
 4. **Posts a verdict comment** to the PR explaining its reasoning
@@ -92,17 +92,18 @@ All fields are optional. Any field you omit stays at its safe default (no auto-m
 
 ## Roadmap
 
-- [x] PyPI + npm ecosystem support
-- [x] Six parallel signal sources (PyPI/npm, OSV, Socket.dev, diff, release age, maintainer history)
+- [x] PyPI, npm, and RubyGems ecosystem support
+- [x] Seven parallel signal sources (metadata, OSV, Socket.dev, diff, release age, maintainer history, SLSA/Sigstore attestations)
 - [x] LLM classifier with rule-based fallback
 - [x] GitHub App auth
 - [x] FastAPI webhook receiver
 - [x] Per-repo config via `.github/triage-agent.yml`
 - [x] Observe-only safe default
 - [x] Replay test fixtures (workflow determinism guarantee)
+- [x] EcosystemProvider plugin architecture (adding an ecosystem = one new file)
 - [ ] Public GitHub App registration
-- [ ] npm support (next — currently PyPI only in production)
-- [ ] Rubygems, Composer, and other ecosystems
+- [ ] Composer (PHP), Maven (Java), and other ecosystems
+- [ ] Renovate-triggered webhook support (currently Dependabot-focused)
 
 ---
 

@@ -1,0 +1,47 @@
+services:
+  temporal:
+    image: temporalio/auto-setup:1.24
+    ports:
+      - "7233:7233"
+    environment:
+      - LOG_LEVEL=warn
+    healthcheck:
+      test: ["CMD", "tctl", "cluster", "health"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  temporal-ui:
+    image: temporalio/ui:2.26
+    ports:
+      - "8233:8233"
+    environment:
+      - TEMPORAL_ADDRESS=temporal:7233
+      - TEMPORAL_CORS_ORIGINS=http://localhost:3000
+    depends_on:
+      temporal:
+        condition: service_healthy
+
+  worker:
+    build: .
+    command: uv run python -m worker
+    env_file: .env
+    environment:
+      - TEMPORAL_ADDRESS=temporal:7233
+    depends_on:
+      temporal:
+        condition: service_healthy
+    restart: on-failure
+
+  webhook:
+    build: .
+    command: uv run uvicorn api.webhook:app --host 0.0.0.0 --port 8080
+    ports:
+      - "8080:8080"
+    env_file: .env
+    environment:
+      - TEMPORAL_ADDRESS=temporal:7233
+    depends_on:
+      temporal:
+        condition: service_healthy
+    restart: on-failure

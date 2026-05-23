@@ -8,7 +8,7 @@ from temporalio.contrib.pydantic import pydantic_data_converter
 from workflows.package_triage_workflow import PackageTriageWorkflow
 from workflows.pr_action_workflow import PRActionWorkflow
 from activities import pypi_metadata, socket, osv, package_diff, release_age, maintainer
-from activities import classifier, repo_config, github
+from activities import attestation, classifier, repo_config, github
 
 load_dotenv()
 
@@ -31,6 +31,7 @@ async def main() -> None:
             package_diff.compute,
             release_age.check,
             maintainer.history,
+            attestation.check,
             classifier.classify,
             repo_config.fetch,
             github.comment,
