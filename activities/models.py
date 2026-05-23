@@ -55,6 +55,15 @@ class ReleaseAgeSignals(BaseModel):
     release_age_hours: float | None   # None when upload_time is missing from PyPI metadata
 
 
+class ReleaseSignals(BaseModel):
+    github_release_exists: bool = False
+    release_author: str | None = None            # GitHub login who created the release
+    release_is_automated: bool = False           # True if github-actions[bot] or similar bot
+    timestamp_skew_minutes: float | None = None  # abs(registry_publish - gh_release_created)
+    possible_rerelease: bool = False             # published_at lags created_at by >24h
+    release_body: str | None = None             # release notes, truncated to 3 000 chars
+
+
 class AttestationSignals(BaseModel):
     has_attestation: bool = False           # new version has a verifiable SLSA/Sigstore attestation
     publisher_kind: str | None = None       # "GitHub", "GitLab", etc.
@@ -81,6 +90,12 @@ class PackageSignals(BaseModel):
     package_description: str | None = None
     install_script_added: bool = False
     install_script_changed: bool = False
+    github_release_exists: bool = False
+    release_author: str | None = None
+    release_is_automated: bool = False
+    timestamp_skew_minutes: float | None = None
+    possible_rerelease: bool = False
+    release_body: str | None = None
     has_attestation: bool = False
     publisher_kind: str | None = None
     publisher_repo: str | None = None

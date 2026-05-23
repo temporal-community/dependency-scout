@@ -11,13 +11,16 @@ import httpx
 from temporalio.exceptions import ApplicationError
 
 from activities.ecosystems import (
+    build_release_signals,
     fetch_github_account_age,
+    fetch_github_release,
     is_major,
+    parse_github_repo,
     parse_upload_time,
     safe_zip_extractall,
     validate_archive_url,
 )
-from activities.models import AttestationSignals, MaintainerSignals, PyPISignals, ReleaseAgeSignals
+from activities.models import AttestationSignals, MaintainerSignals, PyPISignals, ReleaseAgeSignals, ReleaseSignals
 
 
 class PipProvider:
@@ -161,6 +164,49 @@ class PipProvider:
             old_publisher_repo=old_pub.get("repo") if publisher_changed else None,
             publisher_account_age_days=age_days,
         )
+
+    # ------------------------------------------------------------------
+    # fetch_release
+    # ------------------------------------------------------------------
+
+    async def fetch_release(self, package: str, version: str) -> ReleaseSignals:
+        import os
+        token = os.environ.get("GITHUB_TOKEN")
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.get(f"https://pypi.org/pypi/{package}/{version}/json")
+            if resp.status_code != 200:
+                return ReleaseSignals()
+            data = resp.json()
+
+        # Registry publish timestamp for skew calculation
+        registry_time = None
+        urls = data.get("urls", [])
+        if urls:
+            raw = urls[0].get("upload_time_iso_8601") or urls[0].get("upload_time", "")
+            if raw:
+                try:
+                    registry_time = parse_upload_time(raw)
+                except Exception:  # noqa: BLE001
+                    pass
+
+        # Source repo URL — try common project_urls keys before falling back to home_page
+        info = data.get("info", {})
+        project_urls = info.get("project_urls") or {}
+        source_url = (
+            project_urls.get("Source Code")
+            or project_urls.get("Source")
+            or project_urls.get("Repository")
+            or project_urls.get("Homepage")
+            or info.get("home_page")
+            or ""
+        )
+        owner_repo = parse_github_repo(source_url)
+        if not owner_repo:
+            return ReleaseSignals()
+
+        owner, repo = owner_repo.split("/", 1)
+        release = await fetch_github_release(owner, repo, version, token)
+        return build_release_signals(release, registry_time) if release else ReleaseSignals()
 
     def extract_archive(self, archive_bytes: bytes, filename: str, dest: str) -> None:
         buf = io.BytesIO(archive_bytes)

@@ -8,8 +8,16 @@ from datetime import datetime, timezone
 import httpx
 from temporalio.exceptions import ApplicationError
 
-from activities.ecosystems import fetch_github_account_age, is_major, parse_upload_time, validate_archive_url
-from activities.models import AttestationSignals, MaintainerSignals, PyPISignals, ReleaseAgeSignals
+from activities.ecosystems import (
+    build_release_signals,
+    fetch_github_account_age,
+    fetch_github_release,
+    is_major,
+    parse_github_repo,
+    parse_upload_time,
+    validate_archive_url,
+)
+from activities.models import AttestationSignals, MaintainerSignals, PyPISignals, ReleaseAgeSignals, ReleaseSignals
 
 
 class NpmProvider:
@@ -143,6 +151,47 @@ class NpmProvider:
             old_publisher_repo=old_pub.get("repo") if publisher_changed else None,
             publisher_account_age_days=age_days,
         )
+
+    # ------------------------------------------------------------------
+    # fetch_release
+    # ------------------------------------------------------------------
+
+    async def fetch_release(self, package: str, version: str) -> ReleaseSignals:
+        import os
+        token = os.environ.get("GITHUB_TOKEN")
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            v_resp, pkg_resp = await asyncio.gather(
+                client.get(f"https://registry.npmjs.org/{package}/{version}"),
+                client.get(f"https://registry.npmjs.org/{package}"),
+            )
+
+        if v_resp.status_code != 200:
+            return ReleaseSignals()
+        vdata = v_resp.json()
+
+        # Source URL — check repository field then homepage
+        repo_field = vdata.get("repository") or {}
+        source_url = repo_field.get("url", "") if isinstance(repo_field, dict) else str(repo_field)
+        if not source_url:
+            source_url = vdata.get("homepage", "")
+
+        owner_repo = parse_github_repo(source_url)
+        if not owner_repo:
+            return ReleaseSignals()
+
+        # Registry timestamp for skew calculation
+        registry_time = None
+        if pkg_resp.status_code == 200:
+            raw = (pkg_resp.json().get("time") or {}).get(version, "")
+            if raw:
+                try:
+                    registry_time = parse_upload_time(raw)
+                except Exception:  # noqa: BLE001
+                    pass
+
+        owner, repo = owner_repo.split("/", 1)
+        release = await fetch_github_release(owner, repo, version, token)
+        return build_release_signals(release, registry_time) if release else ReleaseSignals()
 
     def extract_archive(self, archive_bytes: bytes, filename: str, dest: str) -> None:
         buf = io.BytesIO(archive_bytes)

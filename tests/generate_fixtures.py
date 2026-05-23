@@ -24,6 +24,7 @@ from activities.models import (
     PRContext,
     PyPISignals,
     ReleaseAgeSignals,
+    ReleaseSignals,
     RepoConfig,
     SocketSignals,
     Verdict,
@@ -101,6 +102,13 @@ def _attestation(has_attestation: bool = True, publisher_repo: str = "psf/reques
             publisher_kind="GitHub" if has_attestation else None,
             publisher_repo=publisher_repo if has_attestation else None,
         )
+    return check
+
+
+def _release_notes():
+    @activity.defn(name="activities.release_notes.check")
+    async def check(*_):
+        return ReleaseSignals(github_release_exists=True, release_is_automated=True)
     return check
 
 
@@ -201,7 +209,7 @@ async def _run_scenario(
 ) -> None:
     acts = [
         _pypi(), _socket(), _osv(), _diff(), _maintainer(), _release_age(),
-        _attestation(), _classifier(classification), _repo_config(config),
+        _attestation(), _release_notes(), _classifier(classification), _repo_config(config),
         _comment(), _merge(), _review(), _label(), _close_pr(),
     ]
     async with Worker(

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import io
 import tarfile
 from datetime import datetime, timezone
@@ -7,8 +8,15 @@ from datetime import datetime, timezone
 import httpx
 from temporalio.exceptions import ApplicationError
 
-from activities.ecosystems import is_major, parse_upload_time, validate_archive_url
-from activities.models import AttestationSignals, MaintainerSignals, PyPISignals, ReleaseAgeSignals
+from activities.ecosystems import (
+    build_release_signals,
+    fetch_github_release,
+    is_major,
+    parse_github_repo,
+    parse_upload_time,
+    validate_archive_url,
+)
+from activities.models import AttestationSignals, MaintainerSignals, PyPISignals, ReleaseAgeSignals, ReleaseSignals
 
 
 class RubyGemsProvider:
@@ -140,6 +148,45 @@ class RubyGemsProvider:
     ) -> AttestationSignals:
         # RubyGems does not yet support SLSA provenance or Sigstore attestations.
         return AttestationSignals(has_attestation=False)
+
+    # ------------------------------------------------------------------
+    # fetch_release
+    # ------------------------------------------------------------------
+
+    async def fetch_release(self, package: str, version: str) -> ReleaseSignals:
+        import os
+        token = os.environ.get("GITHUB_TOKEN")
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            gem_resp, versions_resp = await asyncio.gather(
+                client.get(f"https://rubygems.org/api/v1/gems/{package}.json"),
+                client.get(f"https://rubygems.org/api/v1/versions/{package}.json"),
+            )
+
+        if gem_resp.status_code != 200:
+            return ReleaseSignals()
+        gem_data = gem_resp.json()
+
+        source_url = gem_data.get("source_code_uri") or gem_data.get("homepage_uri") or ""
+        owner_repo = parse_github_repo(source_url)
+        if not owner_repo:
+            return ReleaseSignals()
+
+        # Registry timestamp for skew calculation
+        registry_time = None
+        if versions_resp.status_code == 200:
+            for v in versions_resp.json():
+                if v.get("number") == version:
+                    raw = v.get("created_at", "")
+                    if raw:
+                        try:
+                            registry_time = parse_upload_time(raw)
+                        except Exception:  # noqa: BLE001
+                            pass
+                    break
+
+        owner, repo = owner_repo.split("/", 1)
+        release = await fetch_github_release(owner, repo, version, token)
+        return build_release_signals(release, registry_time) if release else ReleaseSignals()
 
     def extract_archive(self, archive_bytes: bytes, filename: str, dest: str) -> None:
         """Extract a RubyGems .gem file (outer tar → data.tar.gz → source tree)."""

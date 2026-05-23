@@ -21,6 +21,9 @@ YELLOW — needs human eyes. ANY of:
   - missing signals (Socket unavailable, etc.)
   - any new outbound network call added in the diff — legitimate config fetching
     and C2 payload fetching look identical in source code; always requires human review
+  - possible_rerelease=true — GitHub release was drafted much later than created (unusual)
+  - timestamp_skew_minutes > 120 — registry publish and GitHub release far apart in time
+  - release_notes mention security fixes, CVEs, or breaking changes (worth human review)
 
 RED — likely supply chain attack. ANY of:
   - ANY entry in the "=== DANGEROUS BINARY/EXECUTABLE FILES ===" diff section —
@@ -53,6 +56,20 @@ publisher_changed, old_publisher_repo, publisher_account_age_days):
   A very young account (<30 days) combined with any other red/yellow signal is a strong
   red flag. Under 90 days alone warrants yellow. Established accounts (>1 year) are
   a mild positive signal when combined with has_attestation=true.
+
+GitHub release signals (github_release_exists, release_author, release_is_automated,
+timestamp_skew_minutes, possible_rerelease):
+- github_release_exists=false is normal — many packages don't cut GitHub releases.
+- release_is_automated=true is a mild positive signal: automated release tooling
+  (github-actions[bot], release-please, etc.) reduces human error surface.
+- release_is_automated=false with has_attestation=true is slightly unusual but not a flag:
+  a human cut the release but the build was still via trusted CI.
+- timestamp_skew_minutes: null when unavailable. Large values (>120 min) warrant scrutiny;
+  the package was published to the registry at a very different time than the GitHub release.
+- possible_rerelease=true: the release was created much earlier than published, suggesting
+  it was drafted, edited, then published. Not inherently malicious but worth a look.
+- release_notes (in untrusted_registry): review for mention of security fixes, CVEs, or
+  breaking changes — those are not red flags but signal the reviewer should read carefully.
 
 Use `package_description` (when present) to assess the package's risk category.
 Packages that touch auth, cryptography, network I/O, secrets, or code execution

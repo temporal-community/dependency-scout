@@ -11,6 +11,7 @@ To add a new ecosystem:
 from __future__ import annotations
 
 import os
+import re
 import stat
 import urllib.parse
 import zipfile
@@ -21,7 +22,13 @@ from typing import Protocol
 import httpx
 from temporalio.exceptions import ApplicationError
 
-from activities.models import AttestationSignals, MaintainerSignals, PyPISignals, ReleaseAgeSignals
+from activities.models import (
+    AttestationSignals,
+    MaintainerSignals,
+    PyPISignals,
+    ReleaseAgeSignals,
+    ReleaseSignals,
+)
 
 MAX_EXTRACT_BYTES = 100 * 1024 * 1024  # zip bomb guard
 
@@ -50,6 +57,10 @@ class EcosystemProvider(Protocol):
     async def fetch_attestations(
         self, package: str, old_version: str, new_version: str
     ) -> AttestationSignals: ...
+
+    async def fetch_release(
+        self, package: str, version: str
+    ) -> ReleaseSignals: ...
 
 
 def get_provider(ecosystem: str) -> EcosystemProvider:
@@ -106,6 +117,80 @@ def parse_upload_time(raw: str) -> datetime:
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
     return dt
+
+
+_GITHUB_RE = re.compile(
+    r"github\.com[:/]([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+?)(?:\.git)?(?:[/?#]|$)"
+)
+
+
+def parse_github_repo(url: str) -> str | None:
+    """Extract 'owner/repo' from any GitHub URL variant, or None."""
+    if not url:
+        return None
+    m = _GITHUB_RE.search(url)
+    return m.group(1) if m else None
+
+
+async def fetch_github_release(
+    owner: str, repo: str, version: str, token: str | None
+) -> dict | None:
+    """Return the GitHub release JSON for the given version, trying v-prefixed tag first."""
+    headers: dict[str, str] = {"Accept": "application/vnd.github+json"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            for tag in (f"v{version}", version):
+                resp = await client.get(
+                    f"https://api.github.com/repos/{owner}/{repo}/releases/tags/{tag}",
+                    headers=headers,
+                )
+                if resp.status_code == 200:
+                    return resp.json()
+    except Exception:  # noqa: BLE001
+        pass
+    return None
+
+
+def build_release_signals(
+    release: dict, registry_time: datetime | None = None
+) -> ReleaseSignals:
+    """Convert a GitHub release API response into structured ReleaseSignals."""
+    author_login: str = (release.get("author") or {}).get("login") or ""
+    release_is_automated = "[bot]" in author_login
+
+    skew_minutes: float | None = None
+    created_at = release.get("created_at", "")
+    if created_at and registry_time is not None:
+        try:
+            gh_time = parse_upload_time(created_at)
+            skew_minutes = round(abs((gh_time - registry_time).total_seconds()) / 60, 1)
+        except Exception:  # noqa: BLE001
+            pass
+
+    possible_rerelease = False
+    published_at = release.get("published_at", "")
+    if created_at and published_at and created_at != published_at:
+        try:
+            delta = (parse_upload_time(published_at) - parse_upload_time(created_at)).total_seconds()
+            possible_rerelease = delta > 86_400  # drafted >24h before publishing
+        except Exception:  # noqa: BLE001
+            pass
+
+    raw_body = release.get("body") or ""
+    body: str | None = None
+    if raw_body:
+        body = (raw_body[:3000] + "\n[release notes truncated]") if len(raw_body) > 3000 else raw_body
+
+    return ReleaseSignals(
+        github_release_exists=True,
+        release_author=author_login or None,
+        release_is_automated=release_is_automated,
+        timestamp_skew_minutes=skew_minutes,
+        possible_rerelease=possible_rerelease,
+        release_body=body,
+    )
 
 
 async def fetch_github_account_age(owner: str) -> int | None:
