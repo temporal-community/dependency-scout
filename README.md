@@ -4,7 +4,18 @@ You have 47 unreviewed Dependabot PRs. You're going to merge most of them anyway
 
 **This bot gives every dependency PR a real second opinion before it merges.**
 
-It checks seven independent signals in parallel — CVEs, supply chain score, package diff, release age, maintainer changes, download trends, SLSA/Sigstore attestations — classifies the risk as green/yellow/red, and posts a verdict comment to the PR. You decide what happens next.
+**TL;DR — what it checks and why:**
+- **Does this version have known vulnerabilities?** Queries [OSV.dev](https://osv.dev) (includes the OpenSSF malicious-packages database) for CVEs and confirmed malicious packages.
+- **Is the package itself suspicious?** [Socket.dev](https://socket.dev) scans for obfuscated code, install-time scripts, typosquatting, and permission creep.
+- **What code actually changed?** Downloads and diffs both package archives — flags new binary `.so`/`.dll`/`.node` files (which execute on import), new install hooks, and unusual dependency additions.
+- **Is the release fresh?** Very new releases (<24h) haven't had time for community review; older is safer.
+- **Did the maintainer change?** A new account publishing a popular package is a classic supply chain attack vector.
+- **Was it built from the right place?** Checks [SLSA/Sigstore](https://slsa.dev) attestations — cryptographic proof that the artifact was built by a specific CI pipeline from a specific repo. A mismatch is an automatic red flag.
+- **Is the upstream repo healthy?** Queries the [OpenSSF Scorecard](https://securityscorecards.dev) to check if the project has dangerous CI workflows, overprivileged tokens, or no active maintenance.
+- **Is this a zombie package?** Flags bumps to deprecated packages or patches to old major version lines while a newer major is actively maintained.
+- **Is the PR itself suspicious?** Checks that only dependency files changed — finding a Dockerfile or CI workflow script in a "routine dep bump" is a red flag.
+
+It classifies the risk as GREEN / YELLOW / RED, posts a comment explaining its reasoning, and takes action based on how you've configured it (or nothing if you haven't).
 
 > **Status:** Experimental — works locally and with personal GitHub App installs. Supports pip, npm, and RubyGems. Public deployment coming soon.
 
