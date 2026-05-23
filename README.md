@@ -30,6 +30,27 @@ When a Dependabot or Renovate PR opens, the Scout:
 
 **If you don't configure anything, the Scout only posts comments.** It never merges, closes, or requests review unless you explicitly enable it in `.github/triage-agent.yml`. This means installing it on a repo you haven't thought about yet is harmless.
 
+### What the comment looks like
+
+Every PR gets a comment like this:
+
+---
+
+> **Dependabot Triage Agent — 🟡 YELLOW**
+>
+> **Confidence:** 75%
+>
+> > Routine minor bump, but released 18 hours ago — too fresh to auto-merge by default. No CVEs, maintainer stable, diff looks like a docs update.
+>
+> **Flags:**
+> - very fresh release (18h old)
+>
+> [View workflow run](http://localhost:8233/...) · [Configure triage behavior](.github/triage-agent.yml)
+
+---
+
+For a GREEN verdict, the comment is shorter — just the badge, reasoning, and a link. For RED, all flags are listed in full.
+
 ---
 
 ## Try it in 5 minutes
@@ -84,9 +105,10 @@ auto_merge_classifications: [green]   # auto-merge green verdicts
 reviewers: [alice, bob]               # request review on yellow
 min_release_age_hours: 168            # never merge anything < 7 days old
 block_classifications: [red]          # add a label + block merge on red
+max_new_dependencies: 5               # flag as yellow if > 5 new direct deps added
 ```
 
-All fields are optional. Any field you omit stays at its safe default (no auto-merge, no review requests).
+All fields are optional. Any field you omit stays at its safe default (no auto-merge, no review requests, no blocking).
 
 ---
 

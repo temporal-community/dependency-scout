@@ -128,6 +128,45 @@ def test_flags_rendered_when_present(pr):
     assert "- Released <24h ago" in out
 
 
+def test_yellow_many_flags_folds_tail(pr):
+    flags = ["flag one", "flag two", "flag three", "flag four", "flag five"]
+    verdict = Verdict(classification="yellow", confidence=0.6, reasoning="Several issues.", flags=flags)
+    out = format_comment(pr, verdict)
+    assert "- flag one" in out
+    assert "- flag two" in out
+    assert "- flag three" in out
+    assert "<details>" in out
+    assert "and 2 more signals" in out
+    assert "- flag four" in out
+    assert "- flag five" in out
+
+
+def test_yellow_three_flags_not_folded(pr):
+    flags = ["a", "b", "c"]
+    verdict = Verdict(classification="yellow", confidence=0.6, reasoning="Three issues.", flags=flags)
+    out = format_comment(pr, verdict)
+    assert "<details>" not in out
+    assert "- a" in out
+    assert "- c" in out
+
+
+def test_red_many_flags_never_folded(pr):
+    flags = [f"critical issue {i}" for i in range(6)]
+    verdict = Verdict(classification="red", confidence=0.95, reasoning="Bad.", flags=flags)
+    out = format_comment(pr, verdict)
+    assert "<details>" not in out
+    for flag in flags:
+        assert f"- {flag}" in out
+
+
+def test_fold_uses_singular_signal_noun(pr):
+    flags = ["flag one", "flag two", "flag three", "flag four"]
+    verdict = Verdict(classification="yellow", confidence=0.6, reasoning="Issues.", flags=flags)
+    out = format_comment(pr, verdict)
+    assert "and 1 more signal" in out
+    assert "and 1 more signals" not in out
+
+
 def test_flags_are_sanitized(pr):
     verdict = Verdict(
         classification="red",

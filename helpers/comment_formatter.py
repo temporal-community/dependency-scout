@@ -22,6 +22,10 @@ _BADGE = {
     "red": "🔴 RED",
 }
 
+# Flags beyond this count are folded into a <details> block for YELLOW verdicts,
+# so routine bumps with many minor signals don't drown out the important ones.
+_FLAG_FOLD_THRESHOLD = 3
+
 
 def format_comment(pr: PRContext, verdict: Verdict, signals: PackageSignals | None = None) -> str:
     badge = _BADGE.get(verdict.classification, verdict.classification.upper())
@@ -41,7 +45,24 @@ def format_comment(pr: PRContext, verdict: Verdict, signals: PackageSignals | No
     ]
 
     if verdict.flags:
-        lines += ["**Flags:**", *[f"- {_sanitize_reasoning(f)}" for f in verdict.flags], ""]
+        sanitized = [_sanitize_reasoning(f) for f in verdict.flags]
+        # RED flags are always fully visible. YELLOW with many flags collapses the tail
+        # so the comment doesn't drown the reviewer in low-priority noise.
+        if verdict.classification == "red" or len(sanitized) <= _FLAG_FOLD_THRESHOLD:
+            lines += ["**Flags:**", *[f"- {f}" for f in sanitized], ""]
+        else:
+            visible = sanitized[:_FLAG_FOLD_THRESHOLD]
+            hidden = sanitized[_FLAG_FOLD_THRESHOLD:]
+            noun = "signal" if len(hidden) == 1 else "signals"
+            lines += ["**Flags:**", *[f"- {f}" for f in visible]]
+            lines += [
+                f"<details><summary>and {len(hidden)} more {noun}</summary>",
+                "",
+                *[f"- {f}" for f in hidden],
+                "",
+                "</details>",
+                "",
+            ]
 
     if signals:
         lines += [
