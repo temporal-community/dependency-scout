@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import io
+import re
 import tarfile
 from datetime import datetime, timezone
 
@@ -12,6 +13,7 @@ from activities.ecosystems import (
     build_release_signals,
     fetch_github_account_age,
     fetch_github_release,
+    fetch_tag_signature,
     is_major,
     parse_github_repo,
     parse_upload_time,
@@ -142,7 +144,9 @@ class NpmProvider:
             owner = new_pub["repo"].split("/")[0]
             age_days = await fetch_github_account_age(owner)
 
-        publisher_changed = old_pub is not None and old_pub != new_pub
+        publisher_changed = (
+            old_pub is not None and old_pub.get("repo") != new_pub.get("repo")
+        )
         return AttestationSignals(
             has_attestation=True,
             publisher_kind=new_pub.get("kind"),
@@ -150,13 +154,16 @@ class NpmProvider:
             publisher_changed=publisher_changed,
             old_publisher_repo=old_pub.get("repo") if publisher_changed else None,
             publisher_account_age_days=age_days,
+            source_ref=new_pub.get("source_ref"),
+            source_commit_sha=new_pub.get("source_commit_sha"),
+            build_invocation_id=new_pub.get("build_invocation_id"),
         )
 
     # ------------------------------------------------------------------
     # fetch_release
     # ------------------------------------------------------------------
 
-    async def fetch_release(self, package: str, version: str) -> ReleaseSignals:
+    async def fetch_release(self, package: str, old_version: str, version: str) -> ReleaseSignals:
         import os
         token = os.environ.get("GITHUB_TOKEN")
         async with httpx.AsyncClient(timeout=15.0) as client:
@@ -174,6 +181,11 @@ class NpmProvider:
         source_url = repo_field.get("url", "") if isinstance(repo_field, dict) else str(repo_field)
         if not source_url:
             source_url = vdata.get("homepage", "")
+        # Normalize npm bare "owner/repo" shorthand (no scheme → GitHub by npm convention)
+        if source_url and "://" not in source_url and not source_url.startswith("github:"):
+            parts = source_url.split("/")
+            if len(parts) == 2 and all(re.match(r"^[A-Za-z0-9_.-]+$", p) for p in parts if p):
+                source_url = "https://github.com/" + source_url
 
         owner_repo = parse_github_repo(source_url)
         if not owner_repo:
@@ -190,8 +202,15 @@ class NpmProvider:
                     pass
 
         owner, repo = owner_repo.split("/", 1)
-        release = await fetch_github_release(owner, repo, version, token)
-        return build_release_signals(release, registry_time) if release else ReleaseSignals()
+        release, new_sig, old_sig = await asyncio.gather(
+            fetch_github_release(owner, repo, version, token),
+            fetch_tag_signature(owner, repo, version, token),
+            fetch_tag_signature(owner, repo, old_version, token),
+        )
+        return (
+            build_release_signals(release, registry_time, new_sig, old_sig)
+            if release else ReleaseSignals()
+        )
 
     def extract_archive(self, archive_bytes: bytes, filename: str, dest: str) -> None:
         buf = io.BytesIO(archive_bytes)
@@ -237,11 +256,11 @@ def _maintainer_set(data: dict) -> set[str]:
 async def _fetch_npm_publisher(
     client: httpx.AsyncClient, package: str, version: str
 ) -> dict | None:
-    """Return {"kind": "GitHub", "repo": "owner/repo"} or None.
+    """Return provenance dict or None.
 
     npm provenance is available via the attestations endpoint introduced in 2023.
-    The SLSA v1 predicate encodes the source repository in
-    predicate.buildDefinition.externalParameters.workflow.repository.
+    The SLSA v1 predicate encodes the source repository, ref, commit SHA, and
+    CI invocation ID in the buildDefinition and runDetails sections.
     """
     import base64
     import json as _json
@@ -262,20 +281,27 @@ async def _fetch_npm_publisher(
             # DSSE payload is standard base64 (may lack padding)
             padding = 4 - len(payload_b64) % 4
             payload = _json.loads(base64.b64decode(payload_b64 + "=" * (padding % 4)))
-            repo_url = (
-                payload.get("predicate", {})
-                .get("buildDefinition", {})
-                .get("externalParameters", {})
-                .get("workflow", {})
-                .get("repository", "")
-            )
+            pred = payload.get("predicate", {})
+            build_def = pred.get("buildDefinition", {})
+            workflow = build_def.get("externalParameters", {}).get("workflow", {})
+            repo_url = workflow.get("repository", "")
             if repo_url:
                 kind = "GitHub" if "github.com" in repo_url.lower() else "unknown"
                 # Normalize "https://github.com/owner/repo" → "owner/repo"
                 if repo_url.startswith("https://github.com/"):
                     repo_url = repo_url[len("https://github.com/"):]
-                return {"kind": kind, "repo": repo_url}
+                resolved = build_def.get("resolvedDependencies", [])
+                commit_sha = resolved[0].get("digest", {}).get("gitCommit") if resolved else None
+                return {
+                    "kind": kind,
+                    "repo": repo_url,
+                    "source_ref": workflow.get("ref"),
+                    "source_commit_sha": commit_sha,
+                    "build_invocation_id": (
+                        pred.get("runDetails", {}).get("metadata", {}).get("invocationID")
+                    ),
+                }
         # Endpoint returned 200 but no parseable provenance predicate
-        return {"kind": None, "repo": None}
+        return {"kind": None, "repo": None, "source_ref": None, "source_commit_sha": None, "build_invocation_id": None}
     except Exception:
         return None

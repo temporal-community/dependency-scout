@@ -128,6 +128,8 @@ def _rule_based(signals: PackageSignals) -> Verdict:
         flags.append(f"trusted publisher changed{old}")
     if signals.publisher_account_age_days is not None and signals.publisher_account_age_days < 90:
         flags.append(f"publisher GitHub account is only {signals.publisher_account_age_days} days old")
+    if signals.tag_was_previously_signed:
+        flags.append("tag signing dropped: old version had a verified signed tag, new one does not")
     if signals.possible_rerelease:
         flags.append("GitHub release was drafted >24h before publishing (possible re-release)")
     if signals.timestamp_skew_minutes is not None and signals.timestamp_skew_minutes > 120:

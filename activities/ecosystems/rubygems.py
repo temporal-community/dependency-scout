@@ -11,6 +11,7 @@ from temporalio.exceptions import ApplicationError
 from activities.ecosystems import (
     build_release_signals,
     fetch_github_release,
+    fetch_tag_signature,
     is_major,
     parse_github_repo,
     parse_upload_time,
@@ -153,7 +154,7 @@ class RubyGemsProvider:
     # fetch_release
     # ------------------------------------------------------------------
 
-    async def fetch_release(self, package: str, version: str) -> ReleaseSignals:
+    async def fetch_release(self, package: str, old_version: str, version: str) -> ReleaseSignals:
         import os
         token = os.environ.get("GITHUB_TOKEN")
         async with httpx.AsyncClient(timeout=15.0) as client:
@@ -185,8 +186,15 @@ class RubyGemsProvider:
                     break
 
         owner, repo = owner_repo.split("/", 1)
-        release = await fetch_github_release(owner, repo, version, token)
-        return build_release_signals(release, registry_time) if release else ReleaseSignals()
+        release, new_sig, old_sig = await asyncio.gather(
+            fetch_github_release(owner, repo, version, token),
+            fetch_tag_signature(owner, repo, version, token),
+            fetch_tag_signature(owner, repo, old_version, token),
+        )
+        return (
+            build_release_signals(release, registry_time, new_sig, old_sig)
+            if release else ReleaseSignals()
+        )
 
     def extract_archive(self, archive_bytes: bytes, filename: str, dest: str) -> None:
         """Extract a RubyGems .gem file (outer tar → data.tar.gz → source tree)."""

@@ -14,6 +14,7 @@ from activities.ecosystems import (
     build_release_signals,
     fetch_github_account_age,
     fetch_github_release,
+    fetch_tag_signature,
     is_major,
     parse_github_repo,
     parse_upload_time,
@@ -155,7 +156,9 @@ class PipProvider:
             owner = new_pub["repo"].split("/")[0]
             age_days = await fetch_github_account_age(owner)
 
-        publisher_changed = old_pub is not None and old_pub != new_pub
+        publisher_changed = (
+            old_pub is not None and old_pub.get("repo") != new_pub.get("repo")
+        )
         return AttestationSignals(
             has_attestation=True,
             publisher_kind=new_pub.get("kind"),
@@ -163,13 +166,16 @@ class PipProvider:
             publisher_changed=publisher_changed,
             old_publisher_repo=old_pub.get("repo") if publisher_changed else None,
             publisher_account_age_days=age_days,
+            source_ref=new_pub.get("source_ref"),
+            source_commit_sha=new_pub.get("source_commit_sha"),
+            build_invocation_id=new_pub.get("build_invocation_id"),
         )
 
     # ------------------------------------------------------------------
     # fetch_release
     # ------------------------------------------------------------------
 
-    async def fetch_release(self, package: str, version: str) -> ReleaseSignals:
+    async def fetch_release(self, package: str, old_version: str, version: str) -> ReleaseSignals:
         import os
         token = os.environ.get("GITHUB_TOKEN")
         async with httpx.AsyncClient(timeout=15.0) as client:
@@ -205,8 +211,15 @@ class PipProvider:
             return ReleaseSignals()
 
         owner, repo = owner_repo.split("/", 1)
-        release = await fetch_github_release(owner, repo, version, token)
-        return build_release_signals(release, registry_time) if release else ReleaseSignals()
+        release, new_sig, old_sig = await asyncio.gather(
+            fetch_github_release(owner, repo, version, token),
+            fetch_tag_signature(owner, repo, version, token),
+            fetch_tag_signature(owner, repo, old_version, token),
+        )
+        return (
+            build_release_signals(release, registry_time, new_sig, old_sig)
+            if release else ReleaseSignals()
+        )
 
     def extract_archive(self, archive_bytes: bytes, filename: str, dest: str) -> None:
         buf = io.BytesIO(archive_bytes)
@@ -263,12 +276,15 @@ def _maintainer_set(info: dict) -> set[str]:
 async def _fetch_pypi_publisher(
     client: httpx.AsyncClient, package: str, version: str
 ) -> dict | None:
-    """Return {"kind": ..., "repo": ...} from the PEP 740 provenance endpoint, or None.
+    """Return provenance dict from the PEP 740 provenance endpoint, or None.
 
     PyPI generates attestations automatically for packages published via a
     Trusted Publisher (GitHub Actions, GitLab CI, etc.).  A 404 means the
     version was uploaded with a plain API token and has no attestation.
     """
+    import base64
+    import json as _json
+
     try:
         resp = await client.get(f"https://pypi.org/pypi/{package}/{version}/json")
         if resp.status_code != 200:
@@ -291,8 +307,35 @@ async def _fetch_pypi_publisher(
         bundles = prov.json().get("attestation_bundles", [])
         if not bundles:
             return None
-        pub = bundles[0].get("publisher", {})
+        bundle = bundles[0]
+        pub = bundle.get("publisher", {})
         claims = pub.get("claims", {})
-        return {"kind": pub.get("kind"), "repo": claims.get("repository")}
+        result: dict = {
+            "kind": pub.get("kind"),
+            "repo": claims.get("repository"),
+            "source_ref": claims.get("ref"),
+            "source_commit_sha": None,
+            "build_invocation_id": None,
+        }
+
+        # Extract cryptographic chain fields from the DSSE envelope in the first attestation
+        attestations = bundle.get("attestations", [])
+        if attestations:
+            payload_b64 = (
+                attestations[0].get("bundle", {}).get("dsseEnvelope", {}).get("payload", "")
+            )
+            if payload_b64:
+                padding = 4 - len(payload_b64) % 4
+                payload = _json.loads(base64.b64decode(payload_b64 + "=" * (padding % 4)))
+                pred = payload.get("predicate", {})
+                build_def = pred.get("buildDefinition", {})
+                resolved = build_def.get("resolvedDependencies", [])
+                if resolved:
+                    result["source_commit_sha"] = resolved[0].get("digest", {}).get("gitCommit")
+                result["build_invocation_id"] = (
+                    pred.get("runDetails", {}).get("metadata", {}).get("invocationID")
+                )
+
+        return result
     except Exception:
         return None

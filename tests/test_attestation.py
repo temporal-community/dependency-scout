@@ -29,7 +29,33 @@ def _pypi_urls(package: str, version: str, filename: str | None = None) -> dict:
     }
 
 
-def _pypi_provenance(kind: str = "GitHub", repo: str = "psf/requests") -> dict:
+def _pypi_provenance(kind: str = "GitHub", repo: str = "psf/requests", with_dsse: bool = False) -> dict:
+    attestations: list = []
+    if with_dsse:
+        payload = base64.b64encode(json.dumps({
+            "predicateType": "https://slsa.dev/provenance/v1",
+            "predicate": {
+                "buildDefinition": {
+                    "resolvedDependencies": [
+                        {"digest": {"gitCommit": "abc123def456abc123def456abc123def456abc1"}}
+                    ]
+                },
+                "runDetails": {
+                    "metadata": {
+                        "invocationID": "https://github.com/psf/requests/actions/runs/99887766"
+                    }
+                },
+            },
+        }).encode()).decode()
+        attestations = [{
+            "bundle": {
+                "dsseEnvelope": {
+                    "payload": payload,
+                    "payloadType": "application/vnd.in-toto+json",
+                    "signatures": [],
+                }
+            }
+        }]
     return {
         "metadata": {"kind": "publish-attestation", "version": "1"},
         "attestation_bundles": [
@@ -38,13 +64,21 @@ def _pypi_provenance(kind: str = "GitHub", repo: str = "psf/requests") -> dict:
                     "kind": kind,
                     "claims": {"repository": repo, "ref": "refs/tags/2.32.0", "workflow": ".github/workflows/publish.yml"},
                 },
-                "attestations": [],
+                "attestations": attestations,
             }
         ],
     }
 
 
-def _npm_attestation_bundle(repo_url: str = "https://github.com/owner/pkg") -> dict:
+def _npm_attestation_bundle(
+    repo_url: str = "https://github.com/owner/pkg",
+    commit_sha: str | None = None,
+    invocation_id: str | None = None,
+) -> dict:
+    resolved = [{"digest": {"gitCommit": commit_sha}}] if commit_sha else []
+    run_details: dict = {}
+    if invocation_id:
+        run_details = {"metadata": {"invocationID": invocation_id}}
     payload = base64.b64encode(json.dumps({
         "predicateType": "https://slsa.dev/provenance/v1",
         "predicate": {
@@ -55,8 +89,10 @@ def _npm_attestation_bundle(repo_url: str = "https://github.com/owner/pkg") -> d
                         "ref": "refs/tags/v1.1.0",
                         "path": ".github/workflows/publish.yml",
                     }
-                }
-            }
+                },
+                "resolvedDependencies": resolved,
+            },
+            "runDetails": run_details,
         },
     }).encode()).decode()
     return {
@@ -418,3 +454,100 @@ def test_rule_based_classifier_install_script_changed_is_yellow():
     verdict = _rule_based(signals)
     assert verdict.classification == "yellow"
     assert any("install script modified" in f for f in verdict.flags)
+
+
+# ---------------------------------------------------------------------------
+# SLSA chain fields — source_ref, source_commit_sha, build_invocation_id
+# ---------------------------------------------------------------------------
+
+@respx.mock
+async def test_pypi_attestation_populates_source_ref_from_claims():
+    """source_ref comes from publisher.claims.ref even without a DSSE envelope."""
+    respx.get(f"{PYPI_BASE}/pkg/1.0.0/json").mock(
+        return_value=httpx.Response(200, json=_pypi_urls("pkg", "1.0.0"))
+    )
+    respx.get(f"{PYPI_BASE}/pkg/1.1.0/json").mock(
+        return_value=httpx.Response(200, json=_pypi_urls("pkg", "1.1.0"))
+    )
+    respx.get(f"{PYPI_INTEGRITY}/pkg/1.0.0/pkg-1.0.0.tar.gz/provenance").mock(
+        return_value=httpx.Response(200, json=_pypi_provenance(repo="org/pkg"))
+    )
+    respx.get(f"{PYPI_INTEGRITY}/pkg/1.1.0/pkg-1.1.0.tar.gz/provenance").mock(
+        return_value=httpx.Response(200, json=_pypi_provenance(repo="org/pkg"))
+    )
+
+    env = ActivityEnvironment()
+    result = await env.run(attestation_check, "pip", "pkg", "1.0.0", "1.1.0")
+    assert result.has_attestation is True
+    assert result.source_ref == "refs/tags/2.32.0"
+    assert result.source_commit_sha is None  # no DSSE envelope
+    assert result.build_invocation_id is None
+
+
+@respx.mock
+async def test_pypi_attestation_populates_commit_sha_and_invocation_from_dsse():
+    """source_commit_sha and build_invocation_id are extracted from the DSSE payload."""
+    respx.get(f"{PYPI_BASE}/pkg/1.0.0/json").mock(
+        return_value=httpx.Response(200, json=_pypi_urls("pkg", "1.0.0"))
+    )
+    respx.get(f"{PYPI_BASE}/pkg/1.1.0/json").mock(
+        return_value=httpx.Response(200, json=_pypi_urls("pkg", "1.1.0"))
+    )
+    respx.get(f"{PYPI_INTEGRITY}/pkg/1.0.0/pkg-1.0.0.tar.gz/provenance").mock(
+        return_value=httpx.Response(200, json=_pypi_provenance(repo="org/pkg"))
+    )
+    respx.get(f"{PYPI_INTEGRITY}/pkg/1.1.0/pkg-1.1.0.tar.gz/provenance").mock(
+        return_value=httpx.Response(200, json=_pypi_provenance(repo="org/pkg", with_dsse=True))
+    )
+
+    env = ActivityEnvironment()
+    result = await env.run(attestation_check, "pip", "pkg", "1.0.0", "1.1.0")
+    assert result.has_attestation is True
+    assert result.source_commit_sha == "abc123def456abc123def456abc123def456abc1"
+    assert result.build_invocation_id == "https://github.com/psf/requests/actions/runs/99887766"
+
+
+@respx.mock
+async def test_npm_attestation_populates_slsa_chain_fields():
+    """source_ref, source_commit_sha, and build_invocation_id all extracted from npm SLSA payload."""
+    sha = "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+    inv_id = "https://github.com/owner/pkg/actions/runs/12345678"
+    respx.get(f"{NPM_ATT_BASE}/mypkg@1.0.0").mock(
+        return_value=httpx.Response(200, json=_npm_attestation_bundle("https://github.com/owner/mypkg"))
+    )
+    respx.get(f"{NPM_ATT_BASE}/mypkg@1.1.0").mock(
+        return_value=httpx.Response(200, json=_npm_attestation_bundle(
+            "https://github.com/owner/mypkg",
+            commit_sha=sha,
+            invocation_id=inv_id,
+        ))
+    )
+
+    env = ActivityEnvironment()
+    result = await env.run(attestation_check, "npm", "mypkg", "1.0.0", "1.1.0")
+    assert result.has_attestation is True
+    assert result.source_ref == "refs/tags/v1.1.0"
+    assert result.source_commit_sha == sha
+    assert result.build_invocation_id == inv_id
+
+
+@respx.mock
+async def test_publisher_changed_false_when_only_commit_sha_differs():
+    """publisher_changed must not fire when the same repo built different commits (the normal case)."""
+    old_sha = "aaaa1111aaaa1111aaaa1111aaaa1111aaaa1111"
+    new_sha = "bbbb2222bbbb2222bbbb2222bbbb2222bbbb2222"
+    respx.get(f"{NPM_ATT_BASE}/mypkg@1.0.0").mock(
+        return_value=httpx.Response(200, json=_npm_attestation_bundle(
+            "https://github.com/org/mypkg", commit_sha=old_sha
+        ))
+    )
+    respx.get(f"{NPM_ATT_BASE}/mypkg@1.1.0").mock(
+        return_value=httpx.Response(200, json=_npm_attestation_bundle(
+            "https://github.com/org/mypkg", commit_sha=new_sha
+        ))
+    )
+
+    env = ActivityEnvironment()
+    result = await env.run(attestation_check, "npm", "mypkg", "1.0.0", "1.1.0")
+    assert result.has_attestation is True
+    assert result.publisher_changed is False  # same repo, different commits is expected

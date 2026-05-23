@@ -62,6 +62,8 @@ class ReleaseSignals(BaseModel):
     timestamp_skew_minutes: float | None = None  # abs(registry_publish - gh_release_created)
     possible_rerelease: bool = False             # published_at lags created_at by >24h
     release_body: str | None = None             # release notes, truncated to 3 000 chars
+    tag_signature_verified: bool | None = None  # None = no annotated tag; True/False = GH verification result
+    tag_was_previously_signed: bool = False     # old version had a verified signed tag; new one doesn't
 
 
 class AttestationSignals(BaseModel):
@@ -71,6 +73,9 @@ class AttestationSignals(BaseModel):
     publisher_changed: bool = False         # old version had a different trusted publisher
     old_publisher_repo: str | None = None   # previous publisher repo (context when changed)
     publisher_account_age_days: int | None = None  # age of the publisher's GitHub account
+    source_ref: str | None = None           # git ref the build ran against, e.g. "refs/tags/v1.2.3"
+    source_commit_sha: str | None = None    # git commit SHA the artifact was built from
+    build_invocation_id: str | None = None  # CI run URL / ID from SLSA provenance
 
 
 class PackageSignals(BaseModel):
@@ -96,12 +101,17 @@ class PackageSignals(BaseModel):
     timestamp_skew_minutes: float | None = None
     possible_rerelease: bool = False
     release_body: str | None = None
+    tag_signature_verified: bool | None = None
+    tag_was_previously_signed: bool = False
     has_attestation: bool = False
     publisher_kind: str | None = None
     publisher_repo: str | None = None
     publisher_changed: bool = False
     old_publisher_repo: str | None = None
     publisher_account_age_days: int | None = None
+    source_ref: str | None = None
+    source_commit_sha: str | None = None
+    build_invocation_id: str | None = None
 
 
 class Verdict(BaseModel):

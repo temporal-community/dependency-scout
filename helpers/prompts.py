@@ -43,7 +43,8 @@ RED — likely supply chain attack. ANY of:
   - version <24h old with unusual diff content
 
 SLSA/Sigstore attestation signals (has_attestation, publisher_kind, publisher_repo,
-publisher_changed, old_publisher_repo, publisher_account_age_days):
+publisher_changed, old_publisher_repo, publisher_account_age_days, source_ref,
+source_commit_sha, build_invocation_id):
 - has_attestation=false is NOT itself a red/yellow flag — most packages don't use
   trusted publishers yet. It simply means there's no cryptographic provenance.
 - has_attestation=true is a mild positive trust signal: the artifact was built by a
@@ -56,9 +57,17 @@ publisher_changed, old_publisher_repo, publisher_account_age_days):
   A very young account (<30 days) combined with any other red/yellow signal is a strong
   red flag. Under 90 days alone warrants yellow. Established accounts (>1 year) are
   a mild positive signal when combined with has_attestation=true.
+- source_ref: git ref the build ran against (e.g. "refs/tags/v1.2.3"). When present and
+  has_attestation=true, confirms the artifact was built from a tagged release commit.
+  A non-tag ref (branch, SHA) for a release version is mildly suspicious.
+- source_commit_sha: the exact git commit SHA the artifact was built from. Null when no
+  attestation exists. When present, cross-referencing with the repository's tag history
+  can confirm the build matched a public commit.
+- build_invocation_id: CI run URL/ID from the SLSA provenance. Null when unavailable.
+  Provides a direct link to the build log for auditors who need to verify the build steps.
 
 GitHub release signals (github_release_exists, release_author, release_is_automated,
-timestamp_skew_minutes, possible_rerelease):
+timestamp_skew_minutes, possible_rerelease, tag_signature_verified, tag_was_previously_signed):
 - github_release_exists=false is normal — many packages don't cut GitHub releases.
 - release_is_automated=true is a mild positive signal: automated release tooling
   (github-actions[bot], release-please, etc.) reduces human error surface.
@@ -68,6 +77,13 @@ timestamp_skew_minutes, possible_rerelease):
   the package was published to the registry at a very different time than the GitHub release.
 - possible_rerelease=true: the release was created much earlier than published, suggesting
   it was drafted, edited, then published. Not inherently malicious but worth a look.
+- tag_signature_verified: null = no annotated tag or not checked. true = GitHub validated
+  the GPG/SSH signature on the git tag. false = tag exists but signature is unverified.
+  Presence of a verified signature is a mild positive; absence alone is not a flag (most
+  projects don't sign tags).
+- tag_was_previously_signed=true: old version had a verified signed tag; new version does
+  not. This is a YELLOW flag — signing regressions are unusual and worth human review,
+  especially combined with a new maintainer or changed publisher.
 - release_notes (in untrusted_registry): review for mention of security fixes, CVEs, or
   breaking changes — those are not red flags but signal the reviewer should read carefully.
 

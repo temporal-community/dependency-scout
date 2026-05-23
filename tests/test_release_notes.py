@@ -31,7 +31,13 @@ GH_API = "https://api.github.com/repos"
     ("git@github.com:owner/repo.git", "owner/repo"),
     ("https://github.com/owner/repo/issues", "owner/repo"),
     ("https://github.com/nicowillis/better.js", "nicowillis/better.js"),
+    # npm shorthands
+    ("github:owner/repo", "owner/repo"),
+    ("github:owner/repo.git", "owner/repo"),
+    # non-GitHub
     ("https://gitlab.com/owner/repo", None),
+    ("bitbucket:owner/repo", None),
+    ("gitlab:owner/repo", None),
     ("", None),
     ("https://example.com/not-github", None),
 ])
@@ -194,6 +200,42 @@ async def test_npm_release_no_repository_field():
     assert result.github_release_exists is False
 
 
+@respx.mock
+async def test_npm_release_github_shorthand_string():
+    """repository: "github:owner/repo" shorthand resolves to a GitHub release check."""
+    respx.get(f"{NPM_BASE}/mypkg/1.1.0").mock(
+        return_value=httpx.Response(200, json={"repository": "github:owner/mypkg"})
+    )
+    respx.get(f"{NPM_BASE}/mypkg").mock(
+        return_value=httpx.Response(200, json={"time": {"1.1.0": "2024-01-10T12:00:00Z"}})
+    )
+    respx.get(f"{GH_API}/owner/mypkg/releases/tags/v1.1.0").mock(
+        return_value=httpx.Response(200, json=_gh_release())
+    )
+
+    env = ActivityEnvironment()
+    result = await env.run(release_check, "npm", "mypkg", "1.0.0", "1.1.0")
+    assert result.github_release_exists is True
+
+
+@respx.mock
+async def test_npm_release_bare_owner_repo_shorthand():
+    """repository: "owner/repo" bare shorthand is treated as GitHub by npm convention."""
+    respx.get(f"{NPM_BASE}/mypkg/1.1.0").mock(
+        return_value=httpx.Response(200, json={"repository": "owner/mypkg"})
+    )
+    respx.get(f"{NPM_BASE}/mypkg").mock(
+        return_value=httpx.Response(200, json={"time": {"1.1.0": "2024-01-10T12:00:00Z"}})
+    )
+    respx.get(f"{GH_API}/owner/mypkg/releases/tags/v1.1.0").mock(
+        return_value=httpx.Response(200, json=_gh_release())
+    )
+
+    env = ActivityEnvironment()
+    result = await env.run(release_check, "npm", "mypkg", "1.0.0", "1.1.0")
+    assert result.github_release_exists is True
+
+
 # ---------------------------------------------------------------------------
 # RubyGems — fetch_release
 # ---------------------------------------------------------------------------
@@ -299,6 +341,127 @@ async def test_release_body_truncated_at_3000_chars():
 
 
 # ---------------------------------------------------------------------------
+# Tag signature helpers
+# ---------------------------------------------------------------------------
+
+def _git_ref(tag_name: str, sha: str = "tagsha0001", obj_type: str = "tag") -> dict:
+    return {"ref": f"refs/tags/{tag_name}", "object": {"sha": sha, "type": obj_type}}
+
+
+def _git_tag_verified(sha: str = "tagsha0001", verified: bool = True) -> dict:
+    return {
+        "sha": sha,
+        "verification": {
+            "verified": verified,
+            "reason": "valid" if verified else "unsigned",
+            "signature": "-----BEGIN PGP SIGNATURE-----\n...\n-----END PGP SIGNATURE-----" if verified else None,
+            "payload": "object ...\ntype commit\n...",
+        },
+    }
+
+
+# ---------------------------------------------------------------------------
+# Tag signature — fetch_release integration
+# ---------------------------------------------------------------------------
+
+@respx.mock
+async def test_release_tag_signature_verified():
+    """New version has a GPG-signed annotated tag verified by GitHub."""
+    respx.get(f"{PYPI_BASE}/pkg/1.1.0/json").mock(
+        return_value=httpx.Response(200, json=_pypi_json("pkg", "1.1.0"))
+    )
+    respx.get(f"{GH_API}/test/pkg/releases/tags/v1.1.0").mock(
+        return_value=httpx.Response(200, json=_gh_release())
+    )
+    # New version: annotated tag → verified
+    respx.get(f"{GH_API}/test/pkg/git/refs/tags/v1.1.0").mock(
+        return_value=httpx.Response(200, json=_git_ref("v1.1.0"))
+    )
+    respx.get(f"{GH_API}/test/pkg/git/tags/tagsha0001").mock(
+        return_value=httpx.Response(200, json=_git_tag_verified(verified=True))
+    )
+    # Old version: no tag
+    respx.get(f"{GH_API}/test/pkg/git/refs/tags/v1.0.0").mock(return_value=httpx.Response(404))
+    respx.get(f"{GH_API}/test/pkg/git/refs/tags/1.0.0").mock(return_value=httpx.Response(404))
+
+    env = ActivityEnvironment()
+    result = await env.run(release_check, "pip", "pkg", "1.0.0", "1.1.0")
+    assert result.tag_signature_verified is True
+    assert result.tag_was_previously_signed is False  # old had no tag, so no regression
+
+
+@respx.mock
+async def test_release_tag_signature_unverified():
+    """Tag exists but GitHub cannot verify the signature."""
+    respx.get(f"{PYPI_BASE}/pkg/1.1.0/json").mock(
+        return_value=httpx.Response(200, json=_pypi_json("pkg", "1.1.0"))
+    )
+    respx.get(f"{GH_API}/test/pkg/releases/tags/v1.1.0").mock(
+        return_value=httpx.Response(200, json=_gh_release())
+    )
+    respx.get(f"{GH_API}/test/pkg/git/refs/tags/v1.1.0").mock(
+        return_value=httpx.Response(200, json=_git_ref("v1.1.0"))
+    )
+    respx.get(f"{GH_API}/test/pkg/git/tags/tagsha0001").mock(
+        return_value=httpx.Response(200, json=_git_tag_verified(verified=False))
+    )
+    respx.get(f"{GH_API}/test/pkg/git/refs/tags/v1.0.0").mock(return_value=httpx.Response(404))
+    respx.get(f"{GH_API}/test/pkg/git/refs/tags/1.0.0").mock(return_value=httpx.Response(404))
+
+    env = ActivityEnvironment()
+    result = await env.run(release_check, "pip", "pkg", "1.0.0", "1.1.0")
+    assert result.tag_signature_verified is False
+    assert result.tag_was_previously_signed is False
+
+
+@respx.mock
+async def test_release_tag_signing_regression():
+    """Old version had a verified signed tag; new version does not → tag_was_previously_signed."""
+    respx.get(f"{PYPI_BASE}/pkg/1.1.0/json").mock(
+        return_value=httpx.Response(200, json=_pypi_json("pkg", "1.1.0"))
+    )
+    respx.get(f"{GH_API}/test/pkg/releases/tags/v1.1.0").mock(
+        return_value=httpx.Response(200, json=_gh_release())
+    )
+    # New version: lightweight tag — no signature
+    respx.get(f"{GH_API}/test/pkg/git/refs/tags/v1.1.0").mock(
+        return_value=httpx.Response(200, json=_git_ref("v1.1.0", obj_type="commit"))
+    )
+    # Old version: annotated + verified tag
+    respx.get(f"{GH_API}/test/pkg/git/refs/tags/v1.0.0").mock(
+        return_value=httpx.Response(200, json=_git_ref("v1.0.0", sha="oldtagsha"))
+    )
+    respx.get(f"{GH_API}/test/pkg/git/tags/oldtagsha").mock(
+        return_value=httpx.Response(200, json=_git_tag_verified(sha="oldtagsha", verified=True))
+    )
+
+    env = ActivityEnvironment()
+    result = await env.run(release_check, "pip", "pkg", "1.0.0", "1.1.0")
+    assert result.tag_signature_verified is None   # lightweight tag → no signature
+    assert result.tag_was_previously_signed is True
+
+
+@respx.mock
+async def test_release_tag_no_regression_when_both_unsigned():
+    """Neither version signed → no regression flag."""
+    respx.get(f"{PYPI_BASE}/pkg/1.1.0/json").mock(
+        return_value=httpx.Response(200, json=_pypi_json("pkg", "1.1.0"))
+    )
+    respx.get(f"{GH_API}/test/pkg/releases/tags/v1.1.0").mock(
+        return_value=httpx.Response(200, json=_gh_release())
+    )
+    respx.get(f"{GH_API}/test/pkg/git/refs/tags/v1.1.0").mock(return_value=httpx.Response(404))
+    respx.get(f"{GH_API}/test/pkg/git/refs/tags/1.1.0").mock(return_value=httpx.Response(404))
+    respx.get(f"{GH_API}/test/pkg/git/refs/tags/v1.0.0").mock(return_value=httpx.Response(404))
+    respx.get(f"{GH_API}/test/pkg/git/refs/tags/1.0.0").mock(return_value=httpx.Response(404))
+
+    env = ActivityEnvironment()
+    result = await env.run(release_check, "pip", "pkg", "1.0.0", "1.1.0")
+    assert result.tag_signature_verified is None
+    assert result.tag_was_previously_signed is False
+
+
+# ---------------------------------------------------------------------------
 # Classifier integration
 # ---------------------------------------------------------------------------
 
@@ -330,3 +493,19 @@ def test_rule_based_flags_large_timestamp_skew():
     verdict = _rule_based(signals)
     assert verdict.classification == "yellow"
     assert any("300" in f for f in verdict.flags)
+
+
+def test_rule_based_flags_tag_signing_regression():
+    from activities.classifier import _rule_based
+    from activities.models import PackageSignals
+
+    signals = PackageSignals(
+        ecosystem="pip", package_name="pkg", old_version="1.0.0", new_version="1.0.1",
+        release_age_hours=200.0, is_major_bump=False, socket_score=None, socket_alerts=[],
+        osv_vulnerabilities=[], diff_summary="[no changes]", diff_size_bytes=0,
+        maintainer_changed=False, weekly_downloads=100_000,
+        tag_was_previously_signed=True, tag_signature_verified=None,
+    )
+    verdict = _rule_based(signals)
+    assert verdict.classification == "yellow"
+    assert any("tag signing dropped" in f for f in verdict.flags)

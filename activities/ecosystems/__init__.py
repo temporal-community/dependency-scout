@@ -59,7 +59,7 @@ class EcosystemProvider(Protocol):
     ) -> AttestationSignals: ...
 
     async def fetch_release(
-        self, package: str, version: str
+        self, package: str, old_version: str, version: str
     ) -> ReleaseSignals: ...
 
 
@@ -122,6 +122,10 @@ def parse_upload_time(raw: str) -> datetime:
 _GITHUB_RE = re.compile(
     r"github\.com[:/]([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+?)(?:\.git)?(?:[/?#]|$)"
 )
+# npm shorthand: "github:owner/repo" — explicit, unambiguous
+_GITHUB_SHORTHAND_RE = re.compile(
+    r"^github:([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+?)(?:\.git)?$"
+)
 
 
 def parse_github_repo(url: str) -> str | None:
@@ -129,6 +133,9 @@ def parse_github_repo(url: str) -> str | None:
     if not url:
         return None
     m = _GITHUB_RE.search(url)
+    if m:
+        return m.group(1)
+    m = _GITHUB_SHORTHAND_RE.match(url)
     return m.group(1) if m else None
 
 
@@ -153,8 +160,59 @@ async def fetch_github_release(
     return None
 
 
+async def fetch_tag_signature(
+    owner: str, repo: str, version: str, token: str | None
+) -> bool | None:
+    """Return True/False for verified/unverified annotated tag signature, None if absent.
+
+    Lightweight tags cannot carry a signature and always return None.
+    GitHub validates the GPG/SSH signature server-side; the `verified` field
+    reflects whether it trusts the key.
+    """
+    headers: dict[str, str] = {"Accept": "application/vnd.github+json"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            for tag_name in (f"v{version}", version):
+                ref_resp = await client.get(
+                    f"https://api.github.com/repos/{owner}/{repo}/git/refs/tags/{tag_name}",
+                    headers=headers,
+                )
+                if ref_resp.status_code != 200:
+                    continue
+                data = ref_resp.json()
+                # A prefix match returns an array; an exact match returns a single object.
+                if isinstance(data, list):
+                    matches = [r for r in data if r.get("ref") == f"refs/tags/{tag_name}"]
+                    if not matches:
+                        continue
+                    data = matches[0]
+                obj = data.get("object", {})
+                if obj.get("type") != "tag":
+                    # Lightweight tag — points directly to a commit, no tag signature
+                    return None
+                sha = obj.get("sha", "")
+                if not sha:
+                    return None
+                tag_resp = await client.get(
+                    f"https://api.github.com/repos/{owner}/{repo}/git/tags/{sha}",
+                    headers=headers,
+                )
+                if tag_resp.status_code != 200:
+                    return None
+                verification = tag_resp.json().get("verification") or {}
+                return bool(verification.get("verified"))
+    except Exception:  # noqa: BLE001
+        pass
+    return None
+
+
 def build_release_signals(
-    release: dict, registry_time: datetime | None = None
+    release: dict,
+    registry_time: datetime | None = None,
+    tag_signature_verified: bool | None = None,
+    old_tag_signature_verified: bool | None = None,
 ) -> ReleaseSignals:
     """Convert a GitHub release API response into structured ReleaseSignals."""
     author_login: str = (release.get("author") or {}).get("login") or ""
@@ -183,6 +241,11 @@ def build_release_signals(
     if raw_body:
         body = (raw_body[:3000] + "\n[release notes truncated]") if len(raw_body) > 3000 else raw_body
 
+    # Signing regression: old version had a verified tag, new version doesn't
+    tag_was_previously_signed = (
+        old_tag_signature_verified is True and tag_signature_verified is not True
+    )
+
     return ReleaseSignals(
         github_release_exists=True,
         release_author=author_login or None,
@@ -190,6 +253,8 @@ def build_release_signals(
         timestamp_skew_minutes=skew_minutes,
         possible_rerelease=possible_rerelease,
         release_body=body,
+        tag_signature_verified=tag_signature_verified,
+        tag_was_previously_signed=tag_was_previously_signed,
     )
 
 
