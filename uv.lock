@@ -502,7 +502,7 @@ wheels = [
 ]
 
 [[package]]
-name = "dependabot-triage-agent"
+name = "dependabot-supply-chain-scout"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [

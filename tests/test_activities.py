@@ -202,3 +202,270 @@ async def test_maintainer_changed():
     env = ActivityEnvironment()
     result = await env.run(maintainer_history, "pip", "pkg", "1.0.0", "2.0.0")
     assert result.maintainer_changed is True
+
+
+@respx.mock
+async def test_maintainer_fetch_error_returns_no_change():
+    # Network error on one version → _fetch_info returns None → default False
+    respx.get(f"{PYPI_BASE}/errpkg/1.0.0/json").mock(side_effect=httpx.ConnectError("timeout"))
+    respx.get(f"{PYPI_BASE}/errpkg/2.0.0/json").mock(return_value=httpx.Response(200, json=_pypi_response("errpkg", "2.0.0")))
+    env = ActivityEnvironment()
+    result = await env.run(maintainer_history, "pip", "errpkg", "1.0.0", "2.0.0")
+    assert result.maintainer_changed is False
+
+
+# ---------------------------------------------------------------------------
+# pypi_metadata — exception and non-semver edge cases
+# ---------------------------------------------------------------------------
+
+@respx.mock
+async def test_pypi_metadata_pypistats_network_error_returns_none():
+    respx.get(f"{PYPI_BASE}/requests/2.32.0/json").mock(
+        return_value=httpx.Response(200, json=_pypi_response("requests", "2.32.0"))
+    )
+    respx.get(f"{PYPISTATS_BASE}/requests/recent").mock(
+        side_effect=httpx.ConnectError("network down")
+    )
+    env = ActivityEnvironment()
+    result = await env.run(pypi_fetch, "pip", "requests", "2.31.0", "2.32.0")
+    assert result.weekly_downloads is None
+
+
+def test_pypi_is_major_non_semver_returns_false():
+    from activities.pypi_metadata import _is_major
+    assert _is_major("not-a-version", "also-not") is False
+    assert _is_major("", "") is False
+
+
+# ---------------------------------------------------------------------------
+# release_age — 404, empty urls, missing timestamp, naive datetime
+# ---------------------------------------------------------------------------
+
+@respx.mock
+async def test_release_age_404_raises_non_retryable():
+    from activities.release_age import check as release_age_check
+    from temporalio.exceptions import ApplicationError
+    respx.get(f"{PYPI_BASE}/missing/1.0.0/json").mock(return_value=httpx.Response(404))
+    env = ActivityEnvironment()
+    with pytest.raises(ApplicationError) as exc_info:
+        await env.run(release_age_check, "pip", "missing", "0.9.0", "1.0.0")
+    assert exc_info.value.non_retryable is True
+
+
+@respx.mock
+async def test_release_age_empty_urls_returns_none():
+    from activities.release_age import check as release_age_check
+    respx.get(f"{PYPI_BASE}/requests/2.32.0/json").mock(
+        return_value=httpx.Response(200, json={"info": {}, "urls": []})
+    )
+    env = ActivityEnvironment()
+    result = await env.run(release_age_check, "pip", "requests", "2.31.0", "2.32.0")
+    assert result.release_age_hours is None
+
+
+@respx.mock
+async def test_release_age_missing_timestamp_returns_none():
+    from activities.release_age import check as release_age_check
+    respx.get(f"{PYPI_BASE}/requests/2.32.0/json").mock(
+        return_value=httpx.Response(200, json={"info": {}, "urls": [{}]})
+    )
+    env = ActivityEnvironment()
+    result = await env.run(release_age_check, "pip", "requests", "2.31.0", "2.32.0")
+    assert result.release_age_hours is None
+
+
+def test_release_age_naive_datetime_gets_utc():
+    from activities.release_age import _parse_upload_time
+    # No Z and no +00:00 → naive datetime → should be treated as UTC
+    dt = _parse_upload_time("2024-06-01T12:00:00")
+    from datetime import timezone
+    assert dt.tzinfo is not None
+    assert dt.tzinfo == timezone.utc
+
+
+# ---------------------------------------------------------------------------
+# npm paths — pypi_metadata
+# ---------------------------------------------------------------------------
+
+NPM_BASE = "https://registry.npmjs.org"
+NPM_DOWNLOADS_BASE = "https://api.npmjs.org/downloads/point/last-week"
+
+
+@respx.mock
+async def test_npm_metadata_fetch_success():
+    respx.get(f"{NPM_BASE}/lodash/4.17.21").mock(
+        return_value=httpx.Response(200, json={
+            "name": "lodash",
+            "version": "4.17.21",
+            "description": "Lodash modular utilities.",
+        })
+    )
+    respx.get(f"{NPM_DOWNLOADS_BASE}/lodash").mock(
+        return_value=httpx.Response(200, json={"downloads": 30_000_000})
+    )
+
+    env = ActivityEnvironment()
+    result = await env.run(pypi_fetch, "npm", "lodash", "4.17.20", "4.17.21")
+
+    assert result.weekly_downloads == 30_000_000
+    assert result.is_major_bump is False
+    assert result.package_description == "Lodash modular utilities."
+
+
+@respx.mock
+async def test_npm_metadata_major_bump():
+    respx.get(f"{NPM_BASE}/react/18.0.0").mock(
+        return_value=httpx.Response(200, json={"name": "react", "description": "React"})
+    )
+    respx.get(f"{NPM_DOWNLOADS_BASE}/react").mock(
+        return_value=httpx.Response(200, json={"downloads": 50_000_000})
+    )
+
+    env = ActivityEnvironment()
+    result = await env.run(pypi_fetch, "npm", "react", "17.0.0", "18.0.0")
+    assert result.is_major_bump is True
+
+
+@respx.mock
+async def test_npm_metadata_404_raises_non_retryable():
+    from temporalio.exceptions import ApplicationError
+    respx.get(f"{NPM_BASE}/nonexistent/1.0.0").mock(return_value=httpx.Response(404))
+
+    env = ActivityEnvironment()
+    with pytest.raises(ApplicationError) as exc_info:
+        await env.run(pypi_fetch, "npm", "nonexistent", "0.9.0", "1.0.0")
+    assert exc_info.value.non_retryable is True
+
+
+@respx.mock
+async def test_npm_metadata_downloads_failure_returns_none():
+    respx.get(f"{NPM_BASE}/lodash/4.17.21").mock(
+        return_value=httpx.Response(200, json={"name": "lodash", "description": "Lodash"})
+    )
+    respx.get(f"{NPM_DOWNLOADS_BASE}/lodash").mock(return_value=httpx.Response(500))
+
+    env = ActivityEnvironment()
+    result = await env.run(pypi_fetch, "npm", "lodash", "4.17.20", "4.17.21")
+    assert result.weekly_downloads is None
+
+
+@respx.mock
+async def test_npm_metadata_downloads_network_error_returns_none():
+    respx.get(f"{NPM_BASE}/lodash/4.17.21").mock(
+        return_value=httpx.Response(200, json={"name": "lodash", "description": "Lodash"})
+    )
+    respx.get(f"{NPM_DOWNLOADS_BASE}/lodash").mock(side_effect=httpx.ConnectError("down"))
+
+    env = ActivityEnvironment()
+    result = await env.run(pypi_fetch, "npm", "lodash", "4.17.20", "4.17.21")
+    assert result.weekly_downloads is None
+
+
+@respx.mock
+async def test_pypi_metadata_long_summary_truncated():
+    long_summary = "x" * 600
+    resp_data = _pypi_response("pkg", "1.0.0")
+    resp_data["info"]["summary"] = long_summary
+    respx.get(f"{PYPI_BASE}/pkg/1.0.0/json").mock(return_value=httpx.Response(200, json=resp_data))
+    respx.get(f"{PYPISTATS_BASE}/pkg/recent").mock(
+        return_value=httpx.Response(200, json={"data": {"last_week": 1000}})
+    )
+
+    env = ActivityEnvironment()
+    result = await env.run(pypi_fetch, "pip", "pkg", "0.9.0", "1.0.0")
+    assert result.package_description is not None
+    assert len(result.package_description) == 500
+
+
+# ---------------------------------------------------------------------------
+# npm paths — release_age
+# ---------------------------------------------------------------------------
+
+@respx.mock
+async def test_npm_release_age_success():
+    from datetime import datetime, timezone, timedelta
+    recent = (datetime.now(timezone.utc) - timedelta(hours=6)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+    respx.get(f"{NPM_BASE}/lodash").mock(
+        return_value=httpx.Response(200, json={"time": {"4.17.21": recent}})
+    )
+
+    env = ActivityEnvironment()
+    result = await env.run(release_age_check, "npm", "lodash", "4.17.20", "4.17.21")
+    assert result.release_age_hours is not None
+    assert 5.0 < result.release_age_hours < 7.0
+
+
+@respx.mock
+async def test_npm_release_age_404_raises_non_retryable():
+    from temporalio.exceptions import ApplicationError
+    respx.get(f"{NPM_BASE}/missing").mock(return_value=httpx.Response(404))
+
+    env = ActivityEnvironment()
+    with pytest.raises(ApplicationError) as exc_info:
+        await env.run(release_age_check, "npm", "missing", "1.0.0", "1.1.0")
+    assert exc_info.value.non_retryable is True
+
+
+@respx.mock
+async def test_npm_release_age_missing_version_returns_none():
+    respx.get(f"{NPM_BASE}/lodash").mock(
+        return_value=httpx.Response(200, json={"time": {}})
+    )
+
+    env = ActivityEnvironment()
+    result = await env.run(release_age_check, "npm", "lodash", "4.17.20", "4.17.21")
+    assert result.release_age_hours is None
+
+
+# ---------------------------------------------------------------------------
+# npm paths — maintainer
+# ---------------------------------------------------------------------------
+
+def _npm_version_response(maintainers: list[dict]) -> dict:
+    return {"name": "pkg", "maintainers": maintainers}
+
+
+@respx.mock
+async def test_npm_maintainer_no_change():
+    maintainers = [{"name": "alice", "email": "alice@example.com"}]
+    respx.get(f"{NPM_BASE}/pkg/1.0.0").mock(
+        return_value=httpx.Response(200, json=_npm_version_response(maintainers))
+    )
+    respx.get(f"{NPM_BASE}/pkg/1.1.0").mock(
+        return_value=httpx.Response(200, json=_npm_version_response(maintainers))
+    )
+
+    env = ActivityEnvironment()
+    result = await env.run(maintainer_history, "npm", "pkg", "1.0.0", "1.1.0")
+    assert result.maintainer_changed is False
+
+
+@respx.mock
+async def test_npm_maintainer_changed():
+    old_maintainers = [{"name": "alice", "email": "alice@example.com"}]
+    new_maintainers = [
+        {"name": "alice", "email": "alice@example.com"},
+        {"name": "bob", "email": "bob@example.com"},
+    ]
+    respx.get(f"{NPM_BASE}/pkg/1.0.0").mock(
+        return_value=httpx.Response(200, json=_npm_version_response(old_maintainers))
+    )
+    respx.get(f"{NPM_BASE}/pkg/1.1.0").mock(
+        return_value=httpx.Response(200, json=_npm_version_response(new_maintainers))
+    )
+
+    env = ActivityEnvironment()
+    result = await env.run(maintainer_history, "npm", "pkg", "1.0.0", "1.1.0")
+    assert result.maintainer_changed is True
+
+
+@respx.mock
+async def test_npm_maintainer_fetch_error_returns_no_change():
+    respx.get(f"{NPM_BASE}/pkg/1.0.0").mock(side_effect=httpx.ConnectError("timeout"))
+    respx.get(f"{NPM_BASE}/pkg/1.1.0").mock(
+        return_value=httpx.Response(200, json=_npm_version_response([{"name": "alice"}]))
+    )
+
+    env = ActivityEnvironment()
+    result = await env.run(maintainer_history, "npm", "pkg", "1.0.0", "1.1.0")
+    assert result.maintainer_changed is False

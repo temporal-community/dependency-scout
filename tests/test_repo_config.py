@@ -1,6 +1,7 @@
 import base64
 
 import httpx
+import pytest
 import respx
 from temporalio.testing import ActivityEnvironment
 
@@ -71,8 +72,44 @@ async def test_empty_config_returns_defaults():
 
 @respx.mock
 async def test_force_auto_merge_override(monkeypatch):
-    monkeypatch.setenv("FORCE_AUTO_MERGE", "true")
+    monkeypatch.setenv("ENABLE_PR_ACTIONS", "true")
     respx.get(GITHUB_CONTENTS_URL).mock(return_value=httpx.Response(404))
     env = ActivityEnvironment()
     result = await env.run(fetch, PR)
     assert result.auto_merge_enabled is True
+
+
+@respx.mock
+async def test_pat_sent_in_auth_header(monkeypatch):
+    monkeypatch.setenv("GITHUB_TOKEN", "ghs_testpat")
+    route = respx.get(GITHUB_CONTENTS_URL).mock(return_value=httpx.Response(404))
+    env = ActivityEnvironment()
+    await env.run(fetch, PR)
+    assert route.calls[0].request.headers["Authorization"] == "Bearer ghs_testpat"
+
+
+@respx.mock
+async def test_401_raises_non_retryable(monkeypatch):
+    from temporalio.exceptions import ApplicationError
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+    respx.get(GITHUB_CONTENTS_URL).mock(return_value=httpx.Response(401))
+    env = ActivityEnvironment()
+    with pytest.raises(ApplicationError) as exc_info:
+        await env.run(fetch, PR)
+    assert exc_info.value.non_retryable is True
+
+
+@respx.mock
+async def test_github_app_token_used_when_installation_id_set(monkeypatch):
+    """When no PAT is set and installation_id is non-zero, auth via GitHub App token."""
+    from unittest.mock import AsyncMock, patch
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+
+    app_pr = PR.model_copy(update={"installation_id": 99999})
+    route = respx.get(GITHUB_CONTENTS_URL).mock(return_value=httpx.Response(404))
+
+    with patch("helpers.github_app.get_installation_token", new=AsyncMock(return_value="app_token_xyz")):
+        env = ActivityEnvironment()
+        await env.run(fetch, app_pr)
+
+    assert route.calls[0].request.headers["Authorization"] == "Bearer app_token_xyz"

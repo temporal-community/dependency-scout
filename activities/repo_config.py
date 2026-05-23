@@ -13,11 +13,11 @@ from activities.models import PRContext, RepoConfig
 async def fetch(pr: PRContext) -> RepoConfig:
     config = await _fetch_from_github(pr)
 
-    if os.environ.get("FORCE_AUTO_MERGE", "false").lower() == "true":
+    if os.environ.get("ENABLE_PR_ACTIONS", "false").lower() == "true":
         # Intentional footgun guard: log loudly so this never silently slips into prod.
         activity.logger.warning(
-            "⚠️  FORCE_AUTO_MERGE=true is set — overriding per-repo config to enable "
-            "auto-merge on ALL repos. This must never be set in production."
+            "⚠️  ENABLE_PR_ACTIONS=true is set — overriding per-repo config to enable "
+            "real PR actions (comments, merges) on ALL repos. This must never be set in production."
         )
         config = config.model_copy(update={"auto_merge_enabled": True})
 

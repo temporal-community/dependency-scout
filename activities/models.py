@@ -29,6 +29,7 @@ class PyPISignals(BaseModel):
     weekly_downloads: int | None
     publish_account_age_days: int | None
     is_major_bump: bool
+    package_description: str | None = None
 
 
 class SocketSignals(BaseModel):
@@ -68,6 +69,7 @@ class PackageSignals(BaseModel):
     maintainer_changed: bool
     weekly_downloads: int | None
     publish_account_age_days: int | None
+    package_description: str | None = None
 
 
 class Verdict(BaseModel):

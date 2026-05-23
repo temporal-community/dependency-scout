@@ -97,3 +97,14 @@ async def test_purl_uses_correct_ecosystem(monkeypatch):
     import json
     body = json.loads(route.calls[0].request.content)
     assert body["components"][0]["purl"] == "pkg:npm/express@4.18.2"
+
+
+@respx.mock
+async def test_rate_limited_raises_retryable(monkeypatch):
+    monkeypatch.setenv("SOCKET_API_KEY", "test-key")
+    respx.post(PURL_URL).mock(return_value=httpx.Response(429))
+    env = ActivityEnvironment()
+    with pytest.raises(ApplicationError) as exc_info:
+        await env.run(score, "pip", "requests", "2.31.0", "2.32.0")
+    assert exc_info.value.non_retryable is False
+    assert "rate limited" in str(exc_info.value).lower()
