@@ -11,6 +11,8 @@ from activities.models import ReleaseAgeSignals
 async def check(ecosystem: str, package: str, old_version: str, new_version: str) -> ReleaseAgeSignals:
     if ecosystem == "npm":
         return await _check_npm(package, new_version)
+    if ecosystem == "rubygems":
+        return await _check_rubygems(package, new_version)
     return await _check_pypi(package, new_version)
 
 
@@ -59,6 +61,31 @@ async def _check_npm(package: str, new_version: str) -> ReleaseAgeSignals:
     upload_time = _parse_upload_time(raw)
     hours = (datetime.now(timezone.utc) - upload_time).total_seconds() / 3600
     return ReleaseAgeSignals(release_age_hours=max(0.0, hours))
+
+
+async def _check_rubygems(package: str, new_version: str) -> ReleaseAgeSignals:
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        # /api/v1/versions/{gem}.json returns all published versions with created_at
+        resp = await client.get(f"https://rubygems.org/api/v1/versions/{package}.json")
+        if resp.status_code == 404:
+            raise ApplicationError(
+                f"{package} not found on RubyGems",
+                type="PackageNotFound",
+                non_retryable=True,
+            )
+        resp.raise_for_status()
+        versions = resp.json()
+
+    for v in versions:
+        if v.get("number") == new_version:
+            raw = v.get("created_at", "")
+            if not raw:
+                return ReleaseAgeSignals(release_age_hours=None)
+            upload_time = _parse_upload_time(raw)
+            hours = (datetime.now(timezone.utc) - upload_time).total_seconds() / 3600
+            return ReleaseAgeSignals(release_age_hours=max(0.0, hours))
+
+    return ReleaseAgeSignals(release_age_hours=None)
 
 
 def _parse_upload_time(raw: str) -> datetime:

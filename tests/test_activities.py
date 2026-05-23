@@ -469,3 +469,192 @@ async def test_npm_maintainer_fetch_error_returns_no_change():
     env = ActivityEnvironment()
     result = await env.run(maintainer_history, "npm", "pkg", "1.0.0", "1.1.0")
     assert result.maintainer_changed is False
+
+
+# ---------------------------------------------------------------------------
+# RubyGems paths — pypi_metadata
+# ---------------------------------------------------------------------------
+
+RUBYGEMS_API = "https://rubygems.org/api/v1/gems"
+
+
+@respx.mock
+async def test_rubygems_metadata_fetch_success():
+    respx.get(f"{RUBYGEMS_API}/rails.json").mock(
+        return_value=httpx.Response(200, json={
+            "info": "Full-stack web framework.",
+            "downloads": 500_000_000,
+        })
+    )
+
+    env = ActivityEnvironment()
+    result = await env.run(pypi_fetch, "rubygems", "rails", "7.0.0", "7.1.0")
+    assert result.weekly_downloads == 500_000_000
+    assert result.package_description == "Full-stack web framework."
+    assert result.is_major_bump is False
+    assert result.publish_account_age_days is None
+
+
+@respx.mock
+async def test_rubygems_metadata_major_bump():
+    respx.get(f"{RUBYGEMS_API}/rails.json").mock(
+        return_value=httpx.Response(200, json={"info": "Framework", "downloads": 100})
+    )
+
+    env = ActivityEnvironment()
+    result = await env.run(pypi_fetch, "rubygems", "rails", "7.1.0", "8.0.0")
+    assert result.is_major_bump is True
+
+
+@respx.mock
+async def test_rubygems_metadata_404_raises_non_retryable():
+    from temporalio.exceptions import ApplicationError
+    respx.get(f"{RUBYGEMS_API}/nosuchthing.json").mock(return_value=httpx.Response(404))
+
+    env = ActivityEnvironment()
+    with pytest.raises(ApplicationError) as exc_info:
+        await env.run(pypi_fetch, "rubygems", "nosuchthing", "0.9.0", "1.0.0")
+    assert exc_info.value.non_retryable is True
+
+
+@respx.mock
+async def test_rubygems_metadata_empty_description():
+    respx.get(f"{RUBYGEMS_API}/mygem.json").mock(
+        return_value=httpx.Response(200, json={"info": "", "downloads": 0})
+    )
+
+    env = ActivityEnvironment()
+    result = await env.run(pypi_fetch, "rubygems", "mygem", "1.0.0", "1.0.1")
+    assert result.package_description is None
+
+
+# ---------------------------------------------------------------------------
+# RubyGems paths — release_age
+# ---------------------------------------------------------------------------
+
+RUBYGEMS_VERSIONS_API = "https://rubygems.org/api/v1/versions"
+
+
+@respx.mock
+async def test_rubygems_release_age_success():
+    import datetime
+    recent = (
+        datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=6)
+    ).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+    respx.get(f"{RUBYGEMS_VERSIONS_API}/rails.json").mock(
+        return_value=httpx.Response(200, json=[
+            {"number": "7.1.0", "created_at": recent},
+            {"number": "7.0.0", "created_at": "2023-01-01T00:00:00.000Z"},
+        ])
+    )
+
+    env = ActivityEnvironment()
+    result = await env.run(release_age_check, "rubygems", "rails", "7.0.0", "7.1.0")
+    assert result.release_age_hours is not None
+    assert 5.0 < result.release_age_hours < 7.0
+
+
+@respx.mock
+async def test_rubygems_release_age_404_raises_non_retryable():
+    from temporalio.exceptions import ApplicationError
+    respx.get(f"{RUBYGEMS_VERSIONS_API}/nosuchthing.json").mock(return_value=httpx.Response(404))
+
+    env = ActivityEnvironment()
+    with pytest.raises(ApplicationError) as exc_info:
+        await env.run(release_age_check, "rubygems", "nosuchthing", "0.9.0", "1.0.0")
+    assert exc_info.value.non_retryable is True
+
+
+@respx.mock
+async def test_rubygems_release_age_version_not_in_list_returns_none():
+    respx.get(f"{RUBYGEMS_VERSIONS_API}/rails.json").mock(
+        return_value=httpx.Response(200, json=[
+            {"number": "7.0.0", "created_at": "2023-01-01T00:00:00.000Z"},
+        ])
+    )
+
+    env = ActivityEnvironment()
+    result = await env.run(release_age_check, "rubygems", "rails", "6.9.0", "7.1.0")
+    assert result.release_age_hours is None
+
+
+@respx.mock
+async def test_rubygems_release_age_missing_created_at_returns_none():
+    respx.get(f"{RUBYGEMS_VERSIONS_API}/rails.json").mock(
+        return_value=httpx.Response(200, json=[
+            {"number": "7.1.0"},  # no created_at
+        ])
+    )
+
+    env = ActivityEnvironment()
+    result = await env.run(release_age_check, "rubygems", "rails", "7.0.0", "7.1.0")
+    assert result.release_age_hours is None
+
+
+# ---------------------------------------------------------------------------
+# RubyGems paths — maintainer
+# ---------------------------------------------------------------------------
+
+
+@respx.mock
+async def test_rubygems_maintainer_no_change():
+    respx.get(f"{RUBYGEMS_VERSIONS_API}/rails.json").mock(
+        return_value=httpx.Response(200, json=[
+            {"number": "7.0.0", "authors": "DHH, Eileen"},
+            {"number": "7.1.0", "authors": "DHH, Eileen"},
+        ])
+    )
+
+    env = ActivityEnvironment()
+    result = await env.run(maintainer_history, "rubygems", "rails", "7.0.0", "7.1.0")
+    assert result.maintainer_changed is False
+
+
+@respx.mock
+async def test_rubygems_maintainer_new_author_detected():
+    respx.get(f"{RUBYGEMS_VERSIONS_API}/rails.json").mock(
+        return_value=httpx.Response(200, json=[
+            {"number": "7.0.0", "authors": "DHH"},
+            {"number": "7.1.0", "authors": "DHH, NewContributor"},
+        ])
+    )
+
+    env = ActivityEnvironment()
+    result = await env.run(maintainer_history, "rubygems", "rails", "7.0.0", "7.1.0")
+    assert result.maintainer_changed is True
+
+
+@respx.mock
+async def test_rubygems_maintainer_version_not_found_returns_no_change():
+    respx.get(f"{RUBYGEMS_VERSIONS_API}/rails.json").mock(
+        return_value=httpx.Response(200, json=[
+            {"number": "7.0.0", "authors": "DHH"},
+            # 7.1.0 missing from list
+        ])
+    )
+
+    env = ActivityEnvironment()
+    result = await env.run(maintainer_history, "rubygems", "rails", "7.0.0", "7.1.0")
+    assert result.maintainer_changed is False
+
+
+@respx.mock
+async def test_rubygems_maintainer_http_error_returns_no_change():
+    respx.get(f"{RUBYGEMS_VERSIONS_API}/rails.json").mock(
+        return_value=httpx.Response(503)
+    )
+
+    env = ActivityEnvironment()
+    result = await env.run(maintainer_history, "rubygems", "rails", "7.0.0", "7.1.0")
+    assert result.maintainer_changed is False
+
+
+@respx.mock
+async def test_rubygems_maintainer_network_exception_returns_no_change():
+    respx.get(f"{RUBYGEMS_VERSIONS_API}/rails.json").mock(
+        side_effect=httpx.ConnectError("timeout")
+    )
+
+    env = ActivityEnvironment()
+    result = await env.run(maintainer_history, "rubygems", "rails", "7.0.0", "7.1.0")
+    assert result.maintainer_changed is False

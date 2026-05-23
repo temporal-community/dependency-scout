@@ -103,10 +103,19 @@ def test_unknown_branch_defaults_to_pip():
     assert result.ecosystem == "pip"
 
 
-def test_dependabot_unknown_ecosystem_slug_falls_back():
+def test_dependabot_bundler_maps_to_rubygems():
     result = parse_pr(
         "Bump gem from 1.0.0 to 1.1.0",
         branch="dependabot/bundler/gem-1.1.0",
+    )
+    assert result is not None
+    assert result.ecosystem == "rubygems"
+
+
+def test_dependabot_unknown_ecosystem_slug_falls_back():
+    result = parse_pr(
+        "Bump my-crate from 1.0.0 to 1.1.0",
+        branch="dependabot/cargo/my-crate-1.1.0",  # cargo not in the map
     )
     assert result is not None
     assert result.ecosystem == "pip"  # unknown slug → default

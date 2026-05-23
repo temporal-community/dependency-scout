@@ -10,6 +10,8 @@ from activities.models import MaintainerSignals
 async def history(ecosystem: str, package: str, old_version: str, new_version: str) -> MaintainerSignals:
     if ecosystem == "npm":
         return await _history_npm(package, old_version, new_version)
+    if ecosystem == "rubygems":
+        return await _history_rubygems(package, old_version, new_version)
     return await _history_pypi(package, old_version, new_version)
 
 
@@ -72,6 +74,31 @@ def _pypi_maintainer_set(info: dict) -> set[str]:
     return result
 
 
+async def _history_rubygems(package: str, old_version: str, new_version: str) -> MaintainerSignals:
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        try:
+            resp = await client.get(f"https://rubygems.org/api/v1/versions/{package}.json")
+            if resp.status_code != 200:
+                return MaintainerSignals(maintainer_changed=False)
+            versions = resp.json()
+        except Exception:
+            return MaintainerSignals(maintainer_changed=False)
+
+    old_authors: set[str] = set()
+    new_authors: set[str] = set()
+    for v in versions:
+        num = v.get("number", "")
+        if num == old_version:
+            old_authors = _rubygems_author_set(v)
+        elif num == new_version:
+            new_authors = _rubygems_author_set(v)
+
+    if not old_authors or not new_authors:
+        return MaintainerSignals(maintainer_changed=False)
+
+    return MaintainerSignals(maintainer_changed=bool(new_authors - old_authors))
+
+
 def _npm_maintainer_set(data: dict) -> set[str]:
     result = set()
     for m in data.get("maintainers") or []:
@@ -79,3 +106,9 @@ def _npm_maintainer_set(data: dict) -> set[str]:
         if name:
             result.add(name)
     return result
+
+
+def _rubygems_author_set(version_data: dict) -> set[str]:
+    # "authors" is a comma-separated string like "Alice, Bob"
+    raw = (version_data.get("authors") or "").lower()
+    return {a.strip() for a in raw.split(",") if a.strip()}

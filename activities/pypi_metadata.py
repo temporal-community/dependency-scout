@@ -9,6 +9,8 @@ from activities.models import PyPISignals
 async def fetch(ecosystem: str, package: str, old_version: str, new_version: str) -> PyPISignals:
     if ecosystem == "npm":
         return await _fetch_npm(package, old_version, new_version)
+    if ecosystem == "rubygems":
+        return await _fetch_rubygems(package, old_version, new_version)
     return await _fetch_pypi(package, old_version, new_version)
 
 
@@ -57,6 +59,31 @@ async def _fetch_npm(package: str, old_version: str, new_version: str) -> PyPISi
     return PyPISignals(
         weekly_downloads=weekly_downloads,
         publish_account_age_days=None,  # npm API doesn't expose account creation dates
+        is_major_bump=_is_major(old_version, new_version),
+        package_description=summary,
+    )
+
+
+async def _fetch_rubygems(package: str, old_version: str, new_version: str) -> PyPISignals:
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        resp = await client.get(f"https://rubygems.org/api/v1/gems/{package}.json")
+        if resp.status_code == 404:
+            raise ApplicationError(
+                f"{package} not found on RubyGems",
+                type="PackageNotFound",
+                non_retryable=True,
+            )
+        resp.raise_for_status()
+        data = resp.json()
+
+    summary = (data.get("info") or "")[:500] or None
+    # RubyGems has no weekly-downloads endpoint; total downloads is the best
+    # popularity proxy available from the public API.
+    total_downloads = data.get("downloads")
+
+    return PyPISignals(
+        weekly_downloads=total_downloads,
+        publish_account_age_days=None,
         is_major_bump=_is_major(old_version, new_version),
         package_description=summary,
     )

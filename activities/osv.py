@@ -3,7 +3,7 @@ from temporalio import activity
 
 from activities.models import OSVSignals
 
-_ECOSYSTEM_MAP = {"pip": "PyPI", "npm": "npm"}
+_ECOSYSTEM_MAP = {"pip": "PyPI", "npm": "npm", "rubygems": "RubyGems"}
 
 
 @activity.defn(name="activities.osv.check")

@@ -594,3 +594,135 @@ async def test_compute_npm_sri_mismatch_raises():
         await env.run(compute, "npm", "pkg", "1.0.0", "1.1.0")
     assert exc_info.value.non_retryable is True
     assert "SHA-512" in str(exc_info.value)
+
+
+# ---------------------------------------------------------------------------
+# RubyGems helpers
+# ---------------------------------------------------------------------------
+
+RUBYGEMS_VERSIONS = "https://rubygems.org/api/v1/versions"
+RUBYGEMS_GEMS = "https://rubygems.org/gems"
+
+
+def _make_gem(files: dict[str, str]) -> bytes:
+    """Build a minimal .gem archive (outer tar containing data.tar.gz)."""
+    # Build inner data.tar.gz
+    inner_buf = io.BytesIO()
+    with tarfile.open(fileobj=inner_buf, mode="w:gz") as inner:
+        for rel_path, content in files.items():
+            data = content.encode()
+            info = tarfile.TarInfo(name=rel_path)
+            info.size = len(data)
+            inner.addfile(info, io.BytesIO(data))
+    inner_bytes = inner_buf.getvalue()
+
+    # Build outer tar containing data.tar.gz
+    outer_buf = io.BytesIO()
+    with tarfile.open(fileobj=outer_buf, mode="w") as outer:
+        info = tarfile.TarInfo(name="data.tar.gz")
+        info.size = len(inner_bytes)
+        outer.addfile(info, io.BytesIO(inner_bytes))
+    outer_buf.seek(0)
+    return outer_buf.read()
+
+
+def _rubygems_versions_response(package: str, versions: list[tuple[str, str]]) -> list[dict]:
+    """Return a RubyGems versions API response for the given (number, sha256) pairs."""
+    return [
+        {"number": ver, "sha": sha256, "authors": "Alice"}
+        for ver, sha256 in versions
+    ]
+
+
+@respx.mock
+def test_extract_gem_to_dir(tmp_path):
+    from activities.package_diff import _extract_gem_to_dir
+    gem_bytes = _make_gem({"lib/my_gem.rb": "puts 'hello'"})
+    _extract_gem_to_dir(gem_bytes, str(tmp_path))
+    assert (tmp_path / "lib" / "my_gem.rb").exists()
+
+
+def test_extract_gem_no_data_tarball_raises():
+    from activities.package_diff import _extract_gem_to_dir
+    import tempfile
+    # Build outer tar with no data.tar.gz member
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w") as outer:
+        data = b"not the right file"
+        info = tarfile.TarInfo(name="metadata.gz")
+        info.size = len(data)
+        outer.addfile(info, io.BytesIO(data))
+    buf.seek(0)
+    with tempfile.TemporaryDirectory() as d:
+        with pytest.raises(ValueError, match="No data.tar.gz"):
+            _extract_gem_to_dir(buf.read(), d)
+
+
+@respx.mock
+async def test_rubygems_compute_success():
+    old_gem = _make_gem({"lib/mygem.rb": "def hello; end"})
+    new_gem = _make_gem({"lib/mygem.rb": "def hello; 'world'; end"})
+    old_sha = hashlib.sha256(old_gem).hexdigest()
+    new_sha = hashlib.sha256(new_gem).hexdigest()
+
+    old_url = f"{RUBYGEMS_GEMS}/mygem-1.0.0.gem"
+    new_url = f"{RUBYGEMS_GEMS}/mygem-1.1.0.gem"
+
+    respx.get(f"{RUBYGEMS_VERSIONS}/mygem.json").mock(
+        return_value=httpx.Response(200, json=[
+            {"number": "1.0.0", "sha": old_sha, "authors": "Alice"},
+            {"number": "1.1.0", "sha": new_sha, "authors": "Alice"},
+        ])
+    )
+    respx.get(old_url).mock(return_value=httpx.Response(200, content=old_gem))
+    respx.get(new_url).mock(return_value=httpx.Response(200, content=new_gem))
+
+    env = ActivityEnvironment()
+    result = await env.run(compute, "rubygems", "mygem", "1.0.0", "1.1.0")
+    assert result.diff_size_bytes > 0
+    assert "mygem.rb" in result.diff_summary
+
+
+@respx.mock
+async def test_rubygems_compute_404_raises():
+    respx.get(f"{RUBYGEMS_VERSIONS}/nosuchthing.json").mock(return_value=httpx.Response(404))
+
+    env = ActivityEnvironment()
+    with pytest.raises(ApplicationError) as exc_info:
+        await env.run(compute, "rubygems", "nosuchthing", "0.9.0", "1.0.0")
+    assert exc_info.value.non_retryable is True
+
+
+@respx.mock
+async def test_rubygems_compute_version_missing_from_list_returns_stub():
+    respx.get(f"{RUBYGEMS_VERSIONS}/mygem.json").mock(
+        return_value=httpx.Response(200, json=[
+            {"number": "1.0.0", "sha": "abc123", "authors": "Alice"},
+            # 1.1.0 not present
+        ])
+    )
+
+    env = ActivityEnvironment()
+    result = await env.run(compute, "rubygems", "mygem", "1.0.0", "1.1.0")
+    assert result.diff_summary.startswith("[")
+
+
+@respx.mock
+async def test_rubygems_rbc_files_are_noise():
+    from activities.package_diff import _is_noise
+    assert _is_noise("lib/foo.rbc") is True
+
+
+def test_rubygems_bundle_is_dangerous():
+    from activities.package_diff import DANGEROUS_BINARY_SUFFIXES
+    assert ".bundle" in DANGEROUS_BINARY_SUFFIXES
+
+
+def test_rubygems_gemspec_is_high_signal():
+    from activities.package_diff import HIGH_SIGNAL_SUFFIXES
+    assert ".gemspec" in HIGH_SIGNAL_SUFFIXES
+
+
+def test_rubygems_rakefile_is_high_signal():
+    from activities.package_diff import HIGH_SIGNAL_NAMES
+    assert "Rakefile" in HIGH_SIGNAL_NAMES

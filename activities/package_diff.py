@@ -37,10 +37,11 @@ MAX_DIFF_BYTES = 100 * 1024  # 100 KB
 _ALLOWED_CDN_HOSTS: frozenset[str] = frozenset({
     "files.pythonhosted.org",  # PyPI sdists + wheels
     "registry.npmjs.org",       # npm tarballs
+    "rubygems.org",              # RubyGems .gem files
 })
 
 NOISE_DIRS = {".dist-info", "__pycache__", ".egg-info", "node_modules", ".nyc_output", "coverage"}
-NOISE_SUFFIXES = {".pyc", ".pyo"}
+NOISE_SUFFIXES = {".pyc", ".pyo", ".rbc"}  # .rbc = Ruby bytecode cache
 NOISE_FILENAMES = {"RECORD", "WHEEL", "METADATA", "INSTALLER", "package-lock.json", "yarn.lock", "npm-shrinkwrap.json"}
 
 HIGH_SIGNAL_NAMES = {
@@ -53,8 +54,10 @@ HIGH_SIGNAL_NAMES = {
     "install.js",
     "postinstall.js",
     "preinstall.js",
+    "Rakefile",
+    "Gemfile",
 }
-HIGH_SIGNAL_SUFFIXES = {".pth"}  # Python path config files — silent code-exec vector
+HIGH_SIGNAL_SUFFIXES = {".pth", ".gemspec"}
 
 # Files that execute code on load / are impossible to text-diff safely.
 # A new or modified file with any of these extensions is an automatic RED signal.
@@ -62,6 +65,7 @@ DANGEROUS_BINARY_SUFFIXES = {
     ".so", ".pyd", ".dll",       # native compiled extensions — execute arbitrary code
     ".node",                     # Node.js native add-ons — execute arbitrary native code
     ".pkl", ".pickle",            # deserializes and executes arbitrary Python objects
+    ".bundle",                   # Ruby native C extensions (macOS .dylib-like)
 }
 
 
@@ -75,7 +79,12 @@ async def compute(ecosystem: str, package: str, old_version: str, new_version: s
         f"Computing package diff for {package} {old_version} -> {new_version}"
     )
 
-    _url_fetcher = _get_npm_tarball_url if ecosystem == "npm" else _get_sdist_url
+    if ecosystem == "npm":
+        _url_fetcher = _get_npm_tarball_url
+    elif ecosystem == "rubygems":
+        _url_fetcher = _get_rubygems_url
+    else:
+        _url_fetcher = _get_sdist_url
 
     async with httpx.AsyncClient(timeout=30.0) as client:
         old_info, new_info = await asyncio.gather(
@@ -165,6 +174,35 @@ async def _get_npm_tarball_url(
         return None
     _validate_archive_url(tarball_url)
     return tarball_url, tarball_url.split("/")[-1], dist.get("integrity", "")
+
+
+async def _get_rubygems_url(
+    client: httpx.AsyncClient, package: str, version: str
+) -> tuple[str, str, str] | None:
+    """Return (url, filename, sha256) for a RubyGems .gem archive, or None.
+
+    SHA-256 is taken from the versions API `sha` field, enabling integrity
+    verification without a separate digest download.
+    """
+    resp = await client.get(f"https://rubygems.org/api/v1/versions/{package}.json")
+    if resp.status_code == 404:
+        raise ApplicationError(
+            f"{package} not found on RubyGems",
+            type="PackageNotFound",
+            non_retryable=True,
+        )
+    resp.raise_for_status()
+    versions = resp.json()
+
+    for v in versions:
+        if v.get("number") == version:
+            sha256 = v.get("sha", "")
+            filename = f"{package}-{version}.gem"
+            url = f"https://rubygems.org/gems/{filename}"
+            _validate_archive_url(url)
+            return url, filename, sha256
+
+    return None
 
 
 def _validate_archive_url(url: str) -> None:
@@ -263,7 +301,9 @@ def _extract_to_dir(archive_bytes: bytes, filename: str, dest: str) -> None:
     buf = io.BytesIO(archive_bytes)
     dest_path = Path(dest).resolve()
     lower = filename.lower()
-    if lower.endswith((".tar.gz", ".tar.bz2", ".tgz")):
+    if lower.endswith(".gem"):
+        _extract_gem_to_dir(archive_bytes, dest)
+    elif lower.endswith((".tar.gz", ".tar.bz2", ".tgz")):
         with tarfile.open(fileobj=buf) as tf:
             tf.extractall(dest, filter="data")  # filter="data" blocks path traversal
     elif lower.endswith((".whl", ".zip")):
@@ -271,6 +311,33 @@ def _extract_to_dir(archive_bytes: bytes, filename: str, dest: str) -> None:
             _safe_zip_extractall(zf, dest_path)
     else:
         raise ValueError(f"Unsupported archive format: {filename}")
+
+
+def _extract_gem_to_dir(archive_bytes: bytes, dest: str) -> None:
+    """Extract a RubyGems .gem file into *dest*.
+
+    A .gem is a POSIX tar archive containing:
+      data.tar.gz   — the actual source tree
+      metadata.gz   — gem spec
+      checksums.yaml.gz
+
+    We open the outer tar, pull out data.tar.gz, and extract that inner
+    archive with filter="data" to block path traversal.
+    """
+    buf = io.BytesIO(archive_bytes)
+    with tarfile.open(fileobj=buf) as outer:
+        data_member = next(
+            (m for m in outer.getmembers() if m.name == "data.tar.gz"), None
+        )
+        if data_member is None:
+            raise ValueError("No data.tar.gz found in .gem archive")
+        data_fobj = outer.extractfile(data_member)
+        if data_fobj is None:
+            raise ValueError("Could not read data.tar.gz from .gem archive")
+        inner_buf = io.BytesIO(data_fobj.read())
+
+    with tarfile.open(fileobj=inner_buf, mode="r:gz") as inner:
+        inner.extractall(dest, filter="data")
 
 
 def _safe_zip_extractall(zf: zipfile.ZipFile, dest: Path) -> None:

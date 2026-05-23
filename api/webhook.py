@@ -27,10 +27,9 @@ _PR_ACTIONS = {"opened", "synchronize", "reopened"}
 
 # Allowlist patterns for package names and version strings.
 # These are strict enough to block path traversal, command injection, and
-# SSRF gadgets while allowing all real package names from PyPI and npm.
-#   PyPI: PEP 508 names — letters, digits, dots, hyphens, underscores
-#   npm:  unscoped or @scope/name — lowercase, digits, hyphens, dots, tilde
-#         (we allow mixed case for npm too since some legacy packages use it)
+# SSRF gadgets while allowing all real package names per ecosystem.
+#   PyPI/RubyGems: PEP 508 / gem names — letters, digits, dots, hyphens, underscores
+#   npm: unscoped or @scope/name — mixed case allowed for legacy packages
 #   Version: semver-ish — digits, dots, hyphens, plus, tilde, caret, letters
 _PYPI_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,213}$")
 _NPM_NAME_RE = re.compile(
@@ -38,10 +37,16 @@ _NPM_NAME_RE = re.compile(
 )
 _VERSION_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+\-~^]{0,127}$")
 
+_NAME_RE_BY_ECOSYSTEM: dict[str, re.Pattern[str]] = {
+    "pip": _PYPI_NAME_RE,
+    "npm": _NPM_NAME_RE,
+    "rubygems": _PYPI_NAME_RE,  # gem names follow the same rules as PyPI
+}
+
 
 def _validate_parsed_package(ecosystem: str, package: str, old: str, new: str) -> str | None:
     """Return an error reason string, or None if the input is valid."""
-    name_re = _PYPI_NAME_RE if ecosystem == "pip" else _NPM_NAME_RE
+    name_re = _NAME_RE_BY_ECOSYSTEM.get(ecosystem, _PYPI_NAME_RE)
     if not name_re.match(package):
         return f"invalid package name: {package!r}"
     for label, ver in (("old_version", old), ("new_version", new)):

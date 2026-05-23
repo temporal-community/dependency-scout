@@ -7,7 +7,7 @@ class PRContext(BaseModel):
     pr_number: int
     pr_author: str                      # "dependabot[bot]" or "renovate[bot]"
     installation_id: int                # GitHub App installation
-    ecosystem: Literal["pip", "npm"]    # npm is v2; pip-only for v1
+    ecosystem: Literal["pip", "npm", "rubygems"]
     package_name: str
     old_version: str
     new_version: str
@@ -55,7 +55,7 @@ class ReleaseAgeSignals(BaseModel):
 
 
 class PackageSignals(BaseModel):
-    ecosystem: Literal["pip", "npm"]
+    ecosystem: Literal["pip", "npm", "rubygems"]
     package_name: str
     old_version: str
     new_version: str

@@ -23,9 +23,10 @@ from typing import Literal
 
 # Maps Dependabot's internal ecosystem slugs to our ecosystem strings.
 # Add new entries here as more ecosystems are supported.
-_DEPENDABOT_ECOSYSTEM_MAP: dict[str, Literal["pip", "npm"]] = {
+_DEPENDABOT_ECOSYSTEM_MAP: dict[str, Literal["pip", "npm", "rubygems"]] = {
     "npm_and_yarn": "npm",
     "pip": "pip",
+    "bundler": "rubygems",
 }
 
 
@@ -34,7 +35,7 @@ class ParsedPR:
     package: str
     old_version: str
     new_version: str
-    ecosystem: Literal["pip", "npm"] = "pip"
+    ecosystem: Literal["pip", "npm", "rubygems"] = "pip"
 
 
 # @? allows scoped npm packages: @typescript-eslint/parser
@@ -79,7 +80,7 @@ def parse_pr(title: str, body: str = "", branch: str = "") -> ParsedPR | None:
     return None
 
 
-def _detect_ecosystem(package: str, branch: str) -> Literal["pip", "npm"]:
+def _detect_ecosystem(package: str, branch: str) -> Literal["pip", "npm", "rubygems"]:
     # Dependabot branch names encode ecosystem: dependabot/{ecosystem}/{rest}
     if branch.startswith("dependabot/"):
         parts = branch.split("/")
