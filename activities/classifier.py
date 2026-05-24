@@ -1,5 +1,24 @@
+"""
+Classifier protocol — abstracts the decision engine that turns PackageSignals into a Verdict.
+
+Built-in classifiers:
+  ClaudeClassifier      — uses Anthropic API (selected when ANTHROPIC_API_KEY is set)
+  RuleBasedClassifier   — deterministic threshold rules, zero API keys required
+
+To plug in a different LLM provider or a custom policy engine, register an entry point:
+
+    [project.entry-points."triage_agent.classifiers"]
+    my_openai = "my_package:OpenAIClassifier"
+
+Then set CLASSIFIER=my_openai in .env.  Built-in names "claude" and "rule_based" are
+always available as CLASSIFIER values regardless of installed packages.
+"""
+
 import json
+import logging
 import os
+from importlib.metadata import entry_points
+from typing import Protocol
 
 import anthropic
 from temporalio import activity
@@ -7,6 +26,14 @@ from temporalio.exceptions import ApplicationError
 
 from activities.models import PackageSignals, Verdict
 from helpers.prompts import CLASSIFIER_SYSTEM
+
+_logger = logging.getLogger(__name__)
+
+
+class Classifier(Protocol):
+    """Classifies a dependency bump as green / yellow / red given collected signals."""
+
+    async def classify(self, signals: PackageSignals) -> Verdict: ...
 
 
 def _build_message(signals: PackageSignals) -> str:
@@ -54,57 +81,112 @@ def _build_message(signals: PackageSignals) -> str:
     return msg
 
 
+class RuleBasedClassifier:
+    """Deterministic threshold rules — zero API keys required."""
+
+    async def classify(self, signals: PackageSignals) -> Verdict:
+        return _rule_based(signals)
+
+
+class ClaudeClassifier:
+    """Uses the Anthropic API to classify with the configured Claude model."""
+
+    async def classify(self, signals: PackageSignals) -> Verdict:
+        client = anthropic.AsyncAnthropic()
+        model = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-6")
+
+        try:
+            response = await client.messages.create(
+                model=model,
+                max_tokens=1024,
+                system=[
+                    {
+                        "type": "text",
+                        "text": CLASSIFIER_SYSTEM,
+                        "cache_control": {"type": "ephemeral"},
+                    }
+                ],
+                messages=[{"role": "user", "content": _build_message(signals)}],
+                tools=[
+                    {
+                        "name": "submit_verdict",
+                        "description": "Submit your supply chain risk classification",
+                        "input_schema": Verdict.model_json_schema(),
+                    }
+                ],
+                tool_choice={"type": "tool", "name": "submit_verdict"},
+            )
+        except anthropic.AuthenticationError as exc:
+            raise ApplicationError(
+                str(exc), type="AuthenticationError", non_retryable=True
+            ) from exc
+        except anthropic.BadRequestError as exc:
+            raise ApplicationError(str(exc), type="BadRequestError", non_retryable=True) from exc
+        except Exception as exc:
+            # Any LLM failure (rate limit, outage) — fall back to rule-based
+            # rather than failing the workflow.
+            activity.logger.warning(f"LLM classifier failed ({exc!r}), falling back to rule-based")
+            return _rule_based(signals)
+
+        tool_use = next(b for b in response.content if b.type == "tool_use")
+        verdict = Verdict(**tool_use.input)
+        # Pass signals through so PRActionWorkflow can enforce per-repo gates.
+        updates: dict = {}
+        if verdict.release_age_hours is None:
+            updates["release_age_hours"] = signals.age.release_age_hours
+        if verdict.new_dependency_count == 0 and signals.diff.new_dependency_count:
+            updates["new_dependency_count"] = signals.diff.new_dependency_count
+        if updates:
+            verdict = verdict.model_copy(update=updates)
+        activity.logger.info(
+            f"Classified {signals.package_name} {signals.new_version} as "
+            f"{verdict.classification} ({verdict.confidence:.0%})"
+        )
+        return verdict
+
+
+_BUILTIN_CLASSIFIERS: dict[str, type] = {
+    "claude": ClaudeClassifier,
+    "rule_based": RuleBasedClassifier,
+}
+
+
+def get_classifier() -> Classifier:
+    """Return the active Classifier.
+
+    Selection order:
+    1. CLASSIFIER env var → look up in triage_agent.classifiers entry points, then built-in names.
+    2. Default: ClaudeClassifier when ANTHROPIC_API_KEY is set, else RuleBasedClassifier.
+    """
+    name = os.environ.get("CLASSIFIER")
+    if name:
+        try:
+            for ep in entry_points(group="triage_agent.classifiers"):
+                if ep.name == name:
+                    return ep.load()()
+        except Exception as exc:  # noqa: BLE001
+            _logger.warning("Failed to load classifier %r from entry points: %s", name, exc)
+        if name in _BUILTIN_CLASSIFIERS:
+            return _BUILTIN_CLASSIFIERS[name]()
+        _logger.warning(
+            "CLASSIFIER=%r not found in triage_agent.classifiers entry points or built-in names "
+            "('claude', 'rule_based') — falling back to default",
+            name,
+        )
+
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        return RuleBasedClassifier()
+    return ClaudeClassifier()
+
+
 @activity.defn(name="activities.classifier.classify")
 async def classify(signals: PackageSignals) -> Verdict:
-    if not os.environ.get("ANTHROPIC_API_KEY"):
+    clf = get_classifier()
+    if not os.environ.get("ANTHROPIC_API_KEY") and isinstance(clf, RuleBasedClassifier):
         activity.logger.info("No ANTHROPIC_API_KEY — using rule-based classifier")
-        return _rule_based(signals)
-
-    client = anthropic.AsyncAnthropic()
-    model = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-6")
-
-    try:
-        response = await client.messages.create(
-            model=model,
-            max_tokens=1024,
-            system=[{
-                "type": "text",
-                "text": CLASSIFIER_SYSTEM,
-                "cache_control": {"type": "ephemeral"},
-            }],
-            messages=[{"role": "user", "content": _build_message(signals)}],
-            tools=[{
-                "name": "submit_verdict",
-                "description": "Submit your supply chain risk classification",
-                "input_schema": Verdict.model_json_schema(),
-            }],
-            tool_choice={"type": "tool", "name": "submit_verdict"},
-        )
-    except anthropic.AuthenticationError as exc:
-        raise ApplicationError(str(exc), type="AuthenticationError", non_retryable=True) from exc
-    except anthropic.BadRequestError as exc:
-        raise ApplicationError(str(exc), type="BadRequestError", non_retryable=True) from exc
-    except Exception as exc:
-        # Any other LLM failure (rate limit exhausted, service outage) — fall back
-        # to rule-based rather than failing the workflow.
-        activity.logger.warning(f"LLM classifier failed ({exc!r}), falling back to rule-based")
-        return _rule_based(signals)
-
-    tool_use = next(b for b in response.content if b.type == "tool_use")
-    verdict = Verdict(**tool_use.input)
-    # Pass signals through so PRActionWorkflow can enforce per-repo gates.
-    updates: dict = {}
-    if verdict.release_age_hours is None:
-        updates["release_age_hours"] = signals.age.release_age_hours
-    if verdict.new_dependency_count == 0 and signals.diff.new_dependency_count:
-        updates["new_dependency_count"] = signals.diff.new_dependency_count
-    if updates:
-        verdict = verdict.model_copy(update=updates)
-    activity.logger.info(
-        f"Classified {signals.package_name} {signals.new_version} as "
-        f"{verdict.classification} ({verdict.confidence:.0%})"
-    )
-    return verdict
+    else:
+        activity.logger.info("Using classifier: %s", type(clf).__name__)
+    return await clf.classify(signals)
 
 
 def _rule_based(signals: PackageSignals) -> Verdict:
@@ -156,7 +238,11 @@ def _rule_based(signals: PackageSignals) -> Verdict:
     if signals.maintainer.maintainer_changed:
         flags.append("maintainer changed")
     if signals.attestation.publisher_changed:
-        old = f" (was {signals.attestation.old_publisher_repo})" if signals.attestation.old_publisher_repo else ""
+        old = (
+            f" (was {signals.attestation.old_publisher_repo})"
+            if signals.attestation.old_publisher_repo
+            else ""
+        )
         # publisher_repo == metadata_repo means same repo, different workflow/path — likely a
         # legitimate CI migration. Still worth a human glance but lower priority than a repo change.
         if (
@@ -200,18 +286,30 @@ def _rule_based(signals: PackageSignals) -> Verdict:
             f"SLSA source_ref is not a tag ({signals.attestation.source_ref!r}) — "
             "release should be built from a tagged commit"
         )
-    if signals.attestation.publisher_account_age_days is not None and signals.attestation.publisher_account_age_days < 90:
-        flags.append(f"publisher GitHub account is only {signals.attestation.publisher_account_age_days} days old")
+    if (
+        signals.attestation.publisher_account_age_days is not None
+        and signals.attestation.publisher_account_age_days < 90
+    ):
+        flags.append(
+            f"publisher GitHub account is only {signals.attestation.publisher_account_age_days} days old"
+        )
     if signals.release.tag_was_previously_signed:
         flags.append("tag signing dropped: old version had a verified signed tag, new one does not")
     if signals.release.possible_rerelease:
         flags.append("GitHub release was drafted >24h before publishing (possible re-release)")
-    if signals.release.timestamp_skew_minutes is not None and signals.release.timestamp_skew_minutes > 120:
+    if (
+        signals.release.timestamp_skew_minutes is not None
+        and signals.release.timestamp_skew_minutes > 120
+    ):
         flags.append(
             f"registry publish and GitHub release timestamps differ by "
             f"{signals.release.timestamp_skew_minutes:.0f} minutes"
         )
-    if signals.version_line.stale_version_line and signals.version_line.latest_major is not None and signals.version_line.bump_major is not None:
+    if (
+        signals.version_line.stale_version_line
+        and signals.version_line.latest_major is not None
+        and signals.version_line.bump_major is not None
+    ):
         flags.append(
             f"patching older {signals.version_line.bump_major}.x version line while "
             f"{signals.version_line.latest_major}.x is actively maintained — verify this is intentional"
@@ -219,20 +317,35 @@ def _rule_based(signals: PackageSignals) -> Verdict:
     if signals.diff.new_dependency_count >= 5:
         flags.append(f"{signals.diff.new_dependency_count} new direct dependencies added")
     if signals.deps_dev.is_deprecated:
-        reason = f": {signals.deps_dev.deprecated_reason}" if signals.deps_dev.deprecated_reason else ""
+        reason = (
+            f": {signals.deps_dev.deprecated_reason}" if signals.deps_dev.deprecated_reason else ""
+        )
         flags.append(f"package is deprecated at the registry level{reason}")
-    if signals.scorecard.scorecard_maintained is not None and signals.scorecard.scorecard_maintained == 0:
+    if (
+        signals.scorecard.scorecard_maintained is not None
+        and signals.scorecard.scorecard_maintained == 0
+    ):
         flags.append(
             "upstream repo appears unmaintained (Scorecard Maintained: 0/10"
-            + (f", repo: {signals.scorecard.scorecard_repo}" if signals.scorecard.scorecard_repo else "")
+            + (
+                f", repo: {signals.scorecard.scorecard_repo}"
+                if signals.scorecard.scorecard_repo
+                else ""
+            )
             + ")"
         )
-    if signals.scorecard.scorecard_dangerous_workflow is not None and signals.scorecard.scorecard_dangerous_workflow == 0:
+    if (
+        signals.scorecard.scorecard_dangerous_workflow is not None
+        and signals.scorecard.scorecard_dangerous_workflow == 0
+    ):
         flags.append(
             "upstream repo has dangerous CI workflow patterns (Scorecard Dangerous-Workflow: 0/10) — "
             "possible workflow injection vector"
         )
-    if signals.scorecard.scorecard_token_permissions is not None and signals.scorecard.scorecard_token_permissions < 5:
+    if (
+        signals.scorecard.scorecard_token_permissions is not None
+        and signals.scorecard.scorecard_token_permissions < 5
+    ):
         flags.append(
             f"CI tokens appear overprivileged (Scorecard Token-Permissions: {signals.scorecard.scorecard_token_permissions}/10)"
         )
@@ -253,7 +366,11 @@ def _rule_based(signals: PackageSignals) -> Verdict:
             new_dependency_count=signals.diff.new_dependency_count,
         )
 
-    age_str = f"{signals.age.release_age_hours:.0f}h old" if signals.age.release_age_hours is not None else "age unknown"
+    age_str = (
+        f"{signals.age.release_age_hours:.0f}h old"
+        if signals.age.release_age_hours is not None
+        else "age unknown"
+    )
     downloads = f"{signals.pypi.weekly_downloads:,}" if signals.pypi.weekly_downloads else "unknown"
     return Verdict(
         classification="green",

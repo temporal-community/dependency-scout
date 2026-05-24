@@ -136,6 +136,41 @@ Commit the updated files in `tests/fixtures/`. The CI `pytest` run will catch an
 
 ---
 
+## Swapping the classifier
+
+The built-in classifiers (`ClaudeClassifier`, `RuleBasedClassifier`) are selected automatically based on whether `ANTHROPIC_API_KEY` is set. You can override either choice or supply your own engine.
+
+**Force a built-in by name** (useful to pin rule-based even when a key is present):
+
+```env
+# .env
+CLASSIFIER=rule_based   # or: claude
+```
+
+**Register a third-party classifier** in your plugin package:
+
+```python
+# my_package/__init__.py
+from activities.models import PackageSignals, Verdict
+
+class OpenAIClassifier:
+    async def classify(self, signals: PackageSignals) -> Verdict:
+        # call OpenAI, return Verdict(...)
+        ...
+```
+
+```toml
+# pyproject.toml
+[project.entry-points."triage_agent.classifiers"]
+my_openai = "my_package:OpenAIClassifier"
+```
+
+Then set `CLASSIFIER=my_openai` in `.env`. The worker picks it up automatically — no code changes needed.
+
+The classifier receives the full `PackageSignals` object including `custom_signals` (plugin signal activity results). Return a `Verdict` with `classification`, `confidence`, `reasoning`, and `flags`.
+
+---
+
 ## Design principles
 
 - **Graceful degradation** — missing API keys or upstream errors produce degraded signal defaults, not a crash. This is enforced at two levels: each activity catches its own errors and returns a zero-state model; the workflow's `asyncio.gather` uses `return_exceptions=True` so a single failing activity never discards the other ten results.

@@ -4,6 +4,7 @@ Tests for activities/classifier.py.
 _build_message and _rule_based are pure functions — called directly.
 classify() uses ActivityEnvironment + unittest.mock to avoid real LLM calls.
 """
+
 import pytest
 import httpx
 from unittest.mock import patch, AsyncMock, MagicMock
@@ -32,6 +33,7 @@ from activities.models import (
 # Shared fixture
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def base_signals():
     return PackageSignals(
@@ -51,6 +53,7 @@ def base_signals():
 # ---------------------------------------------------------------------------
 # _build_message
 # ---------------------------------------------------------------------------
+
 
 def test_build_message_separates_diff_from_trusted(base_signals):
     msg = _build_message(base_signals)
@@ -77,6 +80,7 @@ def test_build_message_placeholder_when_no_diff(base_signals):
 # _rule_based — RED path
 # ---------------------------------------------------------------------------
 
+
 def test_rule_based_cves_returns_red(base_signals):
     base_signals.osv.osv_vulnerabilities = ["CVE-2024-0001", "CVE-2024-0002"]
     verdict = _rule_based(base_signals)
@@ -89,6 +93,7 @@ def test_rule_based_cves_returns_red(base_signals):
 # ---------------------------------------------------------------------------
 # _rule_based — YELLOW paths
 # ---------------------------------------------------------------------------
+
 
 def test_rule_based_major_bump_is_yellow(base_signals):
     base_signals.pypi.is_major_bump = True
@@ -166,6 +171,7 @@ def test_rule_based_multiple_flags_all_present(base_signals):
 # _rule_based — GREEN path
 # ---------------------------------------------------------------------------
 
+
 def test_rule_based_clean_signals_are_green(base_signals):
     verdict = _rule_based(base_signals)
     assert verdict.classification == "green"
@@ -217,6 +223,7 @@ def test_rule_based_release_age_boundary_168h_is_green(base_signals):
 # classify — no API key falls back to rule-based
 # ---------------------------------------------------------------------------
 
+
 async def test_classify_no_api_key_uses_rule_based(base_signals, monkeypatch):
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     env = ActivityEnvironment()
@@ -228,6 +235,7 @@ async def test_classify_no_api_key_uses_rule_based(base_signals, monkeypatch):
 # ---------------------------------------------------------------------------
 # classify — LLM success path
 # ---------------------------------------------------------------------------
+
 
 def _make_llm_mock(tool_input: dict) -> MagicMock:
     tool_block = MagicMock()
@@ -245,12 +253,14 @@ def _make_llm_mock(tool_input: dict) -> MagicMock:
 
 async def test_classify_llm_returns_verdict(base_signals, monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
-    mock_client = _make_llm_mock({
-        "classification": "green",
-        "confidence": 0.92,
-        "reasoning": "Routine patch bump.",
-        "flags": [],
-    })
+    mock_client = _make_llm_mock(
+        {
+            "classification": "green",
+            "confidence": 0.92,
+            "reasoning": "Routine patch bump.",
+            "flags": [],
+        }
+    )
     env = ActivityEnvironment()
     with patch("activities.classifier.anthropic.AsyncAnthropic", return_value=mock_client):
         verdict = await env.run(classify, base_signals)
@@ -264,12 +274,14 @@ async def test_classify_llm_passes_release_age_through_when_not_set(base_signals
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
     base_signals.age.release_age_hours = 48.0
     # LLM omits release_age_hours (returns None by default in Verdict)
-    mock_client = _make_llm_mock({
-        "classification": "yellow",
-        "confidence": 0.7,
-        "reasoning": "Recent release.",
-        "flags": ["recent release"],
-    })
+    mock_client = _make_llm_mock(
+        {
+            "classification": "yellow",
+            "confidence": 0.7,
+            "reasoning": "Recent release.",
+            "flags": ["recent release"],
+        }
+    )
     env = ActivityEnvironment()
     with patch("activities.classifier.anthropic.AsyncAnthropic", return_value=mock_client):
         verdict = await env.run(classify, base_signals)
@@ -280,6 +292,7 @@ async def test_classify_llm_passes_release_age_through_when_not_set(base_signals
 # ---------------------------------------------------------------------------
 # classify — error paths
 # ---------------------------------------------------------------------------
+
 
 def _anthropic_response(status_code: int) -> httpx.Response:
     """Build an httpx.Response with a request attached (required by anthropic SDK exceptions)."""
@@ -330,3 +343,99 @@ async def test_classify_generic_exception_falls_back_to_rule_based(base_signals,
 
     # Falls back gracefully — still returns a valid verdict
     assert verdict.classification in ("green", "yellow", "red")
+
+
+# ---------------------------------------------------------------------------
+# Classifier protocol — class-based interface
+# ---------------------------------------------------------------------------
+
+
+async def test_rule_based_classifier_classifies(base_signals):
+    from activities.classifier import RuleBasedClassifier
+
+    verdict = await RuleBasedClassifier().classify(base_signals)
+    assert verdict.classification in ("green", "yellow", "red")
+
+
+async def test_claude_classifier_falls_back_to_rule_based_on_error(base_signals, monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    from activities.classifier import ClaudeClassifier
+
+    client = MagicMock()
+    client.messages.create = AsyncMock(side_effect=RuntimeError("outage"))
+    with patch("activities.classifier.anthropic.AsyncAnthropic", return_value=client):
+        verdict = await ClaudeClassifier().classify(base_signals)
+    assert verdict.classification in ("green", "yellow", "red")
+
+
+# ---------------------------------------------------------------------------
+# get_classifier — plugin selection via CLASSIFIER env var
+# ---------------------------------------------------------------------------
+
+
+def test_get_classifier_defaults_to_rule_based_without_api_key(monkeypatch):
+    from activities.classifier import RuleBasedClassifier, get_classifier
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("CLASSIFIER", raising=False)
+    assert isinstance(get_classifier(), RuleBasedClassifier)
+
+
+def test_get_classifier_returns_claude_when_api_key_set(monkeypatch):
+    from activities.classifier import ClaudeClassifier, get_classifier
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    monkeypatch.delenv("CLASSIFIER", raising=False)
+    assert isinstance(get_classifier(), ClaudeClassifier)
+
+
+def test_get_classifier_builtin_rule_based_name(monkeypatch):
+    from activities.classifier import RuleBasedClassifier, get_classifier
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    monkeypatch.setenv("CLASSIFIER", "rule_based")
+    assert isinstance(get_classifier(), RuleBasedClassifier)
+
+
+def test_get_classifier_builtin_claude_name(monkeypatch):
+    from activities.classifier import ClaudeClassifier, get_classifier
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    monkeypatch.setenv("CLASSIFIER", "claude")
+    assert isinstance(get_classifier(), ClaudeClassifier)
+
+
+def test_get_classifier_unknown_name_falls_back(monkeypatch):
+    from activities.classifier import get_classifier
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setenv("CLASSIFIER", "nonexistent_classifier_xyz")
+    # Should warn and fall back gracefully rather than raise
+    clf = get_classifier()
+    assert clf is not None
+
+
+def test_get_classifier_entry_point_plugin(monkeypatch):
+    """A triage_agent.classifiers entry point is discovered and instantiated."""
+    from activities.classifier import RuleBasedClassifier, get_classifier
+
+    monkeypatch.setenv("CLASSIFIER", "my_custom")
+
+    fake_ep = MagicMock()
+    fake_ep.name = "my_custom"
+    fake_ep.load.return_value = RuleBasedClassifier  # returns the class
+
+    with patch("activities.classifier.entry_points", return_value=[fake_ep]) as _mock_eps:
+        clf = get_classifier()
+
+    assert isinstance(clf, RuleBasedClassifier)
+    fake_ep.load.assert_called_once()
+
+
+def test_get_classifier_returns_rule_based_without_key(monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    from activities.classifier import get_classifier, RuleBasedClassifier
+
+    assert isinstance(get_classifier(), RuleBasedClassifier)
+
+
+def test_get_classifier_returns_claude_with_key(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+    from activities.classifier import get_classifier, ClaudeClassifier
+
+    assert isinstance(get_classifier(), ClaudeClassifier)

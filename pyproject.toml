@@ -19,6 +19,14 @@ dependencies = [
     "packaging>=23.0",
 ]
 
+[project.entry-points."triage_agent.classifiers"]
+claude = "activities.classifier:ClaudeClassifier"
+rule_based = "activities.classifier:RuleBasedClassifier"
+
+[project.entry-points."triage_agent.ecosystems"]
+# Built-in providers are discovered via file scan in activities/ecosystems/__init__.py.
+# Third-party providers register here.
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
