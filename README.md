@@ -23,12 +23,12 @@ It classifies the risk as GREEN / YELLOW / RED, posts a comment explaining its r
 
 ## What it actually does
 
-When a Dependabot or Renovate PR opens, the Scout:
+When a Dependabot or Renovate PR opens on **GitHub or GitLab**, the Scout:
 
 1. **Fetches signals** from public APIs (PyPI/npm/RubyGems, OSV, Socket.dev, pypistats, SLSA provenance) — no API keys required for most signals
 2. **Downloads and diffs** the package archive to see what code actually changed
-3. **Classifies risk** as GREEN, YELLOW, or RED using Claude (or a rule-based fallback if you don't have an API key)
-4. **Posts a verdict comment** to the PR explaining its reasoning
+3. **Classifies risk** as GREEN, YELLOW, or RED using your choice of LLM — Claude, OpenAI, Ollama, or a custom plugin — with a rule-based fallback if you'd rather not use any LLM
+4. **Posts a verdict comment** to the PR/MR explaining its reasoning
 5. **Takes action** based on how you've configured it — or does nothing if you haven't
 
 **RED** means something looks wrong: a new binary `.so`/`.node` file, obfuscated code, a maintainer account that appeared last week, exec/eval on dynamic strings, network calls added to install scripts.
@@ -74,7 +74,7 @@ cd dependabot-supply-chain-scout
 uv run python setup.py
 ```
 
-The setup script checks prerequisites, walks you through GitHub credentials (PAT for local testing, GitHub App for production), writes `.env`, and prints the repo config snippet to paste into your target repo.
+The setup script checks prerequisites, explains the tradeoffs between a PAT and a GitHub App, lets you choose your LLM (Claude, OpenAI, Ollama, or skip), writes `.env`, and prints the repo config snippet to paste into your target repo.
 
 Then:
 
@@ -96,17 +96,21 @@ uv run python -m start_workflow \
 
 Open **http://localhost:8233** to watch the workflow run in the Temporal UI. No API keys needed — it'll use the rule-based classifier and log what it would do without touching the actual PR.
 
-### Add keys to unlock more
+### What each credential unlocks
 
-| Keys configured | What changes |
+| Configured | What changes |
 |---|---|
 | _(none)_ | Rule-based classifier, log-only output |
-| `ANTHROPIC_API_KEY` | Claude classifies instead of rule-based thresholds |
-| + `GITHUB_TOKEN` or GitHub App | Posts real PR comments |
-| + `ENABLE_PR_ACTIONS=true` | Can auto-merge green PRs if you've configured it |
-| + `SOCKET_API_KEY` | Adds Socket.dev supply chain score to signals |
+| `ANTHROPIC_API_KEY` | Claude classifies (set `ANTHROPIC_MODEL` to pin a version) |
+| `OPENAI_API_KEY` + `OPENAI_MODEL` | OpenAI classifies instead |
+| `OLLAMA_HOST` + `OLLAMA_MODEL` | Local Ollama classifies — free, no data leaves your machine |
+| `CLASSIFIER=rule_based` | Force rule-based even when an LLM key is present |
+| `GITHUB_TOKEN` or GitHub App | Posts real PR comments on GitHub |
+| `GITLAB_TOKEN` | Posts real MR comments on GitLab |
+| `ENABLE_PR_ACTIONS=true` | Can auto-merge/block PRs if you've configured it |
+| `SOCKET_API_KEY` | Adds Socket.dev supply-chain score to signals |
 
-Copy `.env.example` to `.env` and fill in what you have.
+Copy `.env.example` to `.env` and fill in what you have, or run `uv run python setup.py` to be walked through it interactively.
 
 ---
 
@@ -156,12 +160,27 @@ block_classifications: []   # override the default red-blocking if you want trul
 
 ---
 
+## Extending the Scout
+
+Everything that varies between deployments is pluggable via Python entry points — no forking required.
+
+| What to extend | Entry point group | How |
+|---|---|---|
+| New package ecosystem | `triage_agent.ecosystems` | Implement `EcosystemProvider`, or use `RemoteEcosystemProvider` for non-Python stacks |
+| Custom classifier (OpenAI, Gemini, …) | `triage_agent.classifiers` | Implement `async def classify(signals) -> Verdict`, set `CLASSIFIER=name` |
+| Extra signal activities | `triage_agent.activities` | Decorate with `@activity.defn`, list in `extra_signal_activities` config |
+| New dependency bot (PyUp, etc.) | call `register_bot_parser()` | Implement `BotParser` with `bot_logins` and `parse()` |
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for full examples of each.
+
+---
+
 ## Roadmap
 
 - [x] pip, npm, RubyGems, Maven (Java/JVM), Composer (PHP), NuGet (.NET), Cargo (Rust), Go Modules
 - [x] Eleven parallel signal sources (OSV, Socket.dev, diff, release age, maintainer, SLSA/Sigstore, OpenSSF Scorecard, deps.dev deprecation, version staleness, PR file audit, metadata)
 - [x] LLM classifier with rule-based fallback
-- [x] GitHub App auth
+- [x] GitHub and GitLab support
 - [x] FastAPI webhook receiver
 - [x] Per-repo config via `.github/triage-agent.yml`
 - [x] Observe-only safe default (comment-only with no config file)
@@ -178,7 +197,7 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the two-workflow Temporal design, sig
 
 For production deployment — secrets management, Temporal server options, reverse proxy, health monitoring — see [DEPLOYMENT.md](DEPLOYMENT.md).
 
-For contributor docs — adding ecosystems, signals, or custom plugins — see [CONTRIBUTING.md](CONTRIBUTING.md).
+For contributor docs — adding ecosystems, signals, classifiers, or custom plugins — see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ---
 
