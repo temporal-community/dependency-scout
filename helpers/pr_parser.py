@@ -81,9 +81,7 @@ _RENOVATE_RE = re.compile(
 _VER = r"[\w.\-+]+"
 
 # "`old` -> `new`" or "old → new" — the most common Renovate table format.
-_ARROW_RE = re.compile(
-    r"`?(?P<old>" + _VER + r")`?\s*(?:->|→)\s*`?(?P<new>" + _VER + r")`?"
-)
+_ARROW_RE = re.compile(r"`?(?P<old>" + _VER + r")`?\s*(?:->|→)\s*`?(?P<new>" + _VER + r")`?")
 
 # "from `old` to `new`" — used in Renovate body prose and some table formats.
 _FROM_TO_RE = re.compile(
@@ -135,7 +133,7 @@ def _detect_ecosystem(package: str, branch: str) -> str:
     # Renovate branch names sometimes encode the manager/datasource as a prefix:
     # renovate/{manager}-{package}-{version}.x  (e.g. renovate/npm-lodash-4.x)
     elif branch.startswith("renovate/"):
-        seg = branch[len("renovate/"):]
+        seg = branch[len("renovate/") :]
         prefix = seg.split("-")[0]
         if prefix in _RENOVATE_SLUG_MAP:
             return _RENOVATE_SLUG_MAP[prefix]

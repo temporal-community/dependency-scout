@@ -129,10 +129,7 @@ def test_renovate_prerelease_version_extracted():
 def test_renovate_no_false_positive_substring_match():
     # "xml" must not accidentally pull old version from the "xml-js" line
     title = "Update dependency xml to v1.0.1"
-    body = (
-        "| xml-js | `2.0.0` -> `2.0.1` |\n"
-        "| xml | `1.0.0` -> `1.0.1` |\n"
-    )
+    body = "| xml-js | `2.0.0` -> `2.0.1` |\n| xml | `1.0.0` -> `1.0.1` |\n"
     result = parse_pr(title, body)
     assert result is not None
     assert result.old_version == "1.0.0"

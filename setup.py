@@ -218,7 +218,9 @@ def _ask_menu(prompt: str, options: list[tuple[str, str]], allow_zero: bool = Tr
         raw = _ask(f"Enter choice (0–{len(options)})", default="0")
         try:
             choice = int(raw)
-            if (allow_zero and 0 <= choice <= len(options)) or (not allow_zero and 1 <= choice <= len(options)):
+            if (allow_zero and 0 <= choice <= len(options)) or (
+                not allow_zero and 1 <= choice <= len(options)
+            ):
                 return choice
         except ValueError:
             pass
@@ -227,9 +229,11 @@ def _ask_menu(prompt: str, options: list[tuple[str, str]], allow_zero: bool = Tr
 
 def collect_optional_keys() -> dict[str, str]:
     _h("Optional extras")
-    print(textwrap.dedent("""
+    print(
+        textwrap.dedent("""
   The Scout works without any of these. Each one unlocks more capability.
-    """))
+    """)
+    )
 
     result: dict[str, str] = {}
 
@@ -240,7 +244,10 @@ def collect_optional_keys() -> dict[str, str]:
             ("Claude  (Anthropic)", "best supply chain reasoning — claude.ai/settings/api-keys"),
             ("OpenAI  (GPT-4o)   ", "strong alternative        — platform.openai.com/api-keys"),
             ("Ollama  (local)    ", "free, runs on your machine, no data leaves"),
-            ("Other              ", "any triage_agent.classifiers plugin — set CLASSIFIER manually"),
+            (
+                "Other              ",
+                "any triage_agent.classifiers plugin — set CLASSIFIER manually",
+            ),
         ],
     )
 

@@ -79,7 +79,9 @@ def _check_config() -> None:
         )
     classifier = os.environ.get("CLASSIFIER", "")
     if not classifier and not os.environ.get("ANTHROPIC_API_KEY"):
-        logger.info("No LLM configured (ANTHROPIC_API_KEY / CLASSIFIER not set) — using rule-based classifier.")
+        logger.info(
+            "No LLM configured (ANTHROPIC_API_KEY / CLASSIFIER not set) — using rule-based classifier."
+        )
 
 
 @asynccontextmanager

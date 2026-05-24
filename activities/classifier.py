@@ -136,7 +136,7 @@ class ClaudeClassifier:
             return _rule_based(signals)
 
         tool_use = next(b for b in response.content if b.type == "tool_use")
-        verdict = Verdict(**tool_use.input)
+        verdict = Verdict.model_validate(tool_use.input)
         # Pass signals through so PRActionWorkflow can enforce per-repo gates.
         updates: dict = {}
         if verdict.release_age_hours is None:
@@ -197,11 +197,16 @@ class OpenAIClassifier:
             tool_call = resp.json()["choices"][0]["message"]["tool_calls"][0]
             verdict = Verdict(**json.loads(tool_call["function"]["arguments"]))
         except Exception as exc:
-            activity.logger.warning("OpenAI classifier failed (%r), falling back to rule-based", exc)
+            activity.logger.warning(
+                "OpenAI classifier failed (%r), falling back to rule-based", exc
+            )
             return _rule_based(signals)
         activity.logger.info(
             "Classified %s %s as %s (%.0f%%)",
-            signals.package_name, signals.new_version, verdict.classification, verdict.confidence * 100,
+            signals.package_name,
+            signals.new_version,
+            verdict.classification,
+            verdict.confidence * 100,
         )
         return verdict
 
@@ -219,8 +224,7 @@ class OllamaClassifier:
         system = (
             CLASSIFIER_SYSTEM
             + "\n\nRespond with ONLY a single valid JSON object matching this schema "
-            "(no markdown, no explanation):\n"
-            + schema_hint
+            "(no markdown, no explanation):\n" + schema_hint
         )
         try:
             async with _httpx.AsyncClient(timeout=120.0) as client:
@@ -239,11 +243,16 @@ class OllamaClassifier:
                 resp.raise_for_status()
             verdict = Verdict(**json.loads(resp.json()["message"]["content"]))
         except Exception as exc:
-            activity.logger.warning("Ollama classifier failed (%r), falling back to rule-based", exc)
+            activity.logger.warning(
+                "Ollama classifier failed (%r), falling back to rule-based", exc
+            )
             return _rule_based(signals)
         activity.logger.info(
             "Classified %s %s as %s (%.0f%%)",
-            signals.package_name, signals.new_version, verdict.classification, verdict.confidence * 100,
+            signals.package_name,
+            signals.new_version,
+            verdict.classification,
+            verdict.confidence * 100,
         )
         return verdict
 

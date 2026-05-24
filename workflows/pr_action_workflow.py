@@ -78,7 +78,7 @@ class PRActionWorkflow:
             ).hexdigest()[:8]
             extra_key = f"-x{fp}"
         verdict, pr_files = await asyncio.gather(
-            workflow.execute_child_workflow(
+            workflow.execute_child_workflow(  # type: ignore[call-overload]
                 PackageTriageWorkflow.run,
                 args=[
                     pr.ecosystem,
@@ -182,11 +182,12 @@ class PRActionWorkflow:
             # Re-check authorization each time a signal arrives in case an
             # unauthorized signal arrived first.
             while True:
-                decision_received = await workflow.wait_condition(
-                    lambda: self._human_decision is not None,
-                    timeout=timedelta(days=7),
-                )
-                if not decision_received:
+                try:
+                    await workflow.wait_condition(
+                        lambda: self._human_decision is not None,
+                        timeout=timedelta(days=7),
+                    )
+                except asyncio.TimeoutError:
                     workflow.logger.warning("Human review wait timed out after 7 days")
                     return "timed-out-awaiting-review"
                 if not config.reviewers or self._approver in config.reviewers:

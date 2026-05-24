@@ -38,7 +38,9 @@ def _check_config() -> None:
         )
     classifier = os.environ.get("CLASSIFIER", "")
     if not classifier and not os.environ.get("ANTHROPIC_API_KEY"):
-        logger.info("No LLM configured (ANTHROPIC_API_KEY / CLASSIFIER not set) — using rule-based classifier.")
+        logger.info(
+            "No LLM configured (ANTHROPIC_API_KEY / CLASSIFIER not set) — using rule-based classifier."
+        )
     if not os.environ.get("SOCKET_API_KEY"):
         logger.info(
             "SOCKET_API_KEY not set — Socket.dev supply-chain score signal will be skipped."

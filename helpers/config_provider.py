@@ -11,7 +11,7 @@ Override for all platforms via TRIAGE_CONFIG_PROVIDER=env (reads TRIAGE_CONFIG_*
 from __future__ import annotations
 
 import os
-from typing import Protocol
+from typing import Any, Protocol
 
 from activities.models import PRContext, RepoConfig
 
@@ -97,19 +97,25 @@ class EnvConfigProvider:
             except ValueError:
                 return None
 
-        kwargs: dict = {}
-        if (v := _bool("TRIAGE_CONFIG_AUTO_MERGE")) is not None:
-            kwargs["auto_merge_enabled"] = v
-        if (v := _list("TRIAGE_CONFIG_REVIEWERS")) is not None:
-            kwargs["reviewers"] = v
-        if (v := _int("TRIAGE_CONFIG_MIN_RELEASE_AGE_HOURS")) is not None:
-            kwargs["min_release_age_hours"] = v
-        if (v := _list("TRIAGE_CONFIG_AUTO_MERGE_CLASSIFICATIONS")) is not None:
-            kwargs["auto_merge_classifications"] = v
-        if (v := _list("TRIAGE_CONFIG_BLOCK_CLASSIFICATIONS")) is not None:
-            kwargs["block_classifications"] = v
-        if (v := _int("TRIAGE_CONFIG_MAX_NEW_DEPENDENCIES")) is not None:
-            kwargs["max_new_dependencies"] = v
+        auto_merge = _bool("TRIAGE_CONFIG_AUTO_MERGE")
+        reviewers = _list("TRIAGE_CONFIG_REVIEWERS")
+        min_age = _int("TRIAGE_CONFIG_MIN_RELEASE_AGE_HOURS")
+        auto_merge_cls = _list("TRIAGE_CONFIG_AUTO_MERGE_CLASSIFICATIONS")
+        block_cls = _list("TRIAGE_CONFIG_BLOCK_CLASSIFICATIONS")
+        max_new_deps = _int("TRIAGE_CONFIG_MAX_NEW_DEPENDENCIES")
+        kwargs: dict[str, Any] = {}
+        if auto_merge is not None:
+            kwargs["auto_merge_enabled"] = auto_merge
+        if reviewers is not None:
+            kwargs["reviewers"] = reviewers
+        if min_age is not None:
+            kwargs["min_release_age_hours"] = min_age
+        if auto_merge_cls is not None:
+            kwargs["auto_merge_classifications"] = auto_merge_cls
+        if block_cls is not None:
+            kwargs["block_classifications"] = block_cls
+        if max_new_deps is not None:
+            kwargs["max_new_dependencies"] = max_new_deps
         return RepoConfig(**kwargs)
 
 

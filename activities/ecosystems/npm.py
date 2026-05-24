@@ -157,7 +157,9 @@ class NpmProvider:
             publisher_kind=new_pub.get("kind"),
             publisher_repo=new_pub.get("repo"),
             publisher_changed=publisher_changed,
-            old_publisher_repo=old_pub.get("repo") if publisher_changed else None,
+            old_publisher_repo=old_pub.get("repo")
+            if (old_pub is not None and publisher_changed)
+            else None,
             publisher_account_age_days=age_days,
             source_ref=new_pub.get("source_ref"),
             source_commit_sha=new_pub.get("source_commit_sha"),

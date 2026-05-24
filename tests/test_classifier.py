@@ -375,6 +375,7 @@ async def test_claude_classifier_falls_back_to_rule_based_on_error(base_signals,
 
 def test_get_classifier_defaults_to_rule_based_without_api_key(monkeypatch):
     from activities.classifier import RuleBasedClassifier, get_classifier
+
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.delenv("CLASSIFIER", raising=False)
     assert isinstance(get_classifier(), RuleBasedClassifier)
@@ -382,6 +383,7 @@ def test_get_classifier_defaults_to_rule_based_without_api_key(monkeypatch):
 
 def test_get_classifier_returns_claude_when_api_key_set(monkeypatch):
     from activities.classifier import ClaudeClassifier, get_classifier
+
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
     monkeypatch.delenv("CLASSIFIER", raising=False)
     assert isinstance(get_classifier(), ClaudeClassifier)
@@ -389,6 +391,7 @@ def test_get_classifier_returns_claude_when_api_key_set(monkeypatch):
 
 def test_get_classifier_builtin_rule_based_name(monkeypatch):
     from activities.classifier import RuleBasedClassifier, get_classifier
+
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
     monkeypatch.setenv("CLASSIFIER", "rule_based")
     assert isinstance(get_classifier(), RuleBasedClassifier)
@@ -396,6 +399,7 @@ def test_get_classifier_builtin_rule_based_name(monkeypatch):
 
 def test_get_classifier_builtin_claude_name(monkeypatch):
     from activities.classifier import ClaudeClassifier, get_classifier
+
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
     monkeypatch.setenv("CLASSIFIER", "claude")
     assert isinstance(get_classifier(), ClaudeClassifier)
@@ -403,6 +407,7 @@ def test_get_classifier_builtin_claude_name(monkeypatch):
 
 def test_get_classifier_unknown_name_falls_back(monkeypatch):
     from activities.classifier import get_classifier
+
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.setenv("CLASSIFIER", "nonexistent_classifier_xyz")
     # Should warn and fall back gracefully rather than raise

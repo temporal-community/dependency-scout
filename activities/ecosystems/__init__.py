@@ -213,8 +213,8 @@ def detect_stale_version_line(
     if bump_major is None:
         return VersionLineSignals()
 
-    majors = {_major(v) for v in stable}
-    latest_major = max(majors)  # type: ignore[type-var]
+    majors: set[int] = {m for v in stable if (m := _major(v)) is not None}
+    latest_major = max(majors)
 
     if bump_major >= latest_major:
         return VersionLineSignals(bump_major=bump_major, latest_major=latest_major)
