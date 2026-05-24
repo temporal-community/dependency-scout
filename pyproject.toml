@@ -21,6 +21,8 @@ dependencies = [
 
 [project.entry-points."triage_agent.classifiers"]
 claude = "activities.classifier:ClaudeClassifier"
+openai = "activities.classifier:OpenAIClassifier"
+ollama = "activities.classifier:OllamaClassifier"
 rule_based = "activities.classifier:RuleBasedClassifier"
 
 [project.entry-points."triage_agent.ecosystems"]

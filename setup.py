@@ -197,23 +197,73 @@ def collect_github_credentials() -> dict[str, str]:
     return credentials
 
 
+def _ask_menu(prompt: str, options: list[tuple[str, str]], allow_zero: bool = True) -> int:
+    """Display a numbered menu and return the 1-based choice, or 0 for 'skip'."""
+    print(f"\n  {BOLD}{prompt}{RESET}\n")
+    for i, (label, description) in enumerate(options, start=1):
+        print(f"    {BOLD}{i}){RESET} {CYAN}{label}{RESET} — {description}")
+    if allow_zero:
+        print(f"    {BOLD}0){RESET} Skip")
+    print()
+    while True:
+        raw = _ask(f"Enter choice (0–{len(options)})", default="0")
+        try:
+            choice = int(raw)
+            if (allow_zero and 0 <= choice <= len(options)) or (not allow_zero and 1 <= choice <= len(options)):
+                return choice
+        except ValueError:
+            pass
+        _err(f"Please enter a number between {'1' if not allow_zero else '0'} and {len(options)}")
+
+
 def collect_optional_keys() -> dict[str, str]:
-    _h("Optional API keys")
-    print(
-        textwrap.dedent("""
-  These are optional. The Scout works without them — you'll just get
-  fewer signals and rule-based classification instead of Claude.
-    """)
-    )
+    _h("Optional extras")
+    print(textwrap.dedent("""
+  The Scout works without any of these. Each one unlocks more capability.
+    """))
 
     result: dict[str, str] = {}
 
-    if _ask_yn("Add an Anthropic API key? (enables Claude classifier)", default=False):
+    # --- LLM classifier ---
+    llm_choice = _ask_menu(
+        "Which LLM should the Scout use to classify dependency bumps?",
+        [
+            ("Claude  (Anthropic)", "best supply chain reasoning — claude.ai/settings/api-keys"),
+            ("OpenAI  (GPT-4o)   ", "strong alternative        — platform.openai.com/api-keys"),
+            ("Ollama  (local)    ", "free, runs on your machine, no data leaves"),
+            ("Other              ", "any triage_agent.classifiers plugin — set CLASSIFIER manually"),
+        ],
+    )
+
+    if llm_choice == 1:
         key = _ask("Anthropic API key", secret=True)
         if key:
             result["ANTHROPIC_API_KEY"] = key
             result["ANTHROPIC_MODEL"] = "claude-sonnet-4-6"
+    elif llm_choice == 2:
+        key = _ask("OpenAI API key", secret=True)
+        if key:
+            result["OPENAI_API_KEY"] = key
+            result["OPENAI_MODEL"] = "gpt-4o"
+            result["CLASSIFIER"] = "openai"
+    elif llm_choice == 3:
+        host = _ask("Ollama host", default="http://localhost:11434")
+        model = _ask("Ollama model (must be pulled locally)", default="llama3.2")
+        result["OLLAMA_HOST"] = host
+        result["OLLAMA_MODEL"] = model
+        result["CLASSIFIER"] = "ollama"
+        _warn("Make sure Ollama is running and the model is pulled before starting the worker.")
+    elif llm_choice == 4:
+        name = _ask("CLASSIFIER entry point name")
+        if name:
+            result["CLASSIFIER"] = name
+        key_var = _ask("API key env var name (blank to skip)", default="")
+        if key_var:
+            key_val = _ask(f"Value for {key_var}", secret=True)
+            if key_val:
+                result[key_var] = key_val
 
+    # --- Socket.dev ---
     if _ask_yn("Add a Socket.dev API key? (adds supply-chain score signal)", default=False):
         key = _ask("Socket API key", secret=True)
         if key:

@@ -77,8 +77,9 @@ def _check_config() -> None:
             "No platform credentials found (GITHUB_TOKEN, GITHUB_APP_ID, or GITLAB_TOKEN). "
             "The Scout will run but cannot post PR/MR comments or take actions."
         )
-    if not os.environ.get("ANTHROPIC_API_KEY"):
-        logger.info("ANTHROPIC_API_KEY not set — using rule-based classifier instead of Claude.")
+    classifier = os.environ.get("CLASSIFIER", "")
+    if not classifier and not os.environ.get("ANTHROPIC_API_KEY"):
+        logger.info("No LLM configured (ANTHROPIC_API_KEY / CLASSIFIER not set) — using rule-based classifier.")
 
 
 @asynccontextmanager

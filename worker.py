@@ -36,8 +36,9 @@ def _check_config() -> None:
             "No platform credentials (GITHUB_TOKEN, GITHUB_APP_ID, or GITLAB_TOKEN). "
             "The worker will run but cannot post PR comments or take actions."
         )
-    if not os.environ.get("ANTHROPIC_API_KEY"):
-        logger.info("ANTHROPIC_API_KEY not set — using rule-based classifier (no LLM).")
+    classifier = os.environ.get("CLASSIFIER", "")
+    if not classifier and not os.environ.get("ANTHROPIC_API_KEY"):
+        logger.info("No LLM configured (ANTHROPIC_API_KEY / CLASSIFIER not set) — using rule-based classifier.")
     if not os.environ.get("SOCKET_API_KEY"):
         logger.info(
             "SOCKET_API_KEY not set — Socket.dev supply-chain score signal will be skipped."

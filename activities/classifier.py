@@ -2,16 +2,23 @@
 Classifier protocol — abstracts the decision engine that turns PackageSignals into a Verdict.
 
 Built-in classifiers:
-  ClaudeClassifier      — uses Anthropic API (selected when ANTHROPIC_API_KEY is set)
+  ClaudeClassifier      — Anthropic API (ANTHROPIC_API_KEY + optional ANTHROPIC_MODEL)
+  OpenAIClassifier      — OpenAI API via httpx (OPENAI_API_KEY + optional OPENAI_MODEL)
+  OllamaClassifier      — local Ollama instance (OLLAMA_HOST + OLLAMA_MODEL, no key needed)
   RuleBasedClassifier   — deterministic threshold rules, zero API keys required
 
-To plug in a different LLM provider or a custom policy engine, register an entry point:
+Selection order:
+  1. CLASSIFIER env var — name of a triage_agent.classifiers entry point or a built-in name
+     (claude, openai, ollama, rule_based)
+  2. ANTHROPIC_API_KEY set → ClaudeClassifier
+  3. Fallback → RuleBasedClassifier
+
+Third-party classifiers register via entry point:
 
     [project.entry-points."triage_agent.classifiers"]
-    my_openai = "my_package:OpenAIClassifier"
+    my_gemini = "my_package:GeminiClassifier"
 
-Then set CLASSIFIER=my_openai in .env.  Built-in names "claude" and "rule_based" are
-always available as CLASSIFIER values regardless of installed packages.
+Then set CLASSIFIER=my_gemini in .env.
 """
 
 import json
@@ -145,8 +152,103 @@ class ClaudeClassifier:
         return verdict
 
 
+class OpenAIClassifier:
+    """Uses the OpenAI chat completions API (gpt-4o by default). No extra packages required."""
+
+    async def classify(self, signals: PackageSignals) -> Verdict:
+        import httpx as _httpx
+
+        api_key = os.environ.get("OPENAI_API_KEY", "")
+        model = os.environ.get("OPENAI_MODEL", "gpt-4o")
+        try:
+            async with _httpx.AsyncClient(timeout=60.0) as client:
+                resp = await client.post(
+                    "https://api.openai.com/v1/chat/completions",
+                    headers={
+                        "Authorization": f"Bearer {api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "model": model,
+                        "messages": [
+                            {"role": "system", "content": CLASSIFIER_SYSTEM},
+                            {"role": "user", "content": _build_message(signals)},
+                        ],
+                        "tools": [
+                            {
+                                "type": "function",
+                                "function": {
+                                    "name": "submit_verdict",
+                                    "description": "Submit your supply chain risk classification",
+                                    "parameters": Verdict.model_json_schema(),
+                                },
+                            }
+                        ],
+                        "tool_choice": {
+                            "type": "function",
+                            "function": {"name": "submit_verdict"},
+                        },
+                    },
+                )
+                resp.raise_for_status()
+            tool_call = resp.json()["choices"][0]["message"]["tool_calls"][0]
+            verdict = Verdict(**json.loads(tool_call["function"]["arguments"]))
+        except Exception as exc:
+            activity.logger.warning("OpenAI classifier failed (%r), falling back to rule-based", exc)
+            return _rule_based(signals)
+        activity.logger.info(
+            "Classified %s %s as %s (%.0f%%)",
+            signals.package_name, signals.new_version, verdict.classification, verdict.confidence * 100,
+        )
+        return verdict
+
+
+class OllamaClassifier:
+    """Uses a local Ollama instance. No API key required. Set OLLAMA_HOST and OLLAMA_MODEL."""
+
+    async def classify(self, signals: PackageSignals) -> Verdict:
+        import httpx as _httpx
+
+        host = os.environ.get("OLLAMA_HOST", "http://localhost:11434").rstrip("/")
+        model = os.environ.get("OLLAMA_MODEL", "llama3.2")
+        # Ollama doesn't universally support tool calling; ask for JSON output directly.
+        schema_hint = json.dumps(Verdict.model_json_schema(), indent=2)
+        system = (
+            CLASSIFIER_SYSTEM
+            + "\n\nRespond with ONLY a single valid JSON object matching this schema "
+            "(no markdown, no explanation):\n"
+            + schema_hint
+        )
+        try:
+            async with _httpx.AsyncClient(timeout=120.0) as client:
+                resp = await client.post(
+                    f"{host}/api/chat",
+                    json={
+                        "model": model,
+                        "messages": [
+                            {"role": "system", "content": system},
+                            {"role": "user", "content": _build_message(signals)},
+                        ],
+                        "stream": False,
+                        "format": "json",
+                    },
+                )
+                resp.raise_for_status()
+            verdict = Verdict(**json.loads(resp.json()["message"]["content"]))
+        except Exception as exc:
+            activity.logger.warning("Ollama classifier failed (%r), falling back to rule-based", exc)
+            return _rule_based(signals)
+        activity.logger.info(
+            "Classified %s %s as %s (%.0f%%)",
+            signals.package_name, signals.new_version, verdict.classification, verdict.confidence * 100,
+        )
+        return verdict
+
+
 _BUILTIN_CLASSIFIERS: dict[str, type] = {
     "claude": ClaudeClassifier,
+    "openai": OpenAIClassifier,
+    "ollama": OllamaClassifier,
     "rule_based": RuleBasedClassifier,
 }
 
