@@ -125,14 +125,23 @@ def collect_github_credentials() -> dict[str, str]:
     print(
         textwrap.dedent("""
   The Scout needs GitHub access to read PR files and post comments.
-  There are two options:
 
-    1. Personal Access Token (PAT) — easiest for local testing
-       Create one at: https://github.com/settings/tokens/new
-       Scopes needed: repo (full), read:org (if your repos are in an org)
+  PAT (Personal Access Token) — pick this if:
+    • You're trying this out on your own repos right now
+    • You just want to see it work before committing to a full setup
+  Downside: the token is tied to YOUR account. If you leave the org,
+  or the token expires, the bot silently stops working. It also gets
+  broad repo access — not just the repos you care about.
 
-    2. GitHub App — required for production use across multiple repos
-       Gives per-repo permissions, no broad PAT exposure.
+  GitHub App — pick this if:
+    • You want this running reliably in production
+    • You're installing it across an org or multiple repos
+    • You don't want a personal account to be a single point of failure
+  The App has its own identity (not tied to any person), auto-rotating
+  credentials, and you grant it access only to the repos it needs.
+  Takes about 10 extra minutes to set up.
+
+  Not sure? Start with a PAT. You can switch to an App later.
     """)
     )
 
