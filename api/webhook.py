@@ -8,6 +8,7 @@ Returns 200 immediately — workflow execution is asynchronous.
 import hashlib
 import hmac
 import json
+import logging
 import os
 import re
 from contextlib import asynccontextmanager
@@ -23,6 +24,8 @@ from activities.ecosystems import get_name_re
 from activities.models import PRContext
 from helpers.pr_parser import parse_pr
 from workflows.pr_action_workflow import PRActionWorkflow
+
+logger = logging.getLogger(__name__)
 
 _BOT_LOGINS = {"dependabot[bot]", "renovate[bot]"}
 _PR_ACTIONS = {"opened", "synchronize", "reopened"}
@@ -47,13 +50,40 @@ def _validate_parsed_package(ecosystem: str, package: str, old: str, new: str) -
 _temporal_client: Client | None = None
 
 
+def _check_config() -> None:
+    """Warn at startup about missing or suspicious configuration."""
+    if not os.environ.get("GITHUB_WEBHOOK_SECRET"):
+        logger.error(
+            "GITHUB_WEBHOOK_SECRET is not set — all webhook requests will return 500. "
+            "Generate one with: python -c \"import secrets; print(secrets.token_hex(32))\""
+        )
+    has_github = os.environ.get("GITHUB_TOKEN") or os.environ.get("GITHUB_APP_ID")
+    if not has_github:
+        logger.warning(
+            "No GitHub credentials found (GITHUB_TOKEN or GITHUB_APP_ID). "
+            "The Scout will run but cannot post PR comments or take actions."
+        )
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        logger.info(
+            "ANTHROPIC_API_KEY not set — using rule-based classifier instead of Claude."
+        )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global _temporal_client
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
+    _check_config()
     _temporal_client = await Client.connect(
         os.environ.get("TEMPORAL_ADDRESS", "localhost:7233"),
         namespace=os.environ.get("TEMPORAL_NAMESPACE", "default"),
         data_converter=pydantic_data_converter,
+    )
+    logger.info(
+        "Connected to Temporal at %s (namespace=%s, task_queue=%s)",
+        os.environ.get("TEMPORAL_ADDRESS", "localhost:7233"),
+        os.environ.get("TEMPORAL_NAMESPACE", "default"),
+        os.environ.get("TEMPORAL_TASK_QUEUE", "dependency-triage"),
     )
     yield
 
@@ -90,30 +120,38 @@ async def webhook(
         return await _handle_review(payload)
 
     if x_github_event != "pull_request":
+        logger.debug("Ignored event type: %s", x_github_event)
         return {"status": "ignored", "reason": "not a pull_request event"}
 
     action = payload.get("action")
     if action not in _PR_ACTIONS:
+        logger.debug("Ignored pull_request action: %s", action)
         return {"status": "ignored", "reason": f"action={action}"}
 
     pr_author = payload.get("pull_request", {}).get("user", {}).get("login", "")
     if pr_author not in _BOT_LOGINS:
+        logger.debug("Ignored PR from non-bot author: %s", pr_author)
         return {"status": "ignored", "reason": f"author={pr_author}"}
 
+    repo = payload["repository"]["full_name"]
+    pr_number = payload["pull_request"]["number"]
     title = payload["pull_request"]["title"]
     body_text = payload["pull_request"].get("body") or ""
     head_ref = payload["pull_request"]["head"]["ref"]
     parsed = parse_pr(title, body_text, branch=head_ref)
     if not parsed:
+        logger.warning(
+            "Could not parse package/version from PR title — skipping %s#%s. Title: %r",
+            repo, pr_number, title,
+        )
         return {"status": "ignored", "reason": "could not parse package/version from PR title"}
 
     err = _validate_parsed_package(parsed.ecosystem, parsed.package, parsed.old_version, parsed.new_version)
     if err:
+        logger.warning("Validation failed for %s#%s: %s", repo, pr_number, err)
         return {"status": "ignored", "reason": err}
 
     installation_id = payload.get("installation", {}).get("id", 0)
-    repo = payload["repository"]["full_name"]
-    pr_number = payload["pull_request"]["number"]
     head_sha = payload["pull_request"]["head"]["sha"]
 
     # canonicalize_name is PyPI-specific (normalizes Requests → requests); npm package names are case-sensitive
@@ -141,6 +179,11 @@ async def webhook(
         execution_timeout=timedelta(days=30),  # backstop for zombie workflows
     )
 
+    logger.info(
+        "Started workflow %s for %s#%s (%s %s %s→%s)",
+        workflow_id, repo, pr_number,
+        parsed.ecosystem, package_name, parsed.old_version, parsed.new_version,
+    )
     return {"status": "started", "workflow_id": workflow_id}
 
 
@@ -156,6 +199,7 @@ async def _handle_review(payload: dict) -> dict:
 
     state = payload.get("review", {}).get("state", "").lower()
     if state not in {"approved", "changes_requested"}:
+        logger.debug("Ignored review with state=%s", state)
         return {"status": "ignored", "reason": f"review state={state}"}
 
     reviewer = payload.get("review", {}).get("user", {}).get("login", "")
@@ -170,6 +214,8 @@ async def _handle_review(payload: dict) -> dict:
         await handle.signal(PRActionWorkflow.submit_decision, decision, reviewer)
     except Exception:
         # Workflow may not exist (PR not from a bot, or already completed) — not an error.
+        logger.debug("No active workflow for %s#%s — review signal dropped", repo, pr_number)
         return {"status": "ignored", "reason": "no active workflow for this PR"}
 
+    logger.info("Signalled %s with decision=%s from reviewer=%s", workflow_id, decision, reviewer)
     return {"status": "signalled", "workflow_id": workflow_id, "decision": decision}

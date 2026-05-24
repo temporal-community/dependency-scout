@@ -176,6 +176,8 @@ block_classifications: []   # override the default red-blocking if you want trul
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for the two-workflow Temporal design, signal sources, LLM classifier, security hardening, and how to run it against live GitHub webhooks.
 
+For production deployment — secrets management, Temporal server options, reverse proxy, health monitoring — see [DEPLOYMENT.md](DEPLOYMENT.md).
+
 For contributor docs — adding ecosystems, signals, or custom plugins — see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ---

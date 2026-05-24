@@ -92,10 +92,13 @@ Add logic to `_rule_based` using `signals.my_new.some_flag`, and/or let the LLM 
 Any change to the workflow's gather list changes its Temporal command sequence. Regenerate the determinism fixtures:
 
 ```bash
+# Temporal must be running — the generator executes real workflows
+temporal server start-dev   # in a separate terminal, if not already running
+
 uv run python tests/generate_fixtures.py
 ```
 
-Commit the updated files in `tests/fixtures/`.
+The script prints one line per fixture as it runs. If it hangs, Temporal isn't reachable. Commit the updated files in `tests/fixtures/`.
 
 ---
 
@@ -125,6 +128,7 @@ The Temporal UI will be at http://localhost:8233.
 If you change `workflows/package_triage_workflow.py` or `workflows/pr_action_workflow.py`, regenerate the replay fixtures:
 
 ```bash
+temporal server start-dev   # must be running — generator executes real workflows
 uv run python tests/generate_fixtures.py
 ```
 

@@ -1,5 +1,6 @@
 import asyncio
 import importlib
+import logging
 import os
 import pkgutil
 
@@ -14,6 +15,27 @@ from workflows.package_triage_workflow import PackageTriageWorkflow
 from workflows.pr_action_workflow import PRActionWorkflow
 
 load_dotenv()
+
+logger = logging.getLogger(__name__)
+
+
+def _check_config() -> None:
+    """Warn at startup about missing or suspicious configuration."""
+    if not os.environ.get("GITHUB_WEBHOOK_SECRET"):
+        logger.warning(
+            "GITHUB_WEBHOOK_SECRET is not set — the webhook server will reject all requests. "
+            "This is fine if you're testing with start_workflow directly."
+        )
+    has_github = os.environ.get("GITHUB_TOKEN") or os.environ.get("GITHUB_APP_ID")
+    if not has_github:
+        logger.warning(
+            "No GitHub credentials (GITHUB_TOKEN or GITHUB_APP_ID). "
+            "The worker will run but cannot post PR comments or take actions."
+        )
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        logger.info("ANTHROPIC_API_KEY not set — using rule-based classifier (no LLM).")
+    if not os.environ.get("SOCKET_API_KEY"):
+        logger.info("SOCKET_API_KEY not set — Socket.dev supply-chain score signal will be skipped.")
 
 
 def _discover_activities() -> list:
@@ -73,19 +95,22 @@ ACTIVITIES = _discover_activities() + _discover_plugin_activities()
 
 
 async def main() -> None:
-    client = await Client.connect(
-        os.environ.get("TEMPORAL_ADDRESS", "localhost:7233"),
-        namespace=os.environ.get("TEMPORAL_NAMESPACE", "default"),
-        data_converter=pydantic_data_converter,
-    )
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
+    _check_config()
+    address = os.environ.get("TEMPORAL_ADDRESS", "localhost:7233")
+    namespace = os.environ.get("TEMPORAL_NAMESPACE", "default")
     task_queue = os.environ.get("TEMPORAL_TASK_QUEUE", "dependency-triage")
+    client = await Client.connect(address, namespace=namespace, data_converter=pydantic_data_converter)
     worker = Worker(
         client,
         task_queue=task_queue,
         workflows=[PackageTriageWorkflow, PRActionWorkflow],
         activities=ACTIVITIES,
     )
-    print(f"Worker started on task queue: {task_queue}")
+    logger.info(
+        "Worker started — task_queue=%s temporal=%s activities=%d",
+        task_queue, address, len(ACTIVITIES),
+    )
     await worker.run()
 
 
