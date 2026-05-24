@@ -8,16 +8,16 @@ You have 47 unreviewed Dependabot PRs. You're going to merge most of them anyway
 - **Does this version have known vulnerabilities?** Queries [OSV - Open Source Vulnerabilities database](https://osv.dev) (includes the [OpenSSF malicious-packages database](https://github.com/ossf/malicious-packages)) for CVEs and confirmed malicious packages.
 - **Is the package itself suspicious?** [Socket.dev](https://socket.dev) scans for obfuscated code, install-time scripts, typosquatting, and permission creep.
 - **What code actually changed?** Downloads and diffs both package archives — flags new binary `.so`/`.dll`/`.node` files (which execute on import), new install hooks, and unusual dependency additions.
-- **Is the release fresh?** Releases younger than 24h are flagged as "very fresh"; younger than 7 days as "recent". Auto-merge won't fire on anything under 7 days by default.
+- **Is the release fresh?** Releases younger than 24h are flagged as "very fresh"; younger than 7 days as "recent". The Scout won't automatically merge anything under 7 days old by default.
 - **Did the maintainer change?** A new account publishing a popular package is a classic supply chain attack vector.
-- **Was it built from the right place?** Checks [SLSA/Sigstore](https://slsa.dev) attestations — cryptographic proof that the artifact was built by a specific CI pipeline from a specific repo. A mismatch is an automatic red flag.
+- **Was it built from the right place?** Checks [SLSA](https://slsa.dev) (Supply-chain Levels for Software Artifacts) attestations — cryptographic proof, signed by the CI system, that the package was built from a specific repo and commit. A mismatch is an automatic red flag.
 - **Is the upstream repo healthy?** Queries the [OpenSSF Scorecard](https://securityscorecards.dev) to check if the project has dangerous CI workflows, overprivileged tokens, or no active maintenance.
 - **Is this a zombie package?** Flags bumps to deprecated packages or patches to old major version lines while a newer major is actively maintained.
 - **Is the PR itself suspicious?** Checks that only dependency files changed — finding a Dockerfile or CI workflow script in a "routine dep bump" is a red flag.
 
 It classifies the risk as GREEN / YELLOW / RED, posts a comment explaining its reasoning, and takes action based on how you've configured it (or nothing if you haven't).
 
-> **Status:** Experimental — self-hosted, bring your own keys. Run the worker locally or deploy it yourself (see [DEPLOYMENT.md](DEPLOYMENT.md)). No shared infrastructure, no accounts, no sign-up.
+> **Status:** Experimental — self-hosted, bring your own keys. Run it locally or deploy it to your own server (see [DEPLOYMENT.md](DEPLOYMENT.md)). No shared infrastructure, no accounts, no sign-up.
 
 ---
 
@@ -51,7 +51,7 @@ Every PR gets a comment like this:
 >
 > **Confidence:** 75%
 >
-> > Routine minor bump, but released 18 hours ago — too fresh to auto-merge by default. No CVEs, maintainer stable, diff looks like a docs update.
+> > Routine minor bump, but released 18 hours ago — too fresh to merge automatically by default. No CVEs, maintainer stable, diff looks like a docs update.
 >
 > **Flags:**
 > - very fresh release (18h old)
@@ -79,10 +79,10 @@ The setup script checks prerequisites, explains the tradeoffs between a PAT and 
 Then:
 
 ```bash
-# Terminal 1 — Temporal dev server
+# Terminal 1 — Temporal dev server (the job queue and state store)
 temporal server start-dev
 
-# Terminal 2 — worker
+# Terminal 2 — Scout worker (picks up triage jobs and runs the analysis)
 uv run python -m worker
 
 # Test a triage run against a real public package (no API keys needed)
@@ -107,7 +107,7 @@ Open **http://localhost:8233** to watch the workflow run in the Temporal UI. No 
 | `CLASSIFIER=rule_based` | Force rule-based even when an LLM key is present |
 | `GITHUB_TOKEN` or GitHub App | Posts real PR comments on GitHub |
 | `GITLAB_TOKEN` | Posts real MR comments on GitLab |
-| `ENABLE_PR_ACTIONS=true` | Can auto-merge/block PRs if you've configured it |
+| `ENABLE_PR_ACTIONS=true` | Can automatically merge GREEN PRs and/or close RED ones, based on your config |
 | `SOCKET_API_KEY` | Adds Socket.dev supply-chain score to signals |
 
 Copy `.env.example` to `.env` and fill in what you have, or run `uv run python setup.py` to be walked through it interactively.
