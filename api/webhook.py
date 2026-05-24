@@ -47,12 +47,16 @@ _COMPOSER_NAME_RE = re.compile(
     r"^[A-Za-z0-9][A-Za-z0-9._-]{0,99}/[A-Za-z0-9][A-Za-z0-9._-]{0,99}$"
 )
 
+# NuGet: package IDs are case-insensitive flat names, same character set as PyPI
+_NUGET_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,213}$")
+
 _NAME_RE_BY_ECOSYSTEM: dict[str, re.Pattern[str]] = {
     "pip": _PYPI_NAME_RE,
     "npm": _NPM_NAME_RE,
     "rubygems": _PYPI_NAME_RE,  # gem names follow the same rules as PyPI
     "maven": _MAVEN_NAME_RE,
     "composer": _COMPOSER_NAME_RE,
+    "nuget": _NUGET_NAME_RE,
 }
 
 
@@ -106,10 +110,13 @@ async def webhook(
     body = await request.body()
     _verify_signature(body, x_hub_signature_256)
 
+    payload = json.loads(body)
+
+    if x_github_event == "pull_request_review":
+        return await _handle_review(payload)
+
     if x_github_event != "pull_request":
         return {"status": "ignored", "reason": "not a pull_request event"}
-
-    payload = json.loads(body)
 
     action = payload.get("action")
     if action not in _PR_ACTIONS:
@@ -160,3 +167,34 @@ async def webhook(
     )
 
     return {"status": "started", "workflow_id": workflow_id}
+
+
+async def _handle_review(payload: dict) -> dict:
+    """Route a pull_request_review event to the waiting PRActionWorkflow.
+
+    The reviewer identity comes from the HMAC-verified GitHub payload, not from
+    a self-reported claim, so it can be trusted as the authoritative approver.
+    Only 'submitted' events with state 'approved' or 'changes_requested' are acted on.
+    """
+    if payload.get("action") != "submitted":
+        return {"status": "ignored", "reason": "not a submitted review"}
+
+    state = payload.get("review", {}).get("state", "").lower()
+    if state not in {"approved", "changes_requested"}:
+        return {"status": "ignored", "reason": f"review state={state}"}
+
+    reviewer = payload.get("review", {}).get("user", {}).get("login", "")
+    repo = payload["repository"]["full_name"]
+    pr_number = payload["pull_request"]["number"]
+
+    workflow_id = f"pr-action-{repo.replace('/', '-')}-{pr_number}"
+    decision = "approve" if state == "approved" else "reject"
+
+    try:
+        handle = _temporal_client.get_workflow_handle(workflow_id)
+        await handle.signal(PRActionWorkflow.submit_decision, decision, reviewer)
+    except Exception:
+        # Workflow may not exist (PR not from a bot, or already completed) — not an error.
+        return {"status": "ignored", "reason": "no active workflow for this PR"}
+
+    return {"status": "signalled", "workflow_id": workflow_id, "decision": decision}

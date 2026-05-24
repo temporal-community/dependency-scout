@@ -1,17 +1,41 @@
 import asyncio
+import importlib
 import os
+import pkgutil
+
+import activities as _activities_pkg
 from dotenv import load_dotenv
+from temporalio.activity import _Definition
 from temporalio.client import Client
-from temporalio.worker import Worker
 from temporalio.contrib.pydantic import pydantic_data_converter
+from temporalio.worker import Worker
 
 from workflows.package_triage_workflow import PackageTriageWorkflow
 from workflows.pr_action_workflow import PRActionWorkflow
-from activities import pypi_metadata, socket, osv, package_diff, release_age, maintainer
-from activities import attestation, classifier, release_notes, repo_config, github, version_lineage
-from activities import depsdev, scorecard
 
 load_dotenv()
+
+
+def _discover_activities() -> list:
+    """Return every @activity.defn-decorated function found in activities/*.py (non-recursive).
+
+    Scans only top-level modules — activities/ecosystems/ contains provider helpers, not activities.
+    """
+    seen: set[int] = set()
+    fns = []
+    for mod_info in pkgutil.iter_modules(_activities_pkg.__path__, prefix="activities."):
+        mod = importlib.import_module(mod_info.name)
+        for attr_name in dir(mod):
+            obj = getattr(mod, attr_name)
+            if callable(obj) and id(obj) not in seen and _Definition.from_callable(obj) is not None:
+                seen.add(id(obj))
+                fns.append(obj)
+    return fns
+
+
+# Auto-discovered from activities/*.py — adding a new activity file is sufficient,
+# no manual registration needed. Exposed at module level for test_signal_wiring.py.
+ACTIVITIES = _discover_activities()
 
 
 async def main() -> None:
@@ -25,28 +49,7 @@ async def main() -> None:
         client,
         task_queue=task_queue,
         workflows=[PackageTriageWorkflow, PRActionWorkflow],
-        activities=[
-            pypi_metadata.fetch,
-            socket.score,
-            osv.check,
-            package_diff.compute,
-            release_age.check,
-            maintainer.history,
-            attestation.check,
-            release_notes.check,
-            classifier.classify,
-            repo_config.fetch,
-            github.comment,
-            github.merge_pr,
-            github.request_review,
-            github.label,
-            github.close_pr,
-            github.get_pr,
-            github.check_pr_files,
-            version_lineage.check,
-            depsdev.fetch,
-            scorecard.fetch,
-        ],
+        activities=ACTIVITIES,
     )
     print(f"Worker started on task queue: {task_queue}")
     await worker.run()

@@ -38,6 +38,7 @@ _SEARCH   = "https://search.maven.org/solrsearch/select"
 
 
 class MavenProvider:
+    ecosystem_name = "maven"
     osv_name = "Maven"
 
     # ------------------------------------------------------------------

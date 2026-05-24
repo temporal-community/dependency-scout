@@ -23,6 +23,7 @@ from activities.models import AttestationSignals, MaintainerSignals, PyPISignals
 
 
 class NpmProvider:
+    ecosystem_name = "npm"
     osv_name = "npm"
 
     # ------------------------------------------------------------------

@@ -12,6 +12,31 @@ with workflow.unsafe.imports_passed_through():
         DepsDevSignals, ScorecardSignals,
     )
 
+# Single source of truth for signal activities:
+#   (PackageSignals field name, activity name string, result model, use slow timeout?)
+#
+# Adding a signal: append one row here and add the sub-model to PackageSignals in models.py.
+# The test in tests/test_signal_wiring.py will catch if the worker registration is missing.
+#
+# Append-only: inserting mid-list changes Temporal's ScheduleActivity command sequence,
+# which breaks replay of existing workflow histories and requires fixture regeneration.
+_SIGNAL_REGISTRY: list[tuple[str, str, type, bool]] = [
+    ("pypi",        "activities.pypi_metadata.fetch",  PyPISignals,        False),
+    ("socket",      "activities.socket.score",          SocketSignals,      False),
+    ("osv",         "activities.osv.check",             OSVSignals,         False),
+    ("diff",        "activities.package_diff.compute",  DiffSignals,        True),   # archive download
+    ("maintainer",  "activities.maintainer.history",    MaintainerSignals,  False),
+    ("age",         "activities.release_age.check",     ReleaseAgeSignals,  False),
+    ("attestation", "activities.attestation.check",     AttestationSignals, False),
+    ("release",     "activities.release_notes.check",   ReleaseSignals,     False),
+    ("version_line","activities.version_lineage.check", VersionLineSignals, False),
+    ("deps_dev",    "activities.depsdev.fetch",         DepsDevSignals,     False),
+    ("scorecard",   "activities.scorecard.fetch",       ScorecardSignals,   False),
+]
+
+# Derived from the registry — used by tests/test_signal_wiring.py to verify worker registration.
+SIGNAL_ACTIVITY_NAMES: list[str] = [name for _, name, _, _ in _SIGNAL_REGISTRY]
+
 
 @workflow.defn
 class PackageTriageWorkflow:
@@ -32,65 +57,39 @@ class PackageTriageWorkflow:
         new_version: str,
     ) -> Verdict:
         retry = RetryPolicy(maximum_attempts=5, initial_interval=timedelta(seconds=2))
-        opts: dict = dict(start_to_close_timeout=timedelta(seconds=30), retry_policy=retry)
+        default_opts: dict = dict(start_to_close_timeout=timedelta(seconds=30), retry_policy=retry)
+        slow_opts: dict = dict(start_to_close_timeout=timedelta(minutes=2), retry_policy=retry)
         args = [ecosystem, package, old_version, new_version]
 
-        pypi, sock, osv, diff, maint, age, attest, rel, ver, depsdev, sc = await asyncio.gather(
-            workflow.execute_activity(
-                "activities.pypi_metadata.fetch", args=args, result_type=PyPISignals, **opts
+        raw = await asyncio.gather(
+            *(
+                workflow.execute_activity(
+                    name, args=args, result_type=model,
+                    **(slow_opts if slow else default_opts),
+                )
+                for _, name, model, slow in _SIGNAL_REGISTRY
             ),
-            workflow.execute_activity(
-                "activities.socket.score", args=args, result_type=SocketSignals, **opts
-            ),
-            workflow.execute_activity(
-                "activities.osv.check", args=args, result_type=OSVSignals, **opts
-            ),
-            workflow.execute_activity(
-                "activities.package_diff.compute",
-                args=args,
-                result_type=DiffSignals,
-                start_to_close_timeout=timedelta(minutes=2),
-                retry_policy=retry,
-            ),
-            workflow.execute_activity(
-                "activities.maintainer.history", args=args, result_type=MaintainerSignals, **opts
-            ),
-            workflow.execute_activity(
-                "activities.release_age.check", args=args, result_type=ReleaseAgeSignals, **opts
-            ),
-            workflow.execute_activity(
-                "activities.attestation.check", args=args, result_type=AttestationSignals, **opts
-            ),
-            workflow.execute_activity(
-                "activities.release_notes.check", args=args, result_type=ReleaseSignals, **opts
-            ),
-            workflow.execute_activity(
-                "activities.version_lineage.check", args=args, result_type=VersionLineSignals, **opts
-            ),
-            workflow.execute_activity(
-                "activities.depsdev.fetch", args=args, result_type=DepsDevSignals, **opts
-            ),
-            workflow.execute_activity(
-                "activities.scorecard.fetch", args=args, result_type=ScorecardSignals, **opts
-            ),
+            return_exceptions=True,
         )
+
+        # Map results by field name. A failed activity gets its model's degraded defaults
+        # rather than propagating an exception that would discard all other signal results.
+        signal_kwargs: dict[str, object] = {}
+        for (field, _, model, _), result in zip(_SIGNAL_REGISTRY, raw):
+            if isinstance(result, Exception):
+                workflow.logger.warning(
+                    f"Signal '{field}' failed after retries: {result!r} — using degraded defaults"
+                )
+                signal_kwargs[field] = model()
+            else:
+                signal_kwargs[field] = result
 
         signals = PackageSignals(
             ecosystem=ecosystem,
             package_name=package,
             old_version=old_version,
             new_version=new_version,
-            **pypi.model_dump(),
-            **sock.model_dump(),
-            **osv.model_dump(),
-            **diff.model_dump(),
-            **maint.model_dump(),
-            **age.model_dump(),
-            **attest.model_dump(),
-            **rel.model_dump(),
-            **ver.model_dump(),
-            **depsdev.model_dump(),
-            **sc.model_dump(),
+            **signal_kwargs,  # type: ignore[arg-type]
         )
 
         return await workflow.execute_activity(

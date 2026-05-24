@@ -18,12 +18,17 @@ def _build_message(signals: PackageSignals) -> str:
     # 3. UNTRUSTED DIFF — archive content extracted from the uploaded package.
     #    Highest-risk: directly attacker-authored; wrapped in separate XML tag.
     trusted = signals.model_dump(
-        exclude={"diff_summary", "package_description", "socket_alerts", "release_body"}
+        exclude={
+            "diff": {"diff_summary"},
+            "pypi": {"package_description"},
+            "socket": {"socket_alerts"},
+            "release": {"release_body"},
+        }
     )
-    desc = signals.package_description or "[not available]"
-    alerts = signals.socket_alerts or []
-    notes = signals.release_body or "[not available]"
-    diff = signals.diff_summary or "[no diff available]"
+    desc = signals.pypi.package_description or "[not available]"
+    alerts = signals.socket.socket_alerts or []
+    notes = signals.release.release_body or "[not available]"
+    diff = signals.diff.diff_summary or "[no diff available]"
     return (
         "Classify this dependency bump.\n\n"
         f"TRUSTED SIGNALS (structured data from OSV, Socket, PyPI/npm stats APIs):\n"
@@ -80,9 +85,9 @@ async def classify(signals: PackageSignals) -> Verdict:
     # Pass signals through so PRActionWorkflow can enforce per-repo gates.
     updates: dict = {}
     if verdict.release_age_hours is None:
-        updates["release_age_hours"] = signals.release_age_hours
-    if verdict.new_dependency_count == 0 and signals.new_dependency_count:
-        updates["new_dependency_count"] = signals.new_dependency_count
+        updates["release_age_hours"] = signals.age.release_age_hours
+    if verdict.new_dependency_count == 0 and signals.diff.new_dependency_count:
+        updates["new_dependency_count"] = signals.diff.new_dependency_count
     if updates:
         verdict = verdict.model_copy(update=updates)
     activity.logger.info(
@@ -97,126 +102,136 @@ def _rule_based(signals: PackageSignals) -> Verdict:
     flags: list[str] = []
 
     # Hard RED: known CVEs
-    if signals.osv_vulnerabilities:
+    if signals.osv.osv_vulnerabilities:
         return Verdict(
             classification="red",
             confidence=0.95,
-            reasoning=f"Known vulnerabilities: {', '.join(signals.osv_vulnerabilities)}",
-            flags=[f"CVE: {v}" for v in signals.osv_vulnerabilities],
-            new_dependency_count=signals.new_dependency_count,
+            reasoning=f"Known vulnerabilities: {', '.join(signals.osv.osv_vulnerabilities)}",
+            flags=[f"CVE: {v}" for v in signals.osv.osv_vulnerabilities],
+            new_dependency_count=signals.diff.new_dependency_count,
         )
 
     # Hard RED: new install hook
-    if signals.install_script_added:
+    if signals.diff.install_script_added:
         return Verdict(
             classification="red",
             confidence=0.90,
             reasoning="A new install-time script was added to this version.",
             flags=["install script added"],
-            release_age_hours=signals.release_age_hours,
-            new_dependency_count=signals.new_dependency_count,
+            release_age_hours=signals.age.release_age_hours,
+            new_dependency_count=signals.diff.new_dependency_count,
         )
 
     # Collect yellow signals
-    if signals.is_major_bump:
+    if signals.pypi.is_major_bump:
         flags.append("major version bump")
-    if signals.release_age_hours is None:
+    if signals.age.release_age_hours is None:
         flags.append("release age unknown (missing PyPI metadata)")
-    elif signals.release_age_hours < 24:
-        flags.append(f"very fresh release ({signals.release_age_hours:.0f}h old)")
-    elif signals.release_age_hours < 168:
-        flags.append(f"recent release ({signals.release_age_hours:.0f}h old)")
-    if signals.install_script_changed:
+    elif signals.age.release_age_hours < 24:
+        flags.append(f"very fresh release ({signals.age.release_age_hours:.0f}h old)")
+    elif signals.age.release_age_hours < 168:
+        flags.append(f"recent release ({signals.age.release_age_hours:.0f}h old)")
+    if signals.diff.install_script_changed:
         flags.append("install script modified")
-    if signals.maintainer_changed:
+    if signals.diff.network_calls_in_lib:
+        flags.append(
+            "new outbound network calls added to library code — "
+            "review for unexpected data exfiltration or telemetry"
+        )
+    if signals.diff.binary_data_added:
+        flags.append(
+            "binary/non-text content found in non-binary file — "
+            "possible embedded payload or exfiltrated data (gemstuffer-style attack)"
+        )
+    if signals.maintainer.maintainer_changed:
         flags.append("maintainer changed")
-    if signals.publisher_changed:
-        old = f" (was {signals.old_publisher_repo})" if signals.old_publisher_repo else ""
+    if signals.attestation.publisher_changed:
+        old = f" (was {signals.attestation.old_publisher_repo})" if signals.attestation.old_publisher_repo else ""
         # publisher_repo == metadata_repo means same repo, different workflow/path — likely a
         # legitimate CI migration. Still worth a human glance but lower priority than a repo change.
         if (
-            signals.publisher_repo
-            and signals.metadata_repo
-            and signals.publisher_repo.lower() == signals.metadata_repo.lower()
+            signals.attestation.publisher_repo
+            and signals.release.metadata_repo
+            and signals.attestation.publisher_repo.lower() == signals.release.metadata_repo.lower()
         ):
             flags.append(
                 f"trusted publisher changed{old} — new publisher matches declared repo "
-                f"({signals.publisher_repo}); likely a CI workflow migration, verify expected"
+                f"({signals.attestation.publisher_repo}); likely a CI workflow migration, verify expected"
             )
         else:
             flags.append(f"trusted publisher changed{old}")
     if (
-        signals.has_attestation
-        and signals.publisher_repo
-        and signals.metadata_repo
-        and signals.publisher_repo.lower() != signals.metadata_repo.lower()
+        signals.attestation.has_attestation
+        and signals.attestation.publisher_repo
+        and signals.release.metadata_repo
+        and signals.attestation.publisher_repo.lower() != signals.release.metadata_repo.lower()
     ):
         return Verdict(
             classification="red",
             confidence=0.95,
             reasoning=(
-                f"SLSA attestation publisher repo ({signals.publisher_repo}) does not match "
-                f"the repository declared in package metadata ({signals.metadata_repo}) — "
+                f"SLSA attestation publisher repo ({signals.attestation.publisher_repo}) does not match "
+                f"the repository declared in package metadata ({signals.release.metadata_repo}) — "
                 "strong indicator of a supply chain attack."
             ),
             flags=[
-                f"provenance repo mismatch: attestation={signals.publisher_repo}, "
-                f"metadata={signals.metadata_repo}"
+                f"provenance repo mismatch: attestation={signals.attestation.publisher_repo}, "
+                f"metadata={signals.release.metadata_repo}"
             ],
-            release_age_hours=signals.release_age_hours,
-            new_dependency_count=signals.new_dependency_count,
+            release_age_hours=signals.age.release_age_hours,
+            new_dependency_count=signals.diff.new_dependency_count,
         )
     if (
-        signals.has_attestation
-        and signals.source_ref
-        and not signals.source_ref.startswith("refs/tags/")
+        signals.attestation.has_attestation
+        and signals.attestation.source_ref
+        and not signals.attestation.source_ref.startswith("refs/tags/")
     ):
         flags.append(
-            f"SLSA source_ref is not a tag ({signals.source_ref!r}) — "
+            f"SLSA source_ref is not a tag ({signals.attestation.source_ref!r}) — "
             "release should be built from a tagged commit"
         )
-    if signals.publisher_account_age_days is not None and signals.publisher_account_age_days < 90:
-        flags.append(f"publisher GitHub account is only {signals.publisher_account_age_days} days old")
-    if signals.tag_was_previously_signed:
+    if signals.attestation.publisher_account_age_days is not None and signals.attestation.publisher_account_age_days < 90:
+        flags.append(f"publisher GitHub account is only {signals.attestation.publisher_account_age_days} days old")
+    if signals.release.tag_was_previously_signed:
         flags.append("tag signing dropped: old version had a verified signed tag, new one does not")
-    if signals.possible_rerelease:
+    if signals.release.possible_rerelease:
         flags.append("GitHub release was drafted >24h before publishing (possible re-release)")
-    if signals.timestamp_skew_minutes is not None and signals.timestamp_skew_minutes > 120:
+    if signals.release.timestamp_skew_minutes is not None and signals.release.timestamp_skew_minutes > 120:
         flags.append(
             f"registry publish and GitHub release timestamps differ by "
-            f"{signals.timestamp_skew_minutes:.0f} minutes"
+            f"{signals.release.timestamp_skew_minutes:.0f} minutes"
         )
-    if signals.stale_version_line and signals.latest_major is not None and signals.bump_major is not None:
+    if signals.version_line.stale_version_line and signals.version_line.latest_major is not None and signals.version_line.bump_major is not None:
         flags.append(
-            f"patching older {signals.bump_major}.x version line while "
-            f"{signals.latest_major}.x is actively maintained — verify this is intentional"
+            f"patching older {signals.version_line.bump_major}.x version line while "
+            f"{signals.version_line.latest_major}.x is actively maintained — verify this is intentional"
         )
-    if signals.new_dependency_count >= 5:
-        flags.append(f"{signals.new_dependency_count} new direct dependencies added")
-    if signals.is_deprecated:
-        reason = f": {signals.deprecated_reason}" if signals.deprecated_reason else ""
+    if signals.diff.new_dependency_count >= 5:
+        flags.append(f"{signals.diff.new_dependency_count} new direct dependencies added")
+    if signals.deps_dev.is_deprecated:
+        reason = f": {signals.deps_dev.deprecated_reason}" if signals.deps_dev.deprecated_reason else ""
         flags.append(f"package is deprecated at the registry level{reason}")
-    if signals.scorecard_maintained is not None and signals.scorecard_maintained == 0:
+    if signals.scorecard.scorecard_maintained is not None and signals.scorecard.scorecard_maintained == 0:
         flags.append(
             "upstream repo appears unmaintained (Scorecard Maintained: 0/10"
-            + (f", repo: {signals.scorecard_repo}" if signals.scorecard_repo else "")
+            + (f", repo: {signals.scorecard.scorecard_repo}" if signals.scorecard.scorecard_repo else "")
             + ")"
         )
-    if signals.scorecard_dangerous_workflow is not None and signals.scorecard_dangerous_workflow == 0:
+    if signals.scorecard.scorecard_dangerous_workflow is not None and signals.scorecard.scorecard_dangerous_workflow == 0:
         flags.append(
             "upstream repo has dangerous CI workflow patterns (Scorecard Dangerous-Workflow: 0/10) — "
             "possible workflow injection vector"
         )
-    if signals.scorecard_token_permissions is not None and signals.scorecard_token_permissions < 5:
+    if signals.scorecard.scorecard_token_permissions is not None and signals.scorecard.scorecard_token_permissions < 5:
         flags.append(
-            f"CI tokens appear overprivileged (Scorecard Token-Permissions: {signals.scorecard_token_permissions}/10)"
+            f"CI tokens appear overprivileged (Scorecard Token-Permissions: {signals.scorecard.scorecard_token_permissions}/10)"
         )
-    if signals.socket_alerts:
-        flags.extend(signals.socket_alerts)
-    if signals.socket_score is not None and signals.socket_score < 50:
-        flags.append(f"low socket score ({signals.socket_score}/100)")
-    if signals.weekly_downloads is not None and signals.weekly_downloads < 1_000:
-        flags.append(f"low download count ({signals.weekly_downloads:,}/week)")
+    if signals.socket.socket_alerts:
+        flags.extend(signals.socket.socket_alerts)
+    if signals.socket.socket_score is not None and signals.socket.socket_score < 50:
+        flags.append(f"low socket score ({signals.socket.socket_score}/100)")
+    if signals.pypi.weekly_downloads is not None and signals.pypi.weekly_downloads < 1_000:
+        flags.append(f"low download count ({signals.pypi.weekly_downloads:,}/week)")
 
     if flags:
         return Verdict(
@@ -224,12 +239,12 @@ def _rule_based(signals: PackageSignals) -> Verdict:
             confidence=0.75,
             reasoning=f"[rule-based] Flagged: {', '.join(flags)}.",
             flags=flags,
-            release_age_hours=signals.release_age_hours,
-            new_dependency_count=signals.new_dependency_count,
+            release_age_hours=signals.age.release_age_hours,
+            new_dependency_count=signals.diff.new_dependency_count,
         )
 
-    age_str = f"{signals.release_age_hours:.0f}h old" if signals.release_age_hours is not None else "age unknown"
-    downloads = f"{signals.weekly_downloads:,}" if signals.weekly_downloads else "unknown"
+    age_str = f"{signals.age.release_age_hours:.0f}h old" if signals.age.release_age_hours is not None else "age unknown"
+    downloads = f"{signals.pypi.weekly_downloads:,}" if signals.pypi.weekly_downloads else "unknown"
     return Verdict(
         classification="green",
         confidence=0.80,
@@ -239,6 +254,6 @@ def _rule_based(signals: PackageSignals) -> Verdict:
             f"no maintainer changes, {downloads} weekly downloads."
         ),
         flags=[],
-        release_age_hours=signals.release_age_hours,
-        new_dependency_count=signals.new_dependency_count,
+        release_age_hours=signals.age.release_age_hours,
+        new_dependency_count=signals.diff.new_dependency_count,
     )

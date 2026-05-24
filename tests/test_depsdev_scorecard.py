@@ -8,7 +8,11 @@ from temporalio.testing import ActivityEnvironment
 
 from activities.depsdev import fetch as depsdev_fetch
 from activities.scorecard import fetch as scorecard_fetch
-from activities.models import PackageSignals
+from activities.models import (
+    PackageSignals, PyPISignals, SocketSignals, OSVSignals,
+    DiffSignals, ReleaseAgeSignals, MaintainerSignals,
+    DepsDevSignals, ScorecardSignals,
+)
 
 DEPSDEV_BASE = "https://api.deps.dev/v3alpha/systems"
 SCORECARD_BASE = "https://api.securityscorecards.dev/projects/github.com"
@@ -158,23 +162,37 @@ async def test_scorecard_fallback_to_links():
 # ---------------------------------------------------------------------------
 
 def _base_signals(**overrides):
-    defaults = dict(
-        ecosystem="pip",
-        package_name="mypkg",
-        old_version="1.0.0",
-        new_version="1.1.0",
-        release_age_hours=500.0,
-        is_major_bump=False,
-        socket_score=80,
-        socket_alerts=[],
-        osv_vulnerabilities=[],
-        diff_summary="Minor changes.",
-        diff_size_bytes=100,
-        maintainer_changed=False,
-        weekly_downloads=100_000,
+    return PackageSignals(
+        ecosystem=overrides.pop("ecosystem", "pip"),
+        package_name=overrides.pop("package_name", "mypkg"),
+        old_version=overrides.pop("old_version", "1.0.0"),
+        new_version=overrides.pop("new_version", "1.1.0"),
+        pypi=PyPISignals(
+            weekly_downloads=overrides.pop("weekly_downloads", 100_000),
+            is_major_bump=overrides.pop("is_major_bump", False),
+        ),
+        socket=SocketSignals(
+            socket_score=overrides.pop("socket_score", 80),
+            socket_alerts=overrides.pop("socket_alerts", []),
+        ),
+        osv=OSVSignals(osv_vulnerabilities=overrides.pop("osv_vulnerabilities", [])),
+        diff=DiffSignals(
+            diff_summary=overrides.pop("diff_summary", "Minor changes."),
+            diff_size_bytes=overrides.pop("diff_size_bytes", 100),
+        ),
+        age=ReleaseAgeSignals(release_age_hours=overrides.pop("release_age_hours", 500.0)),
+        maintainer=MaintainerSignals(maintainer_changed=overrides.pop("maintainer_changed", False)),
+        deps_dev=DepsDevSignals(
+            is_deprecated=overrides.pop("is_deprecated", False),
+            deprecated_reason=overrides.pop("deprecated_reason", None),
+        ),
+        scorecard=ScorecardSignals(
+            scorecard_maintained=overrides.pop("scorecard_maintained", None),
+            scorecard_repo=overrides.pop("scorecard_repo", None),
+            scorecard_dangerous_workflow=overrides.pop("scorecard_dangerous_workflow", None),
+            scorecard_token_permissions=overrides.pop("scorecard_token_permissions", None),
+        ),
     )
-    defaults.update(overrides)
-    return PackageSignals(**defaults)
 
 
 def test_classifier_deprecated_is_yellow():

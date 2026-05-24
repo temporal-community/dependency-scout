@@ -3,14 +3,17 @@ Ecosystem abstraction layer.
 
 To add a new ecosystem:
   1. Create activities/ecosystems/{name}.py implementing EcosystemProvider
-  2. Add one entry to the registry in get_provider()
-  3. Add the ecosystem name to the Literal types in activities/models.py
-  4. Add the branch slug to helpers/pr_parser.py's _DEPENDABOT_ECOSYSTEM_MAP
-  5. Add a name-validation regex entry in api/webhook.py's _NAME_RE_BY_ECOSYSTEM
+     (set ecosystem_name = "<key>" as a class attribute — get_provider() discovers it automatically)
+  2. Add the ecosystem name to the Literal types in activities/models.py
+  3. Add the branch slug to helpers/pr_parser.py's _DEPENDABOT_ECOSYSTEM_MAP
+  4. Add a name-validation regex entry in api/webhook.py's _NAME_RE_BY_ECOSYSTEM
 """
 from __future__ import annotations
 
+import importlib
+import inspect
 import os
+import pkgutil
 import re
 import stat
 import urllib.parse
@@ -66,23 +69,33 @@ class EcosystemProvider(Protocol):
     ) -> ReleaseSignals: ...
 
 
-def get_provider(ecosystem: str) -> EcosystemProvider:
-    from activities.ecosystems.composer import ComposerProvider
-    from activities.ecosystems.maven import MavenProvider
-    from activities.ecosystems.npm import NpmProvider
-    from activities.ecosystems.pip import PipProvider
-    from activities.ecosystems.rubygems import RubyGemsProvider
+_PROVIDERS: dict[str, EcosystemProvider] | None = None
 
-    providers: dict[str, EcosystemProvider] = {
-        "pip": PipProvider(),
-        "npm": NpmProvider(),
-        "rubygems": RubyGemsProvider(),
-        "maven": MavenProvider(),
-        "composer": ComposerProvider(),
-    }
-    if ecosystem not in providers:
+
+def _build_provider_registry() -> dict[str, EcosystemProvider]:
+    """Scan activities/ecosystems/*.py for classes with an ecosystem_name attribute.
+
+    Called lazily on first get_provider() call to avoid circular imports at
+    module load time (providers import helpers from this same __init__.py).
+    """
+    import activities.ecosystems as _pkg
+    registry: dict[str, EcosystemProvider] = {}
+    for mod_info in pkgutil.iter_modules(_pkg.__path__, prefix="activities.ecosystems."):
+        mod = importlib.import_module(mod_info.name)
+        for _, obj in inspect.getmembers(mod, inspect.isclass):
+            name = getattr(obj, "ecosystem_name", None)
+            if name and obj.__module__ == mod_info.name:
+                registry[name] = obj()
+    return registry
+
+
+def get_provider(ecosystem: str) -> EcosystemProvider:
+    global _PROVIDERS
+    if _PROVIDERS is None:
+        _PROVIDERS = _build_provider_registry()
+    if ecosystem not in _PROVIDERS:
         raise ValueError(f"Unknown ecosystem: {ecosystem!r}")
-    return providers[ecosystem]
+    return _PROVIDERS[ecosystem]
 
 
 # ---------------------------------------------------------------------------
@@ -95,6 +108,7 @@ ALLOWED_CDN_HOSTS: frozenset[str] = frozenset({
     "rubygems.org",
     "repo1.maven.org",
     "codeload.github.com",   # Composer archives — GitHub's archive CDN (no redirect)
+    "api.nuget.org",
 })
 
 

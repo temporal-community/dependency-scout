@@ -21,6 +21,7 @@ from activities.models import AttestationSignals, MaintainerSignals, PyPISignals
 
 
 class RubyGemsProvider:
+    ecosystem_name = "rubygems"
     osv_name = "RubyGems"
 
     # ------------------------------------------------------------------

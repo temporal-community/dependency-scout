@@ -31,6 +31,8 @@ async def check(ecosystem: str, package: str, old_version: str, new_version: str
             return await _check_maven(package, new_version)
         if ecosystem == "composer":
             return await _check_composer(package, new_version)
+        if ecosystem == "nuget":
+            return await _check_nuget(package, new_version)
     except ApplicationError:
         raise
     except Exception:  # noqa: BLE001
@@ -156,6 +158,19 @@ async def _check_maven(package: str, new_version: str) -> VersionLineSignals:
                 pass
 
     return detect_stale_version_line(all_versions, new_version, release_dates=release_dates)
+
+
+async def _check_nuget(package: str, new_version: str) -> VersionLineSignals:
+    """Use the NuGet flat-container version index to detect stale major-line bumps."""
+    id_lower = package.lower()
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        resp = await client.get(f"https://api.nuget.org/v3-flatcontainer/{id_lower}/index.json")
+    if resp.status_code == 404:
+        raise ApplicationError(f"{package} not found on NuGet", type="PackageNotFound", non_retryable=True)
+    if resp.status_code != 200:
+        return VersionLineSignals()
+    versions: list[str] = resp.json().get("versions", [])
+    return detect_stale_version_line(versions, new_version)
 
 
 async def _check_rubygems(package: str, new_version: str) -> VersionLineSignals:

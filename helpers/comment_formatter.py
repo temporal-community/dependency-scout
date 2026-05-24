@@ -68,13 +68,13 @@ def format_comment(pr: PRContext, verdict: Verdict, signals: PackageSignals | No
         lines += [
             "| Signal | Value |",
             "|--------|-------|",
-            f"| Release age | {signals.release_age_hours:.0f}h |" if signals.release_age_hours is not None else "| Release age | unknown |",
-            f"| Weekly downloads | {signals.weekly_downloads:,} |" if signals.weekly_downloads else "| Weekly downloads | unknown |",
-            f"| Socket score | {signals.socket_score}/100 |" if signals.socket_score is not None else "| Socket score | unavailable |",
-            f"| CVEs | {len(signals.osv_vulnerabilities)} |",
-            f"| Maintainer changed | {'yes' if signals.maintainer_changed else 'no'} |",
-            f"| Major bump | {'yes' if signals.is_major_bump else 'no'} |",
-            f"| Diff size | {signals.diff_size_bytes:,} bytes |",
+            f"| Release age | {signals.age.release_age_hours:.0f}h |" if signals.age.release_age_hours is not None else "| Release age | unknown |",
+            f"| Weekly downloads | {signals.pypi.weekly_downloads:,} |" if signals.pypi.weekly_downloads else "| Weekly downloads | unknown |",
+            f"| Socket score | {signals.socket.socket_score}/100 |" if signals.socket.socket_score is not None else "| Socket score | unavailable |",
+            f"| CVEs | {len(signals.osv.osv_vulnerabilities)} |",
+            f"| Maintainer changed | {'yes' if signals.maintainer.maintainer_changed else 'no'} |",
+            f"| Major bump | {'yes' if signals.pypi.is_major_bump else 'no'} |",
+            f"| Diff size | {signals.diff.diff_size_bytes:,} bytes |",
             "",
         ]
 

@@ -36,6 +36,7 @@ _CODELOAD  = "https://codeload.github.com"
 
 
 class ComposerProvider:
+    ecosystem_name = "composer"
     osv_name = "Packagist"
 
     # ------------------------------------------------------------------

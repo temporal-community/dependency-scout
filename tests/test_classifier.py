@@ -13,7 +13,18 @@ from temporalio.exceptions import ApplicationError
 import anthropic
 
 from activities.classifier import classify, _build_message, _rule_based
-from activities.models import PackageSignals
+from activities.models import (
+    PackageSignals,
+    PyPISignals,
+    SocketSignals,
+    OSVSignals,
+    DiffSignals,
+    ReleaseAgeSignals,
+    AttestationSignals,
+    ReleaseSignals,
+    VersionLineSignals,
+    MaintainerSignals,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -27,16 +38,12 @@ def base_signals():
         package_name="requests",
         old_version="2.31.0",
         new_version="2.32.0",
-        release_age_hours=200.0,
-        is_major_bump=False,
-        socket_score=80,
-        socket_alerts=[],
-        osv_vulnerabilities=[],
-        diff_summary="Minor internal refactor.",
-        diff_size_bytes=512,
-        maintainer_changed=False,
-        weekly_downloads=5_000_000,
-        publisher_account_age_days=1800,
+        pypi=PyPISignals(weekly_downloads=5_000_000, is_major_bump=False),
+        socket=SocketSignals(socket_score=80, socket_alerts=[]),
+        osv=OSVSignals(osv_vulnerabilities=[]),
+        diff=DiffSignals(diff_summary="Minor internal refactor.", diff_size_bytes=512),
+        age=ReleaseAgeSignals(release_age_hours=200.0),
+        attestation=AttestationSignals(publisher_account_age_days=1800),
     )
 
 
@@ -60,7 +67,7 @@ def test_build_message_wraps_diff_in_xml_tags(base_signals):
 
 
 def test_build_message_placeholder_when_no_diff(base_signals):
-    base_signals.diff_summary = ""
+    base_signals.diff.diff_summary = ""
     msg = _build_message(base_signals)
     assert "[no diff available]" in msg
 
@@ -70,7 +77,7 @@ def test_build_message_placeholder_when_no_diff(base_signals):
 # ---------------------------------------------------------------------------
 
 def test_rule_based_cves_returns_red(base_signals):
-    base_signals.osv_vulnerabilities = ["CVE-2024-0001", "CVE-2024-0002"]
+    base_signals.osv.osv_vulnerabilities = ["CVE-2024-0001", "CVE-2024-0002"]
     verdict = _rule_based(base_signals)
     assert verdict.classification == "red"
     assert verdict.confidence == 0.95
@@ -83,72 +90,72 @@ def test_rule_based_cves_returns_red(base_signals):
 # ---------------------------------------------------------------------------
 
 def test_rule_based_major_bump_is_yellow(base_signals):
-    base_signals.is_major_bump = True
+    base_signals.pypi.is_major_bump = True
     verdict = _rule_based(base_signals)
     assert verdict.classification == "yellow"
     assert any("major" in f for f in verdict.flags)
 
 
 def test_rule_based_very_fresh_release_is_yellow(base_signals):
-    base_signals.release_age_hours = 10.0
+    base_signals.age.release_age_hours = 10.0
     verdict = _rule_based(base_signals)
     assert verdict.classification == "yellow"
     assert any("very fresh" in f for f in verdict.flags)
 
 
 def test_rule_based_recent_release_is_yellow(base_signals):
-    base_signals.release_age_hours = 100.0  # 24 ≤ x < 168
+    base_signals.age.release_age_hours = 100.0  # 24 ≤ x < 168
     verdict = _rule_based(base_signals)
     assert verdict.classification == "yellow"
     assert any("recent release" in f for f in verdict.flags)
 
 
 def test_rule_based_age_none_is_yellow(base_signals):
-    base_signals.release_age_hours = None
+    base_signals.age.release_age_hours = None
     verdict = _rule_based(base_signals)
     assert verdict.classification == "yellow"
     assert any("unknown" in f for f in verdict.flags)
 
 
 def test_rule_based_maintainer_changed_is_yellow(base_signals):
-    base_signals.maintainer_changed = True
+    base_signals.maintainer.maintainer_changed = True
     verdict = _rule_based(base_signals)
     assert verdict.classification == "yellow"
     assert any("maintainer" in f for f in verdict.flags)
 
 
 def test_rule_based_socket_alerts_are_yellow(base_signals):
-    base_signals.socket_alerts = ["install script detected"]
+    base_signals.socket.socket_alerts = ["install script detected"]
     verdict = _rule_based(base_signals)
     assert verdict.classification == "yellow"
     assert "install script detected" in verdict.flags
 
 
 def test_rule_based_low_socket_score_is_yellow(base_signals):
-    base_signals.socket_score = 30
+    base_signals.socket.socket_score = 30
     verdict = _rule_based(base_signals)
     assert verdict.classification == "yellow"
     assert any("socket score" in f for f in verdict.flags)
 
 
 def test_rule_based_low_downloads_is_yellow(base_signals):
-    base_signals.weekly_downloads = 500
+    base_signals.pypi.weekly_downloads = 500
     verdict = _rule_based(base_signals)
     assert verdict.classification == "yellow"
     assert any("download count" in f for f in verdict.flags)
 
 
 def test_rule_based_yellow_carries_release_age(base_signals):
-    base_signals.is_major_bump = True
-    base_signals.release_age_hours = 72.0
+    base_signals.pypi.is_major_bump = True
+    base_signals.age.release_age_hours = 72.0
     verdict = _rule_based(base_signals)
     assert verdict.release_age_hours == 72.0
 
 
 def test_rule_based_multiple_flags_all_present(base_signals):
-    base_signals.is_major_bump = True
-    base_signals.maintainer_changed = True
-    base_signals.socket_score = 20
+    base_signals.pypi.is_major_bump = True
+    base_signals.maintainer.maintainer_changed = True
+    base_signals.socket.socket_score = 20
     verdict = _rule_based(base_signals)
     assert verdict.classification == "yellow"
     assert len(verdict.flags) >= 3
@@ -166,20 +173,20 @@ def test_rule_based_clean_signals_are_green(base_signals):
 
 
 def test_rule_based_green_carries_release_age(base_signals):
-    base_signals.release_age_hours = 300.0
+    base_signals.age.release_age_hours = 300.0
     verdict = _rule_based(base_signals)
     assert verdict.release_age_hours == 300.0
 
 
 def test_rule_based_green_handles_none_downloads(base_signals):
-    base_signals.weekly_downloads = None
+    base_signals.pypi.weekly_downloads = None
     verdict = _rule_based(base_signals)
     assert verdict.classification == "green"
     assert "unknown" in verdict.reasoning
 
 
 def test_rule_based_socket_score_boundary_ok(base_signals):
-    base_signals.socket_score = 50  # exactly 50 → not flagged
+    base_signals.socket.socket_score = 50  # exactly 50 → not flagged
     verdict = _rule_based(base_signals)
     assert verdict.classification == "green"
 
@@ -233,7 +240,7 @@ async def test_classify_llm_returns_verdict(base_signals, monkeypatch):
 
 async def test_classify_llm_passes_release_age_through_when_not_set(base_signals, monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
-    base_signals.release_age_hours = 48.0
+    base_signals.age.release_age_hours = 48.0
     # LLM omits release_age_hours (returns None by default in Verdict)
     mock_client = _make_llm_mock({
         "classification": "yellow",

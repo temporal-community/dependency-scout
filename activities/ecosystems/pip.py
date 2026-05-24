@@ -25,6 +25,7 @@ from activities.models import AttestationSignals, MaintainerSignals, PyPISignals
 
 
 class PipProvider:
+    ecosystem_name = "pip"
     osv_name = "PyPI"
 
     # ------------------------------------------------------------------

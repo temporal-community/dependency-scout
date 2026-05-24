@@ -1,6 +1,10 @@
 import pytest
 from helpers.comment_formatter import format_comment, _sanitize_reasoning
-from activities.models import PRContext, PackageSignals, Verdict
+from activities.models import (
+    PRContext, PackageSignals, Verdict,
+    PyPISignals, SocketSignals, OSVSignals, DiffSignals,
+    ReleaseAgeSignals, MaintainerSignals,
+)
 
 
 # --- _sanitize_reasoning ---
@@ -64,16 +68,12 @@ def signals():
         package_name="requests",
         old_version="2.31.0",
         new_version="2.32.0",
-        release_age_hours=200.0,
-        is_major_bump=False,
-        socket_score=85,
-        socket_alerts=[],
-        osv_vulnerabilities=[],
-        diff_summary="Minor changes",
-        diff_size_bytes=1024,
-        maintainer_changed=False,
-        weekly_downloads=5_000_000,
-        publisher_account_age_days=1800,
+        pypi=PyPISignals(weekly_downloads=5_000_000, is_major_bump=False),
+        socket=SocketSignals(socket_score=85, socket_alerts=[]),
+        osv=OSVSignals(osv_vulnerabilities=[]),
+        diff=DiffSignals(diff_summary="Minor changes", diff_size_bytes=1024),
+        age=ReleaseAgeSignals(release_age_hours=200.0),
+        maintainer=MaintainerSignals(maintainer_changed=False),
     )
 
 
@@ -197,7 +197,7 @@ def test_signals_release_age_rendered(pr, green_verdict, signals):
 
 
 def test_signals_release_age_unknown_when_none(pr, green_verdict, signals):
-    signals.release_age_hours = None
+    signals.age.release_age_hours = None
     out = format_comment(pr, green_verdict, signals)
     assert "| Release age | unknown |" in out
 
@@ -208,7 +208,7 @@ def test_signals_weekly_downloads_formatted(pr, green_verdict, signals):
 
 
 def test_signals_weekly_downloads_unknown_when_none(pr, green_verdict, signals):
-    signals.weekly_downloads = None
+    signals.pypi.weekly_downloads = None
     out = format_comment(pr, green_verdict, signals)
     assert "| Weekly downloads | unknown |" in out
 
@@ -219,19 +219,19 @@ def test_signals_socket_score_rendered(pr, green_verdict, signals):
 
 
 def test_signals_socket_score_unavailable_when_none(pr, green_verdict, signals):
-    signals.socket_score = None
+    signals.socket.socket_score = None
     out = format_comment(pr, green_verdict, signals)
     assert "| Socket score | unavailable |" in out
 
 
 def test_signals_cve_count(pr, green_verdict, signals):
-    signals.osv_vulnerabilities = ["CVE-2024-0001", "CVE-2024-0002"]
+    signals.osv.osv_vulnerabilities = ["CVE-2024-0001", "CVE-2024-0002"]
     out = format_comment(pr, green_verdict, signals)
     assert "| CVEs | 2 |" in out
 
 
 def test_signals_maintainer_changed_yes(pr, green_verdict, signals):
-    signals.maintainer_changed = True
+    signals.maintainer.maintainer_changed = True
     out = format_comment(pr, green_verdict, signals)
     assert "| Maintainer changed | yes |" in out
 
@@ -242,13 +242,13 @@ def test_signals_maintainer_changed_no(pr, green_verdict, signals):
 
 
 def test_signals_major_bump_yes(pr, green_verdict, signals):
-    signals.is_major_bump = True
+    signals.pypi.is_major_bump = True
     out = format_comment(pr, green_verdict, signals)
     assert "| Major bump | yes |" in out
 
 
 def test_signals_diff_size_formatted(pr, green_verdict, signals):
-    signals.diff_size_bytes = 1_234_567
+    signals.diff.diff_size_bytes = 1_234_567
     out = format_comment(pr, green_verdict, signals)
     assert "| Diff size | 1,234,567 bytes |" in out
 

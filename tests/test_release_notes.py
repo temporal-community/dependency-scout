@@ -10,7 +10,9 @@ from temporalio.testing import ActivityEnvironment
 
 from activities.ecosystems import parse_github_repo
 from activities.release_notes import check as release_check
-from activities.models import ReleaseSignals
+from activities.models import (
+    ReleaseSignals, PackageSignals, ReleaseAgeSignals,
+)
 
 PYPI_BASE = "https://pypi.org/pypi"
 NPM_BASE = "https://registry.npmjs.org"
@@ -510,13 +512,11 @@ async def test_release_tag_no_regression_when_both_unsigned():
 
 def test_rule_based_flags_possible_rerelease():
     from activities.classifier import _rule_based
-    from activities.models import PackageSignals
 
     signals = PackageSignals(
         ecosystem="pip", package_name="pkg", old_version="1.0.0", new_version="1.0.1",
-        release_age_hours=200.0, is_major_bump=False, socket_score=None, socket_alerts=[],
-        osv_vulnerabilities=[], diff_summary="[no changes]", diff_size_bytes=0,
-        maintainer_changed=False, weekly_downloads=100_000, possible_rerelease=True,
+        age=ReleaseAgeSignals(release_age_hours=200.0),
+        release=ReleaseSignals(possible_rerelease=True),
     )
     verdict = _rule_based(signals)
     assert verdict.classification == "yellow"
@@ -525,13 +525,11 @@ def test_rule_based_flags_possible_rerelease():
 
 def test_rule_based_flags_large_timestamp_skew():
     from activities.classifier import _rule_based
-    from activities.models import PackageSignals
 
     signals = PackageSignals(
         ecosystem="pip", package_name="pkg", old_version="1.0.0", new_version="1.0.1",
-        release_age_hours=200.0, is_major_bump=False, socket_score=None, socket_alerts=[],
-        osv_vulnerabilities=[], diff_summary="[no changes]", diff_size_bytes=0,
-        maintainer_changed=False, weekly_downloads=100_000, timestamp_skew_minutes=300.0,
+        age=ReleaseAgeSignals(release_age_hours=200.0),
+        release=ReleaseSignals(timestamp_skew_minutes=300.0),
     )
     verdict = _rule_based(signals)
     assert verdict.classification == "yellow"
@@ -540,14 +538,11 @@ def test_rule_based_flags_large_timestamp_skew():
 
 def test_rule_based_flags_tag_signing_regression():
     from activities.classifier import _rule_based
-    from activities.models import PackageSignals
 
     signals = PackageSignals(
         ecosystem="pip", package_name="pkg", old_version="1.0.0", new_version="1.0.1",
-        release_age_hours=200.0, is_major_bump=False, socket_score=None, socket_alerts=[],
-        osv_vulnerabilities=[], diff_summary="[no changes]", diff_size_bytes=0,
-        maintainer_changed=False, weekly_downloads=100_000,
-        tag_was_previously_signed=True, tag_signature_verified=None,
+        age=ReleaseAgeSignals(release_age_hours=200.0),
+        release=ReleaseSignals(tag_was_previously_signed=True, tag_signature_verified=None),
     )
     verdict = _rule_based(signals)
     assert verdict.classification == "yellow"

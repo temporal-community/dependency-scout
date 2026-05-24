@@ -141,6 +141,7 @@ class PRActionWorkflow:
         if (
             config.auto_merge_enabled
             and verdict.classification in config.auto_merge_classifications
+            and verdict.confidence >= config.auto_merge_min_confidence
         ):
             await workflow.execute_activity("activities.github.merge_pr", args=[pr], **opts)
             return "auto-merged"

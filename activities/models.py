@@ -7,7 +7,7 @@ class PRContext(BaseModel):
     pr_number: int
     pr_author: str                      # "dependabot[bot]" or "renovate[bot]"
     installation_id: int                # GitHub App installation
-    ecosystem: Literal["pip", "npm", "rubygems", "maven", "composer"]
+    ecosystem: Literal["pip", "npm", "rubygems", "maven", "composer", "nuget"]
     package_name: str
     old_version: str
     new_version: str
@@ -17,14 +17,15 @@ class PRContext(BaseModel):
 class RepoConfig(BaseModel):
     """Loaded from .github/triage-agent.yml in target repo. All fields optional.
 
-    Default behavior (no config file): observe-only — posts a comment on every PR,
-    no auto-merge, no review requests, no blocking.
+    Default behavior (no config file): posts a comment on every PR, closes RED PRs,
+    no auto-merge, no review requests. Set block_classifications: [] for fully observe-only.
     """
     auto_merge_enabled: bool = False
     reviewers: list[str] = []
     min_release_age_hours: int = 168        # 7 days
     auto_merge_classifications: list[str] = ["green"]
-    block_classifications: list[str] = []   # e.g. ["red"] to close suspicious PRs
+    auto_merge_min_confidence: float = 0.80  # classifier must reach this confidence to auto-merge
+    block_classifications: list[str] = ["red"]  # close PRs classified as RED by default; set [] to observe-only
     max_new_dependencies: int = 5           # flag as yellow when more direct deps than this are added
 
 
@@ -51,6 +52,8 @@ class DiffSignals(BaseModel):
     install_script_added: bool = False
     install_script_changed: bool = False
     new_dependency_count: int = 0  # net new direct dependencies added across manifest files
+    network_calls_in_lib: bool = False   # new outbound HTTP calls added to non-install-hook library code
+    binary_data_added: bool = False      # new file with binary/non-text content in a non-binary-extension file
 
 
 class PRFilesSignals(BaseModel):
@@ -112,7 +115,7 @@ class AttestationSignals(BaseModel):
 
 
 class PackageSignals(BaseModel):
-    ecosystem: Literal["pip", "npm", "rubygems", "maven", "composer"]
+    ecosystem: Literal["pip", "npm", "rubygems", "maven", "composer", "nuget"]
     package_name: str
     old_version: str
     new_version: str

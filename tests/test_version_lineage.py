@@ -10,7 +10,9 @@ from temporalio.testing import ActivityEnvironment
 
 from activities.ecosystems import detect_stale_version_line
 from activities.version_lineage import check as lineage_check
-from activities.models import VersionLineSignals
+from activities.models import (
+    VersionLineSignals, PackageSignals, ReleaseAgeSignals,
+)
 
 PYPI_BASE = "https://pypi.org/pypi"
 NPM_BASE = "https://registry.npmjs.org"
@@ -219,25 +221,14 @@ async def test_rubygems_stale_version_line_detected():
 
 def test_rule_based_stale_version_line_is_yellow():
     from activities.classifier import _rule_based
-    from activities.models import PackageSignals
 
     signals = PackageSignals(
         ecosystem="pip",
         package_name="oldpkg",
         old_version="0.9.0",
         new_version="0.9.1",
-        release_age_hours=500.0,
-        is_major_bump=False,
-        socket_score=None,
-        socket_alerts=[],
-        osv_vulnerabilities=[],
-        diff_summary="[no significant changes]",
-        diff_size_bytes=0,
-        maintainer_changed=False,
-        weekly_downloads=50_000,
-        stale_version_line=True,
-        latest_major=1,
-        bump_major=0,
+        age=ReleaseAgeSignals(release_age_hours=500.0),
+        version_line=VersionLineSignals(stale_version_line=True, latest_major=1, bump_major=0),
     )
     verdict = _rule_based(signals)
     assert verdict.classification == "yellow"

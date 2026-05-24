@@ -11,6 +11,7 @@ import difflib
 import hashlib
 import hmac
 import json
+import re
 import tempfile
 from pathlib import Path
 
@@ -69,6 +70,59 @@ DANGEROUS_BINARY_SUFFIXES = {
     ".bundle",                   # Ruby native C extensions (macOS .dylib-like)
 }
 
+# Extensions that are legitimately binary and don't need content inspection.
+# Files with these extensions are skipped for the binary_data_added check.
+_EXPECTED_BINARY_EXTENSIONS = DANGEROUS_BINARY_SUFFIXES | {
+    ".png", ".jpg", ".jpeg", ".gif", ".ico", ".webp", ".bmp", ".tiff",
+    ".woff", ".woff2", ".ttf", ".eot", ".otf",
+    ".zip", ".tar", ".gz", ".bz2", ".xz",
+    ".pdf", ".db", ".sqlite", ".sqlite3",
+    ".mp3", ".mp4", ".wav", ".avi", ".mov",
+    ".exe", ".bin", ".dat",
+}
+
+# Per-extension regex patterns for outbound network calls.
+# Matched against newly-added lines only (not pre-existing code) in non-install-hook files.
+_NET_CALL_PATTERNS: dict[str, list[re.Pattern[str]]] = {
+    ext: [re.compile(p) for p in patterns]
+    for ext, patterns in {
+        ".rb": [
+            r"Net::HTTP\b", r"URI\.open\b", r"open-uri",
+            r"Faraday\b", r"HTTParty\b", r"RestClient\b",
+            r"Excon\b", r"Typhoeus\b",
+            r"\bHTTP\.(get|post|head|put|delete|patch)\b",
+        ],
+        ".py": [
+            r"\brequests\.(get|post|put|delete|head|patch|request)\s*\(",
+            r"\burllib\.request\b", r"\burlopen\s*\(",
+            r"\bhttpx\.(get|post|put|delete|head|patch|request|AsyncClient|Client)\b",
+            r"\baiohttp\.(ClientSession|request)\b",
+            r"\bhttp\.client\.(HTTPConnection|HTTPSConnection)\b",
+        ],
+        ".js": [
+            r"\bfetch\s*\(", r"\baxios\.(get|post|put|delete|request|create)\b",
+            r"\bhttps?\.(request|get)\s*\(", r"\bXMLHttpRequest\b",
+            r"\bgot\s*[\.(]", r"\bsuperagent\b", r"\bnode-fetch\b",
+        ],
+        ".ts": [
+            r"\bfetch\s*\(", r"\baxios\.(get|post|put|delete|request|create)\b",
+            r"\bhttps?\.(request|get)\s*\(", r"\bXMLHttpRequest\b",
+        ],
+        ".mjs": [
+            r"\bfetch\s*\(", r"\baxios\b", r"\bhttps?\.(request|get)\s*\(",
+        ],
+        ".php": [
+            r"\bcurl_exec\s*\(", r"\bcurl_init\s*\(",
+            r"\bfile_get_contents\s*\(\s*['\"]https?://",
+            r"\bGuzzleHttp\\", r"\\Http\\Client\b",
+        ],
+        ".java": [
+            r"\bHttpClient\b", r"\bHttpURLConnection\b", r"\bOkHttpClient\b",
+            r"\bRestTemplate\b", r"\bWebClient\b",
+        ],
+    }.items()
+}
+
 
 # ---------------------------------------------------------------------------
 # Activity entry point
@@ -106,8 +160,10 @@ async def compute(ecosystem: str, package: str, old_version: str, new_version: s
         )
 
     # Extraction and diff are CPU/blocking I/O — run in a thread.
-    diff_summary, install_script_added, install_script_changed, new_dep_count = await asyncio.to_thread(
-        _extract_and_diff, old_bytes, old_filename, new_bytes, new_filename, provider
+    diff_summary, install_script_added, install_script_changed, new_dep_count, net_calls, binary_data = (
+        await asyncio.to_thread(
+            _extract_and_diff, old_bytes, old_filename, new_bytes, new_filename, provider
+        )
     )
 
     return DiffSignals(
@@ -116,6 +172,8 @@ async def compute(ecosystem: str, package: str, old_version: str, new_version: s
         install_script_added=install_script_added,
         install_script_changed=install_script_changed,
         new_dependency_count=new_dep_count,
+        network_calls_in_lib=net_calls,
+        binary_data_added=binary_data,
     )
 
 
@@ -181,7 +239,7 @@ def _extract_and_diff(
     new_bytes: bytes,
     new_filename: str,
     provider,
-) -> tuple[str, bool, bool, int]:
+) -> tuple[str, bool, bool, int, bool, bool]:
     try:
         with tempfile.TemporaryDirectory() as old_dir, tempfile.TemporaryDirectory() as new_dir:
             provider.extract_archive(old_bytes, old_filename, old_dir)
@@ -190,7 +248,7 @@ def _extract_and_diff(
             new_map = _get_file_map(new_dir)
             return _build_diff(old_map, new_map)
     except Exception as exc:  # noqa: BLE001
-        return f"[extraction error: {exc}]", False, False, 0
+        return f"[extraction error: {exc}]", False, False, 0, False, False
 
 
 def _is_noise(rel: str) -> bool:
@@ -252,8 +310,9 @@ _REQUIREMENTS_NAMES = frozenset({
 
 def _build_diff(
     old_map: dict[str, Path], new_map: dict[str, Path]
-) -> tuple[str, bool, bool, int]:
-    """Return (diff_text, install_script_added, install_script_changed, new_dependency_count)."""
+) -> tuple[str, bool, bool, int, bool, bool]:
+    """Return (diff_text, install_script_added, install_script_changed,
+               new_dependency_count, network_calls_in_lib, binary_data_added)."""
     old_keys = set(old_map)
     new_keys = set(new_map)
 
@@ -263,24 +322,40 @@ def _build_diff(
     dangerous_new: list[str] = []
     dangerous_changed: list[str] = []
     regular_new_files: list[str] = []
+    suspicious_binary: list[str] = []
     install_script_added = False
     install_script_changed = False
     new_dependency_count = 0
+    network_calls_in_lib = False
+    binary_data_added = False
 
     for rel in new_files:
-        name = Path(rel).name
+        p = Path(rel)
+        name = p.name
+        suffix = p.suffix.lower()
         if name in INSTALL_HOOK_NAMES:
             install_script_added = True
-        if Path(rel).suffix.lower() in DANGEROUS_BINARY_SUFFIXES:
+        if suffix in DANGEROUS_BINARY_SUFFIXES:
             dangerous_new.append(rel)
         else:
-            regular_new_files.append(f"+ {rel}")
+            # Check for binary content in non-binary-extension files (gemstuffer pattern)
+            if suffix not in _EXPECTED_BINARY_EXTENSIONS and _has_binary_content(new_map[rel]):
+                binary_data_added = True
+                suspicious_binary.append(rel)
+            else:
+                regular_new_files.append(f"+ {rel}")
+            # Check for outbound network calls in library code (not install hooks)
+            if suffix in _NET_CALL_PATTERNS and name not in INSTALL_HOOK_NAMES:
+                new_text = _read_text(new_map[rel])
+                if _added_lines_have_net_calls(new_text.splitlines(), suffix):
+                    network_calls_in_lib = True
 
     high_signal_changed: list[tuple[str, str]] = []
     other_changed: list[str] = []
 
     for rel in changed:
-        suffix = Path(rel).suffix.lower()
+        p = Path(rel)
+        suffix = p.suffix.lower()
         if suffix in DANGEROUS_BINARY_SUFFIXES:
             old_hash = hashlib.sha256(old_map[rel].read_bytes()).hexdigest()
             new_hash = hashlib.sha256(new_map[rel].read_bytes()).hexdigest()
@@ -295,7 +370,7 @@ def _build_diff(
         if old_text == new_text:
             continue
 
-        name = Path(rel).name
+        name = p.name
         if name in INSTALL_HOOK_NAMES:
             install_script_changed = True
         elif name == "package.json" and _npm_install_scripts_added(old_map[rel], new_map[rel]):
@@ -306,7 +381,13 @@ def _build_diff(
         elif name in _REQUIREMENTS_NAMES:
             new_dependency_count += _count_new_pip_deps(old_map[rel], new_map[rel])
 
-        if name in HIGH_SIGNAL_NAMES or Path(name).suffix in HIGH_SIGNAL_SUFFIXES:
+        # Check for newly-added outbound network calls in non-install-hook library code
+        if suffix in _NET_CALL_PATTERNS and name not in INSTALL_HOOK_NAMES:
+            added = _diff_added_lines(old_text, new_text)
+            if _added_lines_have_net_calls(added, suffix):
+                network_calls_in_lib = True
+
+        if name in HIGH_SIGNAL_NAMES or p.suffix in HIGH_SIGNAL_SUFFIXES:
             patch = _unified_diff(old_text, new_text, rel)
             high_signal_changed.append((rel, patch))
         else:
@@ -326,6 +407,13 @@ def _build_diff(
             + "\n".join(lines)
         )
 
+    if suspicious_binary:
+        sections.append(
+            "=== SUSPICIOUS: BINARY DATA IN NON-BINARY FILES ===\n"
+            "(non-binary-extension files containing binary/non-text content — possible embedded payload or exfiltrated data)\n"
+            + "\n".join(f"NEW: {rel}" for rel in suspicious_binary)
+        )
+
     if regular_new_files:
         sections.append("=== NEW FILES ===\n" + "\n".join(regular_new_files))
 
@@ -339,7 +427,7 @@ def _build_diff(
         sections.append("=== CHANGED (other) ===\n" + ", ".join(other_changed))
 
     if not sections:
-        return "[no significant changes detected]", install_script_added, install_script_changed, new_dependency_count
+        return "[no significant changes detected]", install_script_added, install_script_changed, new_dependency_count, network_calls_in_lib, binary_data_added
 
     result = "\n\n".join(sections)
 
@@ -348,7 +436,50 @@ def _build_diff(
         truncated = result.encode()[:MAX_DIFF_BYTES].decode(errors="replace")
         result = truncated + f"\n[diff truncated at 100KB — {total_bytes} bytes total]"
 
-    return result, install_script_added, install_script_changed, new_dependency_count
+    return result, install_script_added, install_script_changed, new_dependency_count, network_calls_in_lib, binary_data_added
+
+
+def _has_binary_content(path: Path, sample_size: int = 8192) -> bool:
+    """Return True if a file contains binary (non-text) data.
+
+    Null bytes are unambiguous. A high ratio of bytes outside printable ASCII
+    plus common whitespace strongly indicates binary or compressed content.
+    """
+    try:
+        sample = path.read_bytes()[:sample_size]
+    except Exception:  # noqa: BLE001
+        return False
+    if not sample:
+        return False
+    if b"\x00" in sample:
+        return True
+    non_text = sum(1 for b in sample if b < 9 or (13 < b < 32) or b > 126)
+    return (non_text / len(sample)) > 0.10
+
+
+def _diff_added_lines(old_text: str, new_text: str) -> list[str]:
+    """Extract lines added in new_text relative to old_text via unified diff."""
+    result: list[str] = []
+    for line in difflib.unified_diff(old_text.splitlines(), new_text.splitlines(), n=0):
+        if line.startswith("+") and not line.startswith("+++"):
+            result.append(line[1:])
+    return result
+
+
+def _added_lines_have_net_calls(lines: list[str], ext: str) -> bool:
+    """Return True if any non-comment line matches a known network-call pattern for ext."""
+    patterns = _NET_CALL_PATTERNS.get(ext, [])
+    if not patterns:
+        return False
+    for line in lines:
+        stripped = line.strip()
+        # Skip single-line comments (rough heuristic — avoids false positives in docs)
+        if stripped.startswith(("#", "//", "*", "--", "=begin", "/*")):
+            continue
+        for pattern in patterns:
+            if pattern.search(line):
+                return True
+    return False
 
 
 def _npm_install_scripts_added(old_path: Path, new_path: Path) -> bool:

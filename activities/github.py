@@ -22,8 +22,7 @@ _CI_INFRA_EXACT: frozenset[str] = frozenset({
     "Makefile", "makefile", "GNUmakefile",
 })
 _CI_INFRA_PATH_PREFIXES: tuple[str, ...] = (
-    ".github/workflows/",
-    ".github/actions/",
+    ".github/",      # workflows/, actions/, CODEOWNERS, dependabot.yml, triage-agent.yml, etc.
     ".circleci/",
     ".buildkite/",
 )

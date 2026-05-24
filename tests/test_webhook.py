@@ -297,3 +297,103 @@ def test_validate_package_accepts_scoped_npm():
 def test_validate_package_accepts_unknown_old_version():
     from api.webhook import _validate_parsed_package
     assert _validate_parsed_package("pip", "requests", "unknown", "2.32.0") is None
+
+
+# ---------------------------------------------------------------------------
+# pull_request_review handling
+# ---------------------------------------------------------------------------
+
+def _review_payload(
+    state: str = "approved",
+    action: str = "submitted",
+    reviewer: str = "alice",
+    pr_number: int = TEST_PR_NUMBER,
+) -> bytes:
+    payload = {
+        "action": action,
+        "review": {"state": state, "user": {"login": reviewer}},
+        "pull_request": {"number": pr_number},
+        "repository": {"full_name": TEST_REPO},
+    }
+    return json.dumps(payload).encode()
+
+
+async def test_approved_review_signals_workflow(client):
+    ac, mock_tc = client
+    mock_handle = AsyncMock()
+    mock_tc.get_workflow_handle = MagicMock(return_value=mock_handle)
+
+    body = _review_payload(state="approved", reviewer="alice")
+    resp = await ac.post(
+        "/webhook",
+        content=body,
+        headers={"X-Hub-Signature-256": _sign(body), "X-GitHub-Event": "pull_request_review"},
+    )
+    assert resp.json()["status"] == "signalled"
+    assert resp.json()["decision"] == "approve"
+    mock_handle.signal.assert_called_once()
+    _, reviewer_arg = mock_handle.signal.call_args[0][1:]
+    assert reviewer_arg == "alice"
+
+
+async def test_changes_requested_review_signals_reject(client):
+    ac, mock_tc = client
+    mock_handle = AsyncMock()
+    mock_tc.get_workflow_handle = MagicMock(return_value=mock_handle)
+
+    body = _review_payload(state="changes_requested", reviewer="bob")
+    resp = await ac.post(
+        "/webhook",
+        content=body,
+        headers={"X-Hub-Signature-256": _sign(body), "X-GitHub-Event": "pull_request_review"},
+    )
+    assert resp.json()["status"] == "signalled"
+    assert resp.json()["decision"] == "reject"
+
+
+async def test_commented_review_is_ignored(client):
+    ac, mock_tc = client
+    body = _review_payload(state="commented")
+    resp = await ac.post(
+        "/webhook",
+        content=body,
+        headers={"X-Hub-Signature-256": _sign(body), "X-GitHub-Event": "pull_request_review"},
+    )
+    assert resp.json()["status"] == "ignored"
+
+
+async def test_review_dismissed_action_is_ignored(client):
+    ac, mock_tc = client
+    body = _review_payload(action="dismissed")
+    resp = await ac.post(
+        "/webhook",
+        content=body,
+        headers={"X-Hub-Signature-256": _sign(body), "X-GitHub-Event": "pull_request_review"},
+    )
+    assert resp.json()["status"] == "ignored"
+
+
+async def test_review_no_active_workflow_is_ignored(client):
+    ac, mock_tc = client
+    mock_handle = AsyncMock()
+    mock_handle.signal.side_effect = Exception("workflow not found")
+    mock_tc.get_workflow_handle = MagicMock(return_value=mock_handle)
+
+    body = _review_payload(state="approved")
+    resp = await ac.post(
+        "/webhook",
+        content=body,
+        headers={"X-Hub-Signature-256": _sign(body), "X-GitHub-Event": "pull_request_review"},
+    )
+    assert resp.json()["status"] == "ignored"
+
+
+async def test_review_bad_signature_rejected(client):
+    ac, _ = client
+    body = _review_payload(state="approved")
+    resp = await ac.post(
+        "/webhook",
+        content=body,
+        headers={"X-Hub-Signature-256": "sha256=badhash", "X-GitHub-Event": "pull_request_review"},
+    )
+    assert resp.status_code == 401

