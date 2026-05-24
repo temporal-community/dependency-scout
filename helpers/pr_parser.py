@@ -23,10 +23,11 @@ from typing import Literal
 
 # Maps Dependabot's internal ecosystem slugs to our ecosystem strings.
 # Add new entries here as more ecosystems are supported.
-_DEPENDABOT_ECOSYSTEM_MAP: dict[str, Literal["pip", "npm", "rubygems"]] = {
+_DEPENDABOT_ECOSYSTEM_MAP: dict[str, Literal["pip", "npm", "rubygems", "maven"]] = {
     "npm_and_yarn": "npm",
     "pip": "pip",
     "bundler": "rubygems",
+    "maven": "maven",
 }
 
 
@@ -35,12 +36,13 @@ class ParsedPR:
     package: str
     old_version: str
     new_version: str
-    ecosystem: Literal["pip", "npm", "rubygems"] = "pip"
+    ecosystem: Literal["pip", "npm", "rubygems", "maven"] = "pip"
 
 
 # @? allows scoped npm packages: @typescript-eslint/parser
+# [^`\s]+ is broad enough to capture Maven coordinates (groupId:artifactId)
 _DEPENDABOT_RE = re.compile(
-    r"[Bb]ump (?P<pkg>@?[\w./\-\[\]]+) from (?P<old>[\w.\-]+) to (?P<new>[\w.\-]+)",
+    r"[Bb]ump (?P<pkg>@?[^\s`]+) from (?P<old>[\w.\-]+) to (?P<new>[\w.\-]+)",
     re.IGNORECASE,
 )
 
@@ -80,7 +82,7 @@ def parse_pr(title: str, body: str = "", branch: str = "") -> ParsedPR | None:
     return None
 
 
-def _detect_ecosystem(package: str, branch: str) -> Literal["pip", "npm", "rubygems"]:
+def _detect_ecosystem(package: str, branch: str) -> Literal["pip", "npm", "rubygems", "maven"]:
     # Dependabot branch names encode ecosystem: dependabot/{ecosystem}/{rest}
     if branch.startswith("dependabot/"):
         parts = branch.split("/")

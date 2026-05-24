@@ -27,6 +27,8 @@ async def check(ecosystem: str, package: str, old_version: str, new_version: str
             return await _check_npm(package, new_version)
         if ecosystem == "rubygems":
             return await _check_rubygems(package, new_version)
+        if ecosystem == "maven":
+            return await _check_maven(package, new_version)
     except ApplicationError:
         raise
     except Exception:  # noqa: BLE001
@@ -78,6 +80,45 @@ async def _check_npm(package: str, new_version: str) -> VersionLineSignals:
             release_dates[version] = parse_upload_time(raw)
         except Exception:  # noqa: BLE001
             pass
+
+    return detect_stale_version_line(all_versions, new_version, release_dates=release_dates)
+
+
+async def _check_maven(package: str, new_version: str) -> VersionLineSignals:
+    """Use search.maven.org to get all versions for a groupId:artifactId package."""
+    if ":" not in package:
+        return VersionLineSignals()
+    group_id, artifact_id = package.split(":", 1)
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        resp = await client.get(
+            "https://search.maven.org/solrsearch/select",
+            params={
+                "q": f"g:{group_id} AND a:{artifact_id}",
+                "core": "gav",
+                "rows": "200",
+                "wt": "json",
+            },
+        )
+    if resp.status_code != 200:
+        return VersionLineSignals()
+
+    docs = resp.json().get("response", {}).get("docs", [])
+    if not docs:
+        return VersionLineSignals()
+
+    release_dates: dict[str, datetime] = {}
+    all_versions: list[str] = []
+    for doc in docs:
+        version = doc.get("v", "")
+        if not version or "SNAPSHOT" in version.upper():
+            continue
+        all_versions.append(version)
+        ts_ms = doc.get("timestamp")
+        if ts_ms is not None:
+            try:
+                release_dates[version] = datetime.fromtimestamp(ts_ms / 1000, tz=timezone.utc)
+            except Exception:  # noqa: BLE001
+                pass
 
     return detect_stale_version_line(all_versions, new_version, release_dates=release_dates)
 

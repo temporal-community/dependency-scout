@@ -67,6 +67,7 @@ class EcosystemProvider(Protocol):
 
 
 def get_provider(ecosystem: str) -> EcosystemProvider:
+    from activities.ecosystems.maven import MavenProvider
     from activities.ecosystems.npm import NpmProvider
     from activities.ecosystems.pip import PipProvider
     from activities.ecosystems.rubygems import RubyGemsProvider
@@ -75,6 +76,7 @@ def get_provider(ecosystem: str) -> EcosystemProvider:
         "pip": PipProvider(),
         "npm": NpmProvider(),
         "rubygems": RubyGemsProvider(),
+        "maven": MavenProvider(),
     }
     if ecosystem not in providers:
         raise ValueError(f"Unknown ecosystem: {ecosystem!r}")
@@ -89,6 +91,7 @@ ALLOWED_CDN_HOSTS: frozenset[str] = frozenset({
     "files.pythonhosted.org",
     "registry.npmjs.org",
     "rubygems.org",
+    "repo1.maven.org",
 })
 
 

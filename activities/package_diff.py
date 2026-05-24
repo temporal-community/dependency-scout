@@ -28,7 +28,7 @@ from activities.models import DiffSignals
 MAX_DOWNLOAD_BYTES = 20 * 1024 * 1024  # 20 MB
 MAX_DIFF_BYTES = 100 * 1024  # 100 KB
 
-NOISE_DIRS = {".dist-info", "__pycache__", ".egg-info", "node_modules", ".nyc_output", "coverage"}
+NOISE_DIRS = {".dist-info", "__pycache__", ".egg-info", "node_modules", ".nyc_output", "coverage", "META-INF"}
 NOISE_SUFFIXES = {".pyc", ".pyo", ".rbc"}  # .rbc = Ruby bytecode cache
 NOISE_FILENAMES = {"RECORD", "WHEEL", "METADATA", "INSTALLER", "package-lock.json", "yarn.lock", "npm-shrinkwrap.json"}
 
@@ -44,6 +44,7 @@ HIGH_SIGNAL_NAMES = {
     "preinstall.js",
     "Rakefile",
     "Gemfile",
+    "pom.xml",
 }
 HIGH_SIGNAL_SUFFIXES = {".pth", ".gemspec"}
 

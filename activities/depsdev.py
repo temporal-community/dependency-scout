@@ -6,7 +6,7 @@ from temporalio import activity
 
 from activities.models import DepsDevSignals
 
-_ECOSYSTEM_MAP = {"pip": "pypi", "npm": "npm", "rubygems": "rubygems"}
+_ECOSYSTEM_MAP = {"pip": "pypi", "npm": "npm", "rubygems": "rubygems", "maven": "maven"}
 
 
 @activity.defn(name="activities.depsdev.fetch")
