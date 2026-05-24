@@ -114,8 +114,17 @@ def test_dependabot_bundler_maps_to_rubygems():
 
 def test_dependabot_unknown_ecosystem_slug_falls_back():
     result = parse_pr(
-        "Bump my-crate from 1.0.0 to 1.1.0",
-        branch="dependabot/cargo/my-crate-1.1.0",  # cargo not in the map
+        "Bump some-pkg from 1.0.0 to 1.1.0",
+        branch="dependabot/gradle/some-pkg-1.1.0",  # gradle not in the map
     )
     assert result is not None
     assert result.ecosystem == "pip"  # unknown slug → default
+
+
+def test_dependabot_cargo_detected():
+    result = parse_pr(
+        "Bump serde from 1.0.100 to 1.0.200",
+        branch="dependabot/cargo/serde-1.0.200",
+    )
+    assert result is not None
+    assert result.ecosystem == "cargo"

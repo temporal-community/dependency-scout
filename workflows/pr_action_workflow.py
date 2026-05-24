@@ -46,7 +46,11 @@ class PRActionWorkflow:
     @workflow.run
     async def run(self, pr: PRContext) -> str:
         retry = RetryPolicy(maximum_attempts=5, initial_interval=timedelta(seconds=2))
-        opts: dict = dict(start_to_close_timeout=timedelta(seconds=30), retry_policy=retry)
+        opts: dict = dict(
+            start_to_close_timeout=timedelta(seconds=30),
+            schedule_to_close_timeout=timedelta(minutes=5),
+            retry_policy=retry,
+        )
 
         config: RepoConfig = await workflow.execute_activity(
             "activities.repo_config.fetch", pr, result_type=RepoConfig, **opts
@@ -67,6 +71,7 @@ class PRActionWorkflow:
                 args=[pr.ecosystem, pr.package_name, pr.old_version, pr.new_version],
                 id=f"triage-{pr.ecosystem}-{pr.package_name}-{pr.new_version}-{date_key}",
                 parent_close_policy=ParentClosePolicy.ABANDON,
+                execution_timeout=timedelta(minutes=15),
                 result_type=Verdict,
             ),
             workflow.execute_activity(
@@ -151,11 +156,17 @@ class PRActionWorkflow:
                 "activities.github.request_review", args=[pr, config.reviewers], **opts
             )
 
-            # Wait for a decision from an authorized reviewer.
+            # Wait for a decision from an authorized reviewer (max 7 days).
             # Re-check authorization each time a signal arrives in case an
             # unauthorized signal arrived first.
             while True:
-                await workflow.wait_condition(lambda: self._human_decision is not None)
+                decision_received = await workflow.wait_condition(
+                    lambda: self._human_decision is not None,
+                    timeout=timedelta(days=7),
+                )
+                if not decision_received:
+                    workflow.logger.warning("Human review wait timed out after 7 days")
+                    return "timed-out-awaiting-review"
                 if not config.reviewers or self._approver in config.reviewers:
                     break
                 # Unauthorized signal — log and keep waiting

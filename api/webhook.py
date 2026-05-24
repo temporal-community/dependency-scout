@@ -11,6 +11,7 @@ import json
 import os
 import re
 from contextlib import asynccontextmanager
+from datetime import timedelta
 
 from fastapi import FastAPI, Header, HTTPException, Request
 from packaging.utils import canonicalize_name
@@ -50,6 +51,9 @@ _COMPOSER_NAME_RE = re.compile(
 # NuGet: package IDs are case-insensitive flat names, same character set as PyPI
 _NUGET_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,213}$")
 
+# Cargo: crate names — letters, digits, hyphens, underscores; max 64 chars
+_CARGO_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
+
 _NAME_RE_BY_ECOSYSTEM: dict[str, re.Pattern[str]] = {
     "pip": _PYPI_NAME_RE,
     "npm": _NPM_NAME_RE,
@@ -57,6 +61,7 @@ _NAME_RE_BY_ECOSYSTEM: dict[str, re.Pattern[str]] = {
     "maven": _MAVEN_NAME_RE,
     "composer": _COMPOSER_NAME_RE,
     "nuget": _NUGET_NAME_RE,
+    "cargo": _CARGO_NAME_RE,
 }
 
 
@@ -164,6 +169,7 @@ async def webhook(
         id=workflow_id,
         task_queue=os.environ.get("TEMPORAL_TASK_QUEUE", "dependency-triage"),
         id_reuse_policy=WorkflowIDReusePolicy.ALLOW_DUPLICATE_FAILED_ONLY,
+        execution_timeout=timedelta(days=30),  # backstop for zombie workflows
     )
 
     return {"status": "started", "workflow_id": workflow_id}

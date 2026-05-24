@@ -109,6 +109,7 @@ ALLOWED_CDN_HOSTS: frozenset[str] = frozenset({
     "repo1.maven.org",
     "codeload.github.com",   # Composer archives — GitHub's archive CDN (no redirect)
     "api.nuget.org",
+    "static.crates.io",
 })
 
 
