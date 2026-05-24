@@ -5,7 +5,7 @@ You have 47 unreviewed Dependabot PRs. You're going to merge most of them anyway
 **This bot gives every dependency PR a real second opinion before it merges.**
 
 **TL;DR — what it checks and why:**
-- **Does this version have known vulnerabilities?** Queries [OSV.dev](https://osv.dev) (includes the OpenSSF malicious-packages database) for CVEs and confirmed malicious packages.
+- **Does this version have known vulnerabilities?** Queries [OSV - Open Source Vulnerabilities database](https://osv.dev) (includes the [OpenSSF malicious-packages database](https://github.com/ossf/malicious-packages)) for CVEs and confirmed malicious packages.
 - **Is the package itself suspicious?** [Socket.dev](https://socket.dev) scans for obfuscated code, install-time scripts, typosquatting, and permission creep.
 - **What code actually changed?** Downloads and diffs both package archives — flags new binary `.so`/`.dll`/`.node` files (which execute on import), new install hooks, and unusual dependency additions.
 - **Is the release fresh?** Very new releases (<24h) haven't had time for community review; older is safer.
