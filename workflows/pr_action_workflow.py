@@ -1,4 +1,6 @@
 import asyncio
+import hashlib
+import json
 from datetime import timedelta
 from temporalio import workflow
 from temporalio.common import RetryPolicy
@@ -61,15 +63,25 @@ class PRActionWorkflow:
         # so a stale GREEN from yesterday cannot persist indefinitely. Within a day, all
         # repos seeing the same bump still share one triage run.
         #
+        # Repos with extra_signal_activities get a fingerprint suffix so they dedup only
+        # among repos with the same custom activity set; repos without custom activities
+        # share the same workflow as before.
+        #
         # check_pr_files runs in parallel: it's a fast per-PR check that looks for CI
         # workflows, Dockerfiles, or scripts in the PR — files that should never appear
         # in a routine dep-bump. No reason to block triage while waiting for it.
         date_key = workflow.now().strftime("%Y-%m-%d")
+        extra_key = ""
+        if config.extra_signal_activities:
+            fp = hashlib.sha256(
+                json.dumps(sorted(config.extra_signal_activities)).encode()
+            ).hexdigest()[:8]
+            extra_key = f"-x{fp}"
         verdict, pr_files = await asyncio.gather(
             workflow.execute_child_workflow(
                 PackageTriageWorkflow.run,
-                args=[pr.ecosystem, pr.package_name, pr.old_version, pr.new_version],
-                id=f"triage-{pr.ecosystem}-{pr.package_name}-{pr.new_version}-{date_key}",
+                args=[pr.ecosystem, pr.package_name, pr.old_version, pr.new_version, config.extra_signal_activities],
+                id=f"triage-{pr.ecosystem}-{pr.package_name}-{pr.new_version}-{date_key}{extra_key}",
                 parent_close_policy=ParentClosePolicy.ABANDON,
                 execution_timeout=timedelta(minutes=15),
                 result_type=Verdict,

@@ -191,6 +191,27 @@ def test_rule_based_socket_score_boundary_ok(base_signals):
     assert verdict.classification == "green"
 
 
+def test_rule_based_socket_score_boundary_below(base_signals):
+    base_signals.socket.socket_score = 49  # one below threshold → flagged
+    verdict = _rule_based(base_signals)
+    assert verdict.classification == "yellow"
+    assert any("socket score" in f for f in verdict.flags)
+
+
+def test_rule_based_release_age_boundary_24h_is_recent(base_signals):
+    base_signals.age.release_age_hours = 24.0  # exactly 24h: past "very fresh", still "recent"
+    verdict = _rule_based(base_signals)
+    assert verdict.classification == "yellow"
+    assert any("recent release" in f for f in verdict.flags)
+    assert not any("very fresh" in f for f in verdict.flags)
+
+
+def test_rule_based_release_age_boundary_168h_is_green(base_signals):
+    base_signals.age.release_age_hours = 168.0  # exactly one week: no longer flagged
+    verdict = _rule_based(base_signals)
+    assert verdict.classification == "green"
+
+
 # ---------------------------------------------------------------------------
 # classify — no API key falls back to rule-based
 # ---------------------------------------------------------------------------

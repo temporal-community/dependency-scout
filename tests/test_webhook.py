@@ -25,7 +25,7 @@ def _sign(body: bytes, secret: str = TEST_SECRET) -> str:
     return "sha256=" + hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
 
 
-TEST_HEAD_SHA = "abc123def456" * 3  # realistic-looking SHA
+TEST_HEAD_SHA = "abc123def456abc123def456abc123def456abc1"  # 40-char hex SHA-1
 
 def _dependabot_payload(
     action: str = "opened",
@@ -129,6 +129,7 @@ async def test_pr_context_fields_correct(client):
     pr_context = args[1]
     assert pr_context.repo == TEST_REPO
     assert pr_context.pr_number == TEST_PR_NUMBER
+    assert pr_context.ecosystem == "pip"
     assert pr_context.package_name == "requests"
     assert pr_context.old_version == "2.31.0"
     assert pr_context.new_version == "2.32.0"

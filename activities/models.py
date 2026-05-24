@@ -1,5 +1,19 @@
-from typing import Literal
-from pydantic import BaseModel, Field
+from typing import Any, Literal
+from pydantic import BaseModel, Field, field_validator
+
+
+def _validate_ecosystem_name(v: str) -> str:
+    try:
+        from activities.ecosystems import get_provider
+    except Exception:
+        # The Temporal workflow sandbox blocks httpx (imported by activities.ecosystems).
+        # Skip validation — the ecosystem name was already validated at the webhook boundary.
+        return v
+    try:
+        get_provider(v)
+    except ValueError:
+        raise ValueError(f"Unknown ecosystem: {v!r} — no provider registered for this name")
+    return v
 
 
 class PRContext(BaseModel):
@@ -7,11 +21,16 @@ class PRContext(BaseModel):
     pr_number: int
     pr_author: str                      # "dependabot[bot]" or "renovate[bot]"
     installation_id: int                # GitHub App installation
-    ecosystem: Literal["pip", "npm", "rubygems", "maven", "composer", "nuget", "cargo", "go"]
+    ecosystem: str
     package_name: str
     old_version: str
     new_version: str
     head_sha: str = ""                  # PR branch HEAD SHA at webhook receipt time
+
+    @field_validator("ecosystem")
+    @classmethod
+    def ecosystem_must_be_registered(cls, v: str) -> str:
+        return _validate_ecosystem_name(v)
 
 
 class RepoConfig(BaseModel):
@@ -27,6 +46,7 @@ class RepoConfig(BaseModel):
     auto_merge_min_confidence: float = 0.80  # classifier must reach this confidence to auto-merge
     block_classifications: list[str] = ["red"]  # close PRs classified as RED by default; set [] to observe-only
     max_new_dependencies: int = 5           # flag as yellow when more direct deps than this are added
+    extra_signal_activities: list[str] = []  # additional Temporal activity names to call; each receives (ecosystem, package, old_version, new_version) and must return a JSON-serializable dict
 
 
 # Partial signal models — one per signal activity, nested into PackageSignals in the workflow.
@@ -115,7 +135,7 @@ class AttestationSignals(BaseModel):
 
 
 class PackageSignals(BaseModel):
-    ecosystem: Literal["pip", "npm", "rubygems", "maven", "composer", "nuget", "cargo", "go"]
+    ecosystem: str
     package_name: str
     old_version: str
     new_version: str
@@ -130,6 +150,12 @@ class PackageSignals(BaseModel):
     version_line: VersionLineSignals = Field(default_factory=VersionLineSignals)
     deps_dev: DepsDevSignals = Field(default_factory=DepsDevSignals)
     scorecard: ScorecardSignals = Field(default_factory=ScorecardSignals)
+    custom_signals: dict[str, Any] = Field(default_factory=dict)  # plugin-supplied signal results
+
+    @field_validator("ecosystem")
+    @classmethod
+    def ecosystem_must_be_registered(cls, v: str) -> str:
+        return _validate_ecosystem_name(v)
 
 
 class Verdict(BaseModel):

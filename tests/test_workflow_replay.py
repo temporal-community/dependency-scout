@@ -48,12 +48,12 @@ async def test_replay_green_automerge(replayer: Replayer) -> None:
 
 
 async def test_replay_yellow_human_approved(replayer: Replayer) -> None:
-    """YELLOW verdict + reviewers config → human approved → merged."""
+    """YELLOW verdict + reviewers config → 7-day wait timed out (no live server in fixture gen)."""
     await replayer.replay_workflow(_load("yellow_human_approved"))
 
 
 async def test_replay_yellow_human_rejected(replayer: Replayer) -> None:
-    """YELLOW verdict + reviewers config → human rejected → closed."""
+    """YELLOW verdict + reviewers config → 7-day wait timed out (no live server in fixture gen)."""
     await replayer.replay_workflow(_load("yellow_human_rejected"))
 
 

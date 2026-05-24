@@ -76,19 +76,40 @@ _PROVIDERS: dict[str, EcosystemProvider] | None = None
 
 
 def _build_provider_registry() -> dict[str, EcosystemProvider]:
-    """Scan activities/ecosystems/*.py for classes with an ecosystem_name attribute.
+    """Scan built-in providers then entry points for classes with an ecosystem_name attribute.
+
+    Built-in providers: activities/ecosystems/*.py (pkgutil scan).
+    External plugins: declare an entry point in group "triage_agent.ecosystems":
+        [project.entry-points."triage_agent.ecosystems"]
+        my_ecosystem = "my_package:MyProvider"
 
     Called lazily on first get_provider() call to avoid circular imports at
     module load time (providers import helpers from this same __init__.py).
+    Built-in providers take precedence over plugins with the same ecosystem_name.
     """
     import activities.ecosystems as _pkg
     registry: dict[str, EcosystemProvider] = {}
+
     for mod_info in pkgutil.iter_modules(_pkg.__path__, prefix="activities.ecosystems."):
         mod = importlib.import_module(mod_info.name)
         for _, obj in inspect.getmembers(mod, inspect.isclass):
             name = getattr(obj, "ecosystem_name", None)
             if name and obj.__module__ == mod_info.name:
                 registry[name] = obj()
+
+    try:
+        from importlib.metadata import entry_points
+        for ep in entry_points(group="triage_agent.ecosystems"):
+            try:
+                cls = ep.load()
+                name = getattr(cls, "ecosystem_name", None)
+                if name and name not in registry:
+                    registry[name] = cls()
+            except Exception:  # noqa: BLE001
+                pass
+    except Exception:  # noqa: BLE001
+        pass
+
     return registry
 
 

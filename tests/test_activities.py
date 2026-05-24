@@ -3,12 +3,15 @@ Unit tests for signal activities. HTTP calls are mocked with respx.
 Each test uses ActivityEnvironment to provide the Temporal activity context.
 """
 import json
+from datetime import datetime, timezone, timedelta
+
+import httpx
 import pytest
 import respx
-import httpx
+from temporalio.exceptions import ApplicationError
 from temporalio.testing import ActivityEnvironment
 
-from activities.pypi_metadata import fetch as pypi_fetch
+from activities.pypi_metadata import fetch as metadata_fetch
 from activities.osv import check as osv_check
 from activities.release_age import check as release_age_check
 from activities.maintainer import history as maintainer_history
@@ -33,7 +36,8 @@ def _pypi_response(package: str, version: str, upload_time: str = "2025-01-01T00
             "maintainer": "",
             "maintainer_email": "",
         },
-        "urls": [{"upload_time_iso_8601": upload_time, "upload_time": upload_time.rstrip("Z")}],
+        # upload_time_iso_8601 includes the "Z" timezone suffix; upload_time is naive (no suffix).
+        "urls": [{"upload_time_iso_8601": upload_time, "upload_time": upload_time.removesuffix("Z")}],
     }
 
 
@@ -51,7 +55,7 @@ async def test_pypi_metadata_fetch_success():
     )
 
     env = ActivityEnvironment()
-    result = await env.run(pypi_fetch, "pip", "requests", "2.31.0", "2.32.0")
+    result = await env.run(metadata_fetch, "pip", "requests", "2.31.0", "2.32.0")
 
     assert result.weekly_downloads == 50_000_000
     assert result.is_major_bump is False
@@ -67,20 +71,19 @@ async def test_pypi_metadata_major_bump():
     )
 
     env = ActivityEnvironment()
-    result = await env.run(pypi_fetch, "pip", "django", "4.2.0", "5.0.0")
+    result = await env.run(metadata_fetch, "pip", "django", "4.2.0", "5.0.0")
     assert result.is_major_bump is True
 
 
 @respx.mock
 async def test_pypi_metadata_404_raises_non_retryable():
-    from temporalio.exceptions import ApplicationError
     respx.get(f"{PYPI_BASE}/nonexistent/1.0.0/json").mock(
         return_value=httpx.Response(404)
     )
 
     env = ActivityEnvironment()
     with pytest.raises(ApplicationError) as exc_info:
-        await env.run(pypi_fetch, "pip", "nonexistent", "0.9.0", "1.0.0")
+        await env.run(metadata_fetch, "pip", "nonexistent", "0.9.0", "1.0.0")
     assert exc_info.value.non_retryable is True
 
 
@@ -94,7 +97,7 @@ async def test_pypi_metadata_pypistats_failure_returns_none():
     )
 
     env = ActivityEnvironment()
-    result = await env.run(pypi_fetch, "pip", "requests", "2.31.0", "2.32.0")
+    result = await env.run(metadata_fetch, "pip", "requests", "2.31.0", "2.32.0")
     assert result.weekly_downloads is None
 
 
@@ -149,7 +152,6 @@ async def test_osv_passes_correct_ecosystem():
 
 @respx.mock
 async def test_release_age_recent():
-    from datetime import datetime, timezone, timedelta
     recent = (datetime.now(timezone.utc) - timedelta(hours=12)).strftime("%Y-%m-%dT%H:%M:%SZ")
     respx.get(f"{PYPI_BASE}/requests/2.32.0/json").mock(
         return_value=httpx.Response(200, json=_pypi_response("requests", "2.32.0", recent))
@@ -162,8 +164,9 @@ async def test_release_age_recent():
 
 @respx.mock
 async def test_release_age_old():
+    old_ts = (datetime.now(timezone.utc) - timedelta(days=90)).strftime("%Y-%m-%dT%H:%M:%SZ")
     respx.get(f"{PYPI_BASE}/requests/2.32.0/json").mock(
-        return_value=httpx.Response(200, json=_pypi_response("requests", "2.32.0", "2024-01-01T00:00:00Z"))
+        return_value=httpx.Response(200, json=_pypi_response("requests", "2.32.0", old_ts))
     )
 
     env = ActivityEnvironment()
@@ -226,7 +229,7 @@ async def test_pypi_metadata_pypistats_network_error_returns_none():
         side_effect=httpx.ConnectError("network down")
     )
     env = ActivityEnvironment()
-    result = await env.run(pypi_fetch, "pip", "requests", "2.31.0", "2.32.0")
+    result = await env.run(metadata_fetch, "pip", "requests", "2.31.0", "2.32.0")
     assert result.weekly_downloads is None
 
 
@@ -236,14 +239,18 @@ def test_pypi_is_major_non_semver_returns_false():
     assert is_major("", "") is False
 
 
+def test_is_major_equal_versions_returns_false():
+    from activities.ecosystems import is_major
+    assert is_major("2.0.0", "2.0.0") is False
+    assert is_major("v1.0.0", "v1.0.0") is False
+
+
 # ---------------------------------------------------------------------------
 # release_age — 404, empty urls, missing timestamp, naive datetime
 # ---------------------------------------------------------------------------
 
 @respx.mock
 async def test_release_age_404_raises_non_retryable():
-    from activities.release_age import check as release_age_check
-    from temporalio.exceptions import ApplicationError
     respx.get(f"{PYPI_BASE}/missing/1.0.0/json").mock(return_value=httpx.Response(404))
     env = ActivityEnvironment()
     with pytest.raises(ApplicationError) as exc_info:
@@ -253,7 +260,6 @@ async def test_release_age_404_raises_non_retryable():
 
 @respx.mock
 async def test_release_age_empty_urls_returns_none():
-    from activities.release_age import check as release_age_check
     respx.get(f"{PYPI_BASE}/requests/2.32.0/json").mock(
         return_value=httpx.Response(200, json={"info": {}, "urls": []})
     )
@@ -264,7 +270,6 @@ async def test_release_age_empty_urls_returns_none():
 
 @respx.mock
 async def test_release_age_missing_timestamp_returns_none():
-    from activities.release_age import check as release_age_check
     respx.get(f"{PYPI_BASE}/requests/2.32.0/json").mock(
         return_value=httpx.Response(200, json={"info": {}, "urls": [{}]})
     )
@@ -304,7 +309,7 @@ async def test_npm_metadata_fetch_success():
     )
 
     env = ActivityEnvironment()
-    result = await env.run(pypi_fetch, "npm", "lodash", "4.17.20", "4.17.21")
+    result = await env.run(metadata_fetch, "npm", "lodash", "4.17.20", "4.17.21")
 
     assert result.weekly_downloads == 30_000_000
     assert result.is_major_bump is False
@@ -321,7 +326,7 @@ async def test_npm_metadata_major_bump():
     )
 
     env = ActivityEnvironment()
-    result = await env.run(pypi_fetch, "npm", "react", "17.0.0", "18.0.0")
+    result = await env.run(metadata_fetch, "npm", "react", "17.0.0", "18.0.0")
     assert result.is_major_bump is True
 
 
@@ -332,7 +337,7 @@ async def test_npm_metadata_404_raises_non_retryable():
 
     env = ActivityEnvironment()
     with pytest.raises(ApplicationError) as exc_info:
-        await env.run(pypi_fetch, "npm", "nonexistent", "0.9.0", "1.0.0")
+        await env.run(metadata_fetch, "npm", "nonexistent", "0.9.0", "1.0.0")
     assert exc_info.value.non_retryable is True
 
 
@@ -344,7 +349,7 @@ async def test_npm_metadata_downloads_failure_returns_none():
     respx.get(f"{NPM_DOWNLOADS_BASE}/lodash").mock(return_value=httpx.Response(500))
 
     env = ActivityEnvironment()
-    result = await env.run(pypi_fetch, "npm", "lodash", "4.17.20", "4.17.21")
+    result = await env.run(metadata_fetch, "npm", "lodash", "4.17.20", "4.17.21")
     assert result.weekly_downloads is None
 
 
@@ -356,7 +361,7 @@ async def test_npm_metadata_downloads_network_error_returns_none():
     respx.get(f"{NPM_DOWNLOADS_BASE}/lodash").mock(side_effect=httpx.ConnectError("down"))
 
     env = ActivityEnvironment()
-    result = await env.run(pypi_fetch, "npm", "lodash", "4.17.20", "4.17.21")
+    result = await env.run(metadata_fetch, "npm", "lodash", "4.17.20", "4.17.21")
     assert result.weekly_downloads is None
 
 
@@ -371,7 +376,7 @@ async def test_pypi_metadata_long_summary_truncated():
     )
 
     env = ActivityEnvironment()
-    result = await env.run(pypi_fetch, "pip", "pkg", "0.9.0", "1.0.0")
+    result = await env.run(metadata_fetch, "pip", "pkg", "0.9.0", "1.0.0")
     assert result.package_description is not None
     assert len(result.package_description) == 500
 
@@ -382,7 +387,6 @@ async def test_pypi_metadata_long_summary_truncated():
 
 @respx.mock
 async def test_npm_release_age_success():
-    from datetime import datetime, timezone, timedelta
     recent = (datetime.now(timezone.utc) - timedelta(hours=6)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
     respx.get(f"{NPM_BASE}/lodash").mock(
         return_value=httpx.Response(200, json={"time": {"4.17.21": recent}})
@@ -396,7 +400,6 @@ async def test_npm_release_age_success():
 
 @respx.mock
 async def test_npm_release_age_404_raises_non_retryable():
-    from temporalio.exceptions import ApplicationError
     respx.get(f"{NPM_BASE}/missing").mock(return_value=httpx.Response(404))
 
     env = ActivityEnvironment()
@@ -495,7 +498,7 @@ async def test_rubygems_metadata_fetch_success():
     )
 
     env = ActivityEnvironment()
-    result = await env.run(pypi_fetch, "rubygems", "rails", "7.0.0", "7.1.0")
+    result = await env.run(metadata_fetch, "rubygems", "rails", "7.0.0", "7.1.0")
     assert result.weekly_downloads == 74_000   # sum of 7 days, not total lifetime
     assert result.package_description == "Full-stack web framework."
     assert result.is_major_bump is False
@@ -510,7 +513,7 @@ async def test_rubygems_metadata_weekly_downloads_fallback_on_error():
     respx.get(RUBYGEMS_DL_SEARCH).mock(return_value=httpx.Response(500))
 
     env = ActivityEnvironment()
-    result = await env.run(pypi_fetch, "rubygems", "rails", "7.0.0", "7.1.0")
+    result = await env.run(metadata_fetch, "rubygems", "rails", "7.0.0", "7.1.0")
     assert result.weekly_downloads is None
     assert result.is_major_bump is False
 
@@ -523,19 +526,18 @@ async def test_rubygems_metadata_major_bump():
     respx.get(RUBYGEMS_DL_SEARCH).mock(return_value=httpx.Response(500))
 
     env = ActivityEnvironment()
-    result = await env.run(pypi_fetch, "rubygems", "rails", "7.1.0", "8.0.0")
+    result = await env.run(metadata_fetch, "rubygems", "rails", "7.1.0", "8.0.0")
     assert result.is_major_bump is True
 
 
 @respx.mock
 async def test_rubygems_metadata_404_raises_non_retryable():
-    from temporalio.exceptions import ApplicationError
     respx.get(f"{RUBYGEMS_API}/nosuchthing.json").mock(return_value=httpx.Response(404))
     respx.get(RUBYGEMS_DL_SEARCH).mock(return_value=httpx.Response(404))
 
     env = ActivityEnvironment()
     with pytest.raises(ApplicationError) as exc_info:
-        await env.run(pypi_fetch, "rubygems", "nosuchthing", "0.9.0", "1.0.0")
+        await env.run(metadata_fetch, "rubygems", "nosuchthing", "0.9.0", "1.0.0")
     assert exc_info.value.non_retryable is True
 
 
@@ -547,7 +549,7 @@ async def test_rubygems_metadata_empty_description():
     respx.get(RUBYGEMS_DL_SEARCH).mock(return_value=httpx.Response(500))
 
     env = ActivityEnvironment()
-    result = await env.run(pypi_fetch, "rubygems", "mygem", "1.0.0", "1.0.1")
+    result = await env.run(metadata_fetch, "rubygems", "mygem", "1.0.0", "1.0.1")
     assert result.package_description is None
 
 
@@ -560,10 +562,7 @@ RUBYGEMS_VERSIONS_API = "https://rubygems.org/api/v1/versions"
 
 @respx.mock
 async def test_rubygems_release_age_success():
-    import datetime
-    recent = (
-        datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=6)
-    ).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+    recent = (datetime.now(timezone.utc) - timedelta(hours=6)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
     respx.get(f"{RUBYGEMS_VERSIONS_API}/rails.json").mock(
         return_value=httpx.Response(200, json=[
             {"number": "7.1.0", "created_at": recent},
@@ -579,7 +578,6 @@ async def test_rubygems_release_age_success():
 
 @respx.mock
 async def test_rubygems_release_age_404_raises_non_retryable():
-    from temporalio.exceptions import ApplicationError
     respx.get(f"{RUBYGEMS_VERSIONS_API}/nosuchthing.json").mock(return_value=httpx.Response(404))
 
     env = ActivityEnvironment()

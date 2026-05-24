@@ -1,19 +1,15 @@
 """
-Structural tests that catch three classes of wiring bugs:
+Structural tests that catch two classes of wiring bugs:
 
 1. An activity name string in the workflow has no registered handler in the worker
    (silent runtime failure after the workflow has already started).
 
 2. A PackageSignals sub-model is gathered and stored but never read by the classifier
    (dead code — the signal runs, costs latency, and changes nothing).
-
-3. A provider's ecosystem_name is not in the Literal type annotations in models.py
-   (Pydantic will reject that ecosystem at runtime even though the provider exists).
 """
 import inspect
-import typing
 
-from activities.models import PackageSignals, PRContext
+from activities.models import PackageSignals
 
 
 def test_all_signal_activities_registered_with_worker():
@@ -36,16 +32,25 @@ def test_all_signal_activities_registered_with_worker():
 
 def test_all_signal_sub_models_used_in_classifier():
     """Every PackageSignals sub-model field has at least one field access in classifier.py."""
+    import re
     import activities.classifier as classifier_module
 
     source = inspect.getsource(classifier_module)
+    # Strip single-line comments so a field mentioned only in a comment isn't counted as used.
+    code_only = re.sub(r"#[^\n]*", "", source)
 
     identity_fields = {"ecosystem", "package_name", "old_version", "new_version"}
+    # Dict fields are accessed as `signals.field` (no dot into sub-fields); sub-models use `signals.field.attr`.
+    dict_fields = {
+        name for name, info in PackageSignals.model_fields.items()
+        if hasattr(info.annotation, "__origin__") and info.annotation.__origin__ is dict
+    }
     unused = []
     for field_name, field_info in PackageSignals.model_fields.items():
         if field_name in identity_fields:
             continue
-        if f"signals.{field_name}." not in source:
+        pattern = f"signals.{field_name}" if field_name in dict_fields else f"signals.{field_name}."
+        if pattern not in code_only:
             unused.append(field_name)
 
     assert not unused, (
@@ -55,19 +60,3 @@ def test_all_signal_sub_models_used_in_classifier():
     )
 
 
-def test_all_providers_in_ecosystem_literal():
-    """Every discovered provider's ecosystem_name is in the Literal type in models.py.
-
-    The Literal type can't be auto-discovered (Python type system limitation), so this
-    test catches the gap: provider exists, but Pydantic will reject it at runtime.
-    """
-    from activities.ecosystems import _build_provider_registry
-
-    providers = _build_provider_registry()
-    valid = set(typing.get_args(PRContext.model_fields["ecosystem"].annotation))
-    missing = [name for name in providers if name not in valid]
-    assert not missing, (
-        f"Ecosystem providers exist but their names are missing from the "
-        f"Literal type in activities/models.py — Pydantic will reject them at runtime:\n"
-        + "\n".join(f"  {name!r}" for name in missing)
-    )

@@ -6,39 +6,14 @@ io.BytesIO. ActivityEnvironment provides the Temporal activity context.
 """
 from __future__ import annotations
 
-import io
-import tarfile
-
 import httpx
 import respx
 from temporalio.testing import ActivityEnvironment
 
 from activities.package_diff import compute
+from tests.helpers import make_tar_gz as _make_tar_gz
 
 PYPI_BASE = "https://pypi.org/pypi"
-
-
-# ---------------------------------------------------------------------------
-# Archive / PyPI response helpers
-# ---------------------------------------------------------------------------
-
-def _make_tar_gz(files: dict[str, str], top_dir: str = "mypkg-1.0.0") -> bytes:
-    """
-    Build an in-memory .tar.gz archive.
-
-    *files* maps relative paths (inside *top_dir*) to file contents.
-    The archive mimics a real sdist: each member is prefixed with *top_dir/*.
-    """
-    buf = io.BytesIO()
-    with tarfile.open(fileobj=buf, mode="w:gz") as tf:
-        for rel_path, content in files.items():
-            member_name = f"{top_dir}/{rel_path}"
-            data = content.encode()
-            info = tarfile.TarInfo(name=member_name)
-            info.size = len(data)
-            tf.addfile(info, io.BytesIO(data))
-    buf.seek(0)
-    return buf.read()
 
 
 def _pypi_json(package: str, version: str, sdist_url: str | None = None) -> dict:

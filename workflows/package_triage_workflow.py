@@ -55,6 +55,7 @@ class PackageTriageWorkflow:
         package: str,
         old_version: str,
         new_version: str,
+        extra_signal_activities: list[str] = [],
     ) -> Verdict:
         retry = RetryPolicy(maximum_attempts=5, initial_interval=timedelta(seconds=2))
         default_opts: dict = dict(
@@ -93,11 +94,32 @@ class PackageTriageWorkflow:
             else:
                 signal_kwargs[field] = result
 
+        custom_signals: dict[str, object] = {}
+        if extra_signal_activities:
+            custom_raw = await asyncio.gather(
+                *(
+                    workflow.execute_activity(
+                        name, args=args, result_type=dict,
+                        **default_opts,
+                    )
+                    for name in extra_signal_activities
+                ),
+                return_exceptions=True,
+            )
+            for name, result in zip(extra_signal_activities, custom_raw):
+                if isinstance(result, Exception):
+                    workflow.logger.warning(
+                        f"Custom signal '{name}' failed: {result!r} — skipped"
+                    )
+                else:
+                    custom_signals[name] = result
+
         signals = PackageSignals(
             ecosystem=ecosystem,
             package_name=package,
             old_version=old_version,
             new_version=new_version,
+            custom_signals=custom_signals,
             **signal_kwargs,  # type: ignore[arg-type]
         )
 

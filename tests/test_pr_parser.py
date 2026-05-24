@@ -2,30 +2,31 @@ import pytest
 from helpers.pr_parser import parse_pr
 
 
-@pytest.mark.parametrize("title,pkg,old,new", [
+@pytest.mark.parametrize("title,pkg,old,new,ecosystem", [
     (
         "Bump requests from 2.31.0 to 2.32.0",
-        "requests", "2.31.0", "2.32.0",
+        "requests", "2.31.0", "2.32.0", "pip",
     ),
     (
         "Bump requests from 2.31.0 to 2.32.0 in /foundations/hello_world",
-        "requests", "2.31.0", "2.32.0",
+        "requests", "2.31.0", "2.32.0", "pip",
     ),
     (
         "build(deps): bump litellm from 1.30.1 to 1.30.2",
-        "litellm", "1.30.1", "1.30.2",
+        "litellm", "1.30.1", "1.30.2", "pip",
     ),
     (
         "Bump actions/checkout from 3 to 4",
-        "actions/checkout", "3", "4",
+        "actions/checkout", "3", "4", "pip",  # no branch → defaults to pip
     ),
 ])
-def test_dependabot_titles(title, pkg, old, new):
+def test_dependabot_titles(title, pkg, old, new, ecosystem):
     result = parse_pr(title)
     assert result is not None
     assert result.package == pkg
     assert result.old_version == old
     assert result.new_version == new
+    assert result.ecosystem == ecosystem
 
 
 @pytest.mark.parametrize("title,pkg,new", [
@@ -38,6 +39,7 @@ def test_renovate_titles(title, pkg, new):
     assert result is not None
     assert result.package == pkg
     assert result.new_version == new
+    assert result.old_version == "unknown"  # no body → can't extract old version
 
 
 def test_unknown_title_returns_none():

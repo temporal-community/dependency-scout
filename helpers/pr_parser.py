@@ -19,7 +19,6 @@ Ecosystem detection (in priority order):
 """
 import re
 from dataclasses import dataclass
-from typing import Literal
 
 from activities.ecosystems import get_dependabot_slug_map
 
@@ -29,7 +28,7 @@ class ParsedPR:
     package: str
     old_version: str
     new_version: str
-    ecosystem: Literal["pip", "npm", "rubygems", "maven", "composer", "nuget", "cargo", "go"] = "pip"
+    ecosystem: str = "pip"
 
 
 # @? allows scoped npm packages: @typescript-eslint/parser
@@ -75,7 +74,7 @@ def parse_pr(title: str, body: str = "", branch: str = "") -> ParsedPR | None:
     return None
 
 
-def _detect_ecosystem(package: str, branch: str) -> Literal["pip", "npm", "rubygems", "maven", "composer", "nuget", "cargo", "go"]:
+def _detect_ecosystem(package: str, branch: str) -> str:
     # Dependabot branch names encode ecosystem: dependabot/{ecosystem}/{rest}
     if branch.startswith("dependabot/"):
         parts = branch.split("/")

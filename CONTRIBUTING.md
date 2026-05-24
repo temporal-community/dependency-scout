@@ -26,13 +26,7 @@ class ComposerProvider:
 
 `get_archive_url` returns `(url, filename, integrity_string)`. Call `validate_archive_url(url)` before returning — this enforces the CDN allowlist. Add your registry's CDN host to `ALLOWED_CDN_HOSTS` in `activities/ecosystems/__init__.py`.
 
-**Step 2 — Three small one-line changes**
-
-- `activities/models.py` — add the name to the `Literal["pip", "npm", ...]` type in both `PRContext.ecosystem` and `PackageSignals.ecosystem`
-- `helpers/pr_parser.py` — add the Dependabot branch slug to `_DEPENDABOT_ECOSYSTEM_MAP` (e.g. `"composer": "composer"`)
-- `api/webhook.py` — add a package name validation regex to `_NAME_RE_BY_ECOSYSTEM`
-
-**Step 3 — Tests**
+**Step 2 — Tests**
 
 Add a test section for your ecosystem following the existing npm/rubygems patterns in `tests/test_activities.py`. Each method needs at minimum: success case, 404/not-found case, and (for attestations) a no-attestation case. Aim to keep overall coverage above 95%.
 
@@ -147,4 +141,46 @@ Commit the updated files in `tests/fixtures/`. The CI `pytest` run will catch an
 - **Signals are nested, not flat** — `PackageSignals` holds typed sub-models (`signals.age.release_age_hours`, not `signals.release_age_hours`). Field name collisions between signals are structurally impossible.
 - **The registry is the source of truth** — `_SIGNAL_REGISTRY` in `package_triage_workflow.py` drives the gather order, the `SIGNAL_ACTIVITY_NAMES` constant, and the worker registration test. When adding a signal, the registry row is the one required workflow-layer edit.
 - **Worker registration is automatic** — `worker.py` scans `activities/*.py` at startup for `@activity.defn`-decorated functions. Creating a new activity file is sufficient; no manual entry in `ACTIVITIES` is needed.
-- **Ecosystem provider registration is automatic** — `get_provider()` scans `activities/ecosystems/*.py` for classes with an `ecosystem_name` attribute. Creating a new provider file with `ecosystem_name = "..."` is sufficient; no manual entry in `get_provider()` is needed.
+- **Ecosystem provider registration is automatic** — `get_provider()` scans `activities/ecosystems/*.py` for classes with an `ecosystem_name` attribute, then checks the `triage_agent.ecosystems` entry points group for installed plugins. Creating a new provider file (or installing a plugin package) is sufficient; no manual registration is needed.
+
+---
+
+## Extending from outside this repo (plugin API)
+
+Third-party packages can register ecosystem providers without modifying this codebase.
+
+### Python-native plugins
+
+Declare an entry point in your `pyproject.toml`:
+
+```toml
+[project.entry-points."triage_agent.ecosystems"]
+django_packages = "triage_agent_django:DjangoPackagesProvider"
+```
+
+`DjangoPackagesProvider` must implement the `EcosystemProvider` Protocol: the four class attributes (`ecosystem_name`, `osv_name`, `dependabot_slug`, `name_re`) and the seven async methods. See any built-in provider in `activities/ecosystems/` for a template.
+
+### Non-Python bridge packages (PHP, Go, Rust, …)
+
+If your logic lives in a non-Python stack, subclass `RemoteEcosystemProvider` from `activities/ecosystems/remote.py`. It implements all seven protocol methods by POSTing to your service — your bridge package is ~10 lines of Python that configure the URL and ecosystem metadata:
+
+```python
+# triage_agent_drupal/__init__.py
+import re
+from activities.ecosystems.remote import RemoteEcosystemProvider
+
+class DrupalProvider(RemoteEcosystemProvider):
+    ecosystem_name  = "drupal"
+    osv_name        = "Packagist"
+    dependabot_slug = "drupal"
+    name_re         = re.compile(r"^[a-z0-9_-]+/[a-z0-9_-]+$")
+    remote_base_url = "https://drupal-bridge.example.com/triage/v1"
+```
+
+Your service must expose `POST {base_url}/{method_name}` endpoints. Each endpoint receives the method parameters as a JSON body and responds with the corresponding signal model fields as JSON. The full request/response spec is in the docstrings in `activities/ecosystems/remote.py`.
+
+### In both cases
+
+Once installed, `get_provider("drupal")` returns your provider automatically — no changes to this repo needed. Built-in providers take precedence over plugins with the same `ecosystem_name`, so core ecosystems cannot be shadowed.
+
+Custom signal results can be stored in `PackageSignals.custom_signals` (a plain `dict`) and surfaced to the LLM classifier via the trusted JSON block, which includes the full `PackageSignals.model_dump()`.

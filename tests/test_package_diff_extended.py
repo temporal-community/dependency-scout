@@ -30,35 +30,14 @@ from activities.package_diff import (
     _is_noise,
     compute,
 )
+from tests.helpers import make_tar_gz as _make_tar_gz, make_zip as _make_zip
 
 PYPI_BASE = "https://pypi.org/pypi"
 
 
 # ---------------------------------------------------------------------------
-# Helpers (reuse + extend from existing test_package_diff.py)
+# Helpers
 # ---------------------------------------------------------------------------
-
-def _make_tar_gz(files: dict[str, str], top_dir: str = "pkg-1.0.0") -> bytes:
-    buf = io.BytesIO()
-    with tarfile.open(fileobj=buf, mode="w:gz") as tf:
-        for rel_path, content in files.items():
-            member_name = f"{top_dir}/{rel_path}"
-            data = content.encode()
-            info = tarfile.TarInfo(name=member_name)
-            info.size = len(data)
-            tf.addfile(info, io.BytesIO(data))
-    buf.seek(0)
-    return buf.read()
-
-
-def _make_zip(files: dict[str, str]) -> bytes:
-    buf = io.BytesIO()
-    with zipfile.ZipFile(buf, "w") as zf:
-        for name, content in files.items():
-            zf.writestr(name, content)
-    buf.seek(0)
-    return buf.read()
-
 
 def _pypi_json_with_sha(package: str, version: str, url: str, sha256: str = "", pkg_type: str = "sdist", filename: str | None = None) -> dict:
     fname = filename or f"{package}-{version}.tar.gz"
