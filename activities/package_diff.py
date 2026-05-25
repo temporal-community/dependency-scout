@@ -223,6 +223,7 @@ _NET_CALL_PATTERNS: dict[str, list[re.Pattern[str]]] = {
             r"open\s*\([^)]*['\"]\/proc\/\d+\/mem['\"]",  # /proc/PID/mem read — CI secret extraction bypassing log masking (SAP CAP)
             r"drive\.usercontent\.google\.com/download",  # Google Drive CDN payload delivery (Contagious Interview Apr 2026)
             r"drive\.google\.com/uc\?[^\"']{0,60}export=download",  # Google Drive legacy direct-download
+            r"icanhazip\.com",  # public IP oracle used to fingerprint victim before C2 beacon (Coruna art-template May 2026)
         ],
         ".js": [
             r"\bfetch\s*\(",
@@ -256,6 +257,7 @@ _NET_CALL_PATTERNS: dict[str, list[re.Pattern[str]]] = {
             r"drive\.google\.com/uc\?[^\"']{0,60}export=download",  # Google Drive legacy direct-download (same campaign)
             r"azurestaticprovider\.net",  # lookalike Azure domain used for DNS TXT C2 (node-ipc stealer May 2026)
             r"\bchild_process\b[^\n]{0,80}\bfork\s*\(",  # child_process.fork in library code (node-ipc detached stealer process)
+            r"icanhazip\.com",  # public IP oracle used to fingerprint victim before C2 beacon (Coruna art-template May 2026)
         ],
         ".ts": [
             r"\bfetch\s*\(",
@@ -288,6 +290,7 @@ _NET_CALL_PATTERNS: dict[str, list[re.Pattern[str]]] = {
             r"pastebin\.com/raw/",  # Pastebin raw paste dead-drop
             r"azurestaticprovider\.net",  # lookalike Azure domain used for DNS TXT C2 (node-ipc stealer May 2026)
             r"\bchild_process\b[^\n]{0,80}\bfork\s*\(",  # child_process.fork in library (node-ipc detached stealer process)
+            r"icanhazip\.com",  # public IP oracle used to fingerprint victim before C2 beacon (Coruna art-template May 2026)
         ],
         ".mjs": [
             r"\bfetch\s*\(",
@@ -304,6 +307,8 @@ _NET_CALL_PATTERNS: dict[str, list[re.Pattern[str]]] = {
             r"\\Http\\Client\b",
             r"(?:shell_exec|passthru|popen)\s*\(\s*['\"](?:curl|wget)\b",  # shell binary download (Intercom PHP)
             r"github\.com/[^/]+/[^/]+/releases/download/bun-",  # Bun runtime drop (Intercom PHP, SAP CAP)
+            r"\bexec\s*\(\s*['\"]php\s",  # PHP subprocess staging: exec("php /tmp/...") — drops payload to sys_get_temp_dir() then self-executes (Laravel Lang May 2026)
+            r"sys_get_temp_dir\s*\(\s*\)\s*\.\s*['\"]\/\.",  # write to hidden path inside sys_get_temp_dir() — payload staging (Laravel Lang May 2026)
         ],
         ".java": [
             r"\bHttpClient\b",
@@ -360,6 +365,7 @@ _OBFUSCATION_PATTERNS: dict[str, list[re.Pattern[str]]] = {
             r"\beval\s*\(\s*atob\s*\(",  # eval(atob(...)) decode-then-exec chain
             r"\beval\s*\(\s*Buffer\.from\s*\(",  # eval(Buffer.from(..., 'base64'))
             r"\bnew\s+Function\s*\(\s*atob\s*\(",  # new Function(atob(...))
+            r"globalThis\s*\.\s*\w+\s*=\s*new\s+Function\s*\(\s*atob\s*\(",  # globalThis.<name> = new Function(atob(...))() IIFE — module-level obfuscated eval (Coruna art-template May 2026)
             r"gh[op]_[A-Za-z0-9]{20,}",  # hardcoded GitHub PAT or token regex in source
             r"npm_[A-Za-z0-9]{20,}",  # hardcoded npm publish token regex in source
             r"\(\s*\d{7,}\s*\^\s*\d{7,}\s*\)",  # integer XOR-pair obfuscation (Coruna pattern)
@@ -402,6 +408,8 @@ _OBFUSCATION_PATTERNS: dict[str, list[re.Pattern[str]]] = {
         ".cs": [
             r"\[ModuleInitializer\]",  # auto-executes on DLL load (NuGet Chinese UI attack)
             r"\bRuntimeHelpers\.RunModuleConstructor\b",  # explicit module initializer trigger
+            r"PAGE_EXECUTE_READWRITE",  # VirtualAlloc RWX memory for JIT hook — .NET Reactor Necrobit patching clrjit.dll!getJit (NuGet IR.* campaign May 2026)
+            r"\bclrjit\b",  # direct reference to CLR JIT library — only present when patching the JIT compiler (NuGet IR.* campaign May 2026)
         ],
     }.items()
 }

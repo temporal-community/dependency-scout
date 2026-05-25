@@ -3545,3 +3545,113 @@ def test_net_calls_rb_chmod_gem_credentials(tmp_path):
     )
     _, _, _, _, net_calls, *_ = _build_diff(old, new)
     assert net_calls is True
+
+
+# ── Coruna art-template: icanhazip.com IP oracle ──────────────────────────────
+
+
+def test_net_calls_icanhazip_js(tmp_path):
+    """icanhazip.com in JS triggers network_calls_in_lib (victim IP used in C2 beacon)."""
+    old = _write_files(tmp_path / "old", {"lib/beacon.js": "// nothing\n"})
+    new = _write_files(
+        tmp_path / "new",
+        {
+            "lib/beacon.js": (
+                "// nothing\n"
+                "fetch('https://ipv4.icanhazip.com').then(r => r.text()).then(ip => register(ip));\n"
+            )
+        },
+    )
+    _, _, _, _, net_calls, *_ = _build_diff(old, new)
+    assert net_calls is True
+
+
+def test_net_calls_icanhazip_py(tmp_path):
+    """icanhazip.com in Python library code triggers network_calls_in_lib."""
+    old = _write_files(tmp_path / "old", {"mylib/info.py": "# nothing\n"})
+    new = _write_files(
+        tmp_path / "new",
+        {
+            "mylib/info.py": (
+                "# nothing\n"
+                "import requests\n"
+                "ip = requests.get('https://ipv4.icanhazip.com').text.strip()\n"
+            )
+        },
+    )
+    _, _, _, _, net_calls, *_ = _build_diff(old, new)
+    assert net_calls is True
+
+
+# ── Laravel Lang RCE: PHP subprocess staging ──────────────────────────────────
+
+
+def test_net_calls_php_exec_php_subprocess(tmp_path):
+    """exec(\"php /tmp/...\") in PHP library triggers network_calls_in_lib (Laravel Lang RCE staging)."""
+    old = _write_files(tmp_path / "old", {})
+    new = _write_files(
+        tmp_path / "new",
+        {
+            "src/Lang.php": (
+                "<?php\n"
+                "$tmp = sys_get_temp_dir() . '/.upd';\n"
+                "file_put_contents($tmp, $payload);\n"
+                "exec('php ' . $tmp);\n"
+            )
+        },
+    )
+    _, _, _, _, net_calls, *_ = _build_diff(old, new)
+    assert net_calls is True
+
+
+def test_net_calls_php_sys_get_temp_dir_hidden(tmp_path):
+    """sys_get_temp_dir() . '/.' hidden path in PHP triggers network_calls_in_lib (payload staging)."""
+    old = _write_files(tmp_path / "old", {})
+    new = _write_files(
+        tmp_path / "new",
+        {
+            "src/Cache.php": (
+                "<?php\n"
+                "$stage = sys_get_temp_dir() . '/.cache_upd';\n"
+                "file_put_contents($stage, base64_decode($enc));\n"
+            )
+        },
+    )
+    _, _, _, _, net_calls, *_ = _build_diff(old, new)
+    assert net_calls is True
+
+
+# ── NuGet IR.* campaign: .NET JIT hook patterns ───────────────────────────────
+
+
+def test_obfuscation_cs_page_execute_readwrite(tmp_path):
+    """PAGE_EXECUTE_READWRITE in C# triggers obfuscated_code (VirtualAlloc RWX for JIT patching)."""
+    old = _write_files(tmp_path / "old", {})
+    new = _write_files(
+        tmp_path / "new",
+        {
+            "IR.Updater/Loader.cs": (
+                "using System.Runtime.InteropServices;\n"
+                "const uint PAGE_EXECUTE_READWRITE = 0x40;\n"
+                "IntPtr mem = VirtualAlloc(IntPtr.Zero, (uint)shellcode.Length, 0x3000, PAGE_EXECUTE_READWRITE);\n"
+            )
+        },
+    )
+    _, _, _, _, _, _, _, obfuscated, *_ = _build_diff(old, new)
+    assert obfuscated is True
+
+
+def test_obfuscation_cs_clrjit(tmp_path):
+    """clrjit reference in C# triggers obfuscated_code (CLR JIT patching to intercept all compilation)."""
+    old = _write_files(tmp_path / "old", {})
+    new = _write_files(
+        tmp_path / "new",
+        {
+            "IR.Updater/JitHook.cs": (
+                'IntPtr jitHandle = NativeLibrary.Load("clrjit");\n'
+                "IntPtr getJit = NativeLibrary.GetExport(jitHandle, \"getJit\");\n"
+            )
+        },
+    )
+    _, _, _, _, _, _, _, obfuscated, *_ = _build_diff(old, new)
+    assert obfuscated is True
