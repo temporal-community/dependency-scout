@@ -4,16 +4,16 @@ Each ecosystem provider translates a package registry's APIs into the seven sign
 
 ## Coverage
 
-| Ecosystem | `ecosystem_name` | Registry | Attestations | Notes |
-|---|---|---|---|---|
-| pip (PyPI) | `pip` | pypi.org | Yes (PEP 740 / Sigstore) | Full provenance chain from DSSE envelope |
-| npm | `npm` | registry.npmjs.org | Yes (npm provenance) | DSSE payload decoded for build invocation ID |
-| Cargo | `cargo` | crates.io | No | |
-| RubyGems | `rubygems` | rubygems.org | No | Archive is nested `.gem` → `data.tar.gz` |
-| Go modules | `go` | proxy.golang.org | No | GOPROXY URL encoding (`!` escaping for uppercase) |
-| Maven | `maven` | repo1.maven.org | No | Coordinate format: `groupId:artifactId` |
-| NuGet | `nuget` | api.nuget.org | No | Registration pages may be paginated |
-| Composer | `composer` | packagist.org | No | Archives fetched from GitHub codeload |
+| Ecosystem | `ecosystem_name` | Language(s) | Registry | Attestations | Notes |
+|---|---|---|---|---|---|
+| pip (PyPI) | `pip` | Python | pypi.org | Yes | Cryptographic proof of where the package was built, verified via Sigstore |
+| npm | `npm` | JavaScript / TypeScript / Node.js | registry.npmjs.org | Yes | Same provenance scheme as pip |
+| Cargo | `cargo` | Rust | crates.io | No | |
+| RubyGems | `rubygems` | Ruby | rubygems.org | No | Archive is nested `.gem` → `data.tar.gz` |
+| Go modules | `go` | Go | proxy.golang.org | No | GOPROXY URL encoding (`!` escaping for uppercase) |
+| Maven | `maven` | Java / Kotlin / Scala / JVM | repo1.maven.org | No | Coordinate format: `groupId:artifactId` |
+| NuGet | `nuget` | C# / .NET / F# | api.nuget.org | No | Registration pages may be paginated |
+| Composer | `composer` | PHP | packagist.org | No | Archives fetched from GitHub codeload |
 
 All eight providers implement all seven signal methods. "Attestations: No" means `fetch_attestations` returns `AttestationChecks(has_attestation=False)` — it doesn't fail, it just signals absence.
 
