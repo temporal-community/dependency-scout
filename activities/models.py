@@ -85,6 +85,10 @@ class DiffSignals(BaseModel):
     binary_data_added: bool = (
         False  # new file with binary/non-text content in a non-binary-extension file
     )
+    git_url_dependency_added: bool = False  # npm dep sourced from git/GitHub URL, bypasses registry
+    obfuscated_code: bool = (
+        False  # machine-generated obfuscation detected (eval/atob, _0x vars, etc.)
+    )
 
 
 class PRFilesSignals(BaseModel):

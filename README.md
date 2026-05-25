@@ -80,6 +80,7 @@ Then:
 
 ```bash
 # Terminal 1 — Temporal dev server (the job queue and state store)
+# Skip this if you're using Temporal Cloud — set TEMPORAL_TLS_CERT/KEY in .env instead
 temporal server start-dev
 
 # Terminal 2 — Scout worker (picks up triage jobs and runs the analysis)

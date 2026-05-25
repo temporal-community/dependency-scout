@@ -102,9 +102,13 @@ def check_prerequisites() -> bool:
     _h("Checking prerequisites")
     ok = True
     ok &= _check_cmd("uv", "install from https://docs.astral.sh/uv/")
-    ok &= _check_cmd(
-        "temporal", "install from https://docs.temporal.io/cli  (brew install temporal)"
-    )
+    if not shutil.which("temporal"):
+        _warn(
+            "temporal CLI not found — needed for local dev server; not required for Temporal Cloud\n"
+            "     install: https://docs.temporal.io/cli  (brew install temporal)"
+        )
+    else:
+        _ok("temporal found")
     if not ok:
         print()
         _err("Please install missing tools and re-run setup.py")
@@ -366,8 +370,28 @@ def print_repo_config() -> None:
         print(f"    {CYAN}{line}{RESET}")
 
 
-def print_next_steps(used_app: bool) -> None:
+def print_next_steps(used_app: bool, temporal_mode: str = "local") -> None:
     _h("You're set up. Next steps:")
+
+    if temporal_mode == "cloud":
+        temporal_step = textwrap.dedent("""\
+  1. Your worker will connect to Temporal Cloud automatically using the TLS
+     credentials in .env — no local server needed. Skip to step 2.
+    """)
+        workflow_ui = "https://cloud.temporal.io"
+    elif temporal_mode == "local":
+        temporal_step = textwrap.dedent("""\
+  1. Start Temporal (in a separate terminal):
+       temporal server start-dev
+    """)
+        workflow_ui = "http://localhost:8233"
+    else:
+        temporal_step = textwrap.dedent("""\
+  1. Start Temporal (configure TEMPORAL_ADDRESS etc. in .env first):
+       temporal server start-dev   # local dev
+       # — or — connect to Temporal Cloud (see .env.example for TLS vars)
+    """)
+        workflow_ui = "http://localhost:8233"
 
     if used_app:
         webhook_registration = textwrap.dedent("""\
@@ -394,9 +418,8 @@ def print_next_steps(used_app: bool) -> None:
     """)
 
     print(
-        textwrap.dedent("""
-  1. Start Temporal (in a separate terminal):
-       temporal server start-dev
+        textwrap.dedent(f"""
+  {temporal_step.strip()}
 
   2. Start the worker (in a separate terminal):
        uv run python -m worker
@@ -407,7 +430,7 @@ def print_next_steps(used_app: bool) -> None:
          --package idna --old-version 3.11 --new-version 3.15 \\
          --pr-number 122
 
-     Watch the run at: http://localhost:8233
+     Watch the run at: {workflow_ui}
 
   4. To receive live Dependabot webhooks, expose the API server:
        uv run uvicorn api.webhook:app --port 8080
@@ -416,6 +439,80 @@ def print_next_steps(used_app: bool) -> None:
     """)
         + webhook_registration
     )
+
+
+def collect_temporal_config() -> tuple[dict[str, str], str]:
+    """Returns (env_dict, mode) where mode is 'local', 'cloud', or 'skip'."""
+    _h("Temporal — job queue and state store")
+    print(
+        textwrap.dedent("""
+  The Scout uses Temporal to run signal-gathering jobs reliably. Choose how
+  you want to run it:
+
+  Local dev server — pick this if:
+    • You're trying things out locally right now
+    • You don't want to sign up for anything
+  Run `temporal server start-dev` in a separate terminal. State is in-memory;
+  it resets when you stop the server.
+
+  Temporal Cloud — pick this if:
+    • You want the Scout running 24/7 without a server to babysit
+    • You're deploying to production
+  Free tier available at https://cloud.temporal.io (no credit card).
+  State is durable; restarts and failures are handled for you.
+    """)
+    )
+
+    choice = _ask_menu(
+        "Which Temporal setup are you using?",
+        [
+            ("Local dev server", "temporal server start-dev — easiest to get started"),
+            ("Temporal Cloud", "fully managed, no infrastructure to maintain"),
+        ],
+    )
+
+    if choice == 0:
+        _warn("Skipping Temporal config — edit .env manually before starting the worker")
+        return {
+            "TEMPORAL_ADDRESS": "localhost:7233",
+            "TEMPORAL_NAMESPACE": "default",
+            "TEMPORAL_TASK_QUEUE": "dependency-triage",
+            "TEMPORAL_UI_BASE_URL": "http://localhost:8233",
+        }, "skip"
+
+    if choice == 1:
+        return {
+            "TEMPORAL_ADDRESS": "localhost:7233",
+            "TEMPORAL_NAMESPACE": "default",
+            "TEMPORAL_TASK_QUEUE": "dependency-triage",
+            "TEMPORAL_UI_BASE_URL": "http://localhost:8233",
+        }, "local"
+
+    # Temporal Cloud
+    print(
+        textwrap.dedent("""
+  To connect to Temporal Cloud you need:
+    1. A namespace — create one at https://cloud.temporal.io
+    2. A TLS client certificate + private key for that namespace
+       (generate via the Certificates page in the Cloud UI, or bring your own)
+    """)
+    )
+    namespace = _ask("Temporal Cloud namespace (e.g. mynamespace.abc12)")
+    default_address = (
+        f"{namespace}.tmprl.cloud:7233" if namespace else "your-namespace.tmprl.cloud:7233"
+    )
+    address = _ask("Temporal Cloud address", default=default_address)
+    cert_path = _ask("Path to TLS client certificate (.pem)")
+    key_path = _ask("Path to TLS private key (.pem)")
+
+    return {
+        "TEMPORAL_ADDRESS": address,
+        "TEMPORAL_NAMESPACE": namespace,
+        "TEMPORAL_TASK_QUEUE": "dependency-triage",
+        "TEMPORAL_UI_BASE_URL": "https://cloud.temporal.io",
+        "TEMPORAL_TLS_CERT": cert_path,
+        "TEMPORAL_TLS_KEY": key_path,
+    }, "cloud"
 
 
 # ---------------------------------------------------------------------------
@@ -442,17 +539,11 @@ def main() -> None:
     github = collect_github_credentials()
     used_app = "GITHUB_APP_ID" in github
     optional = collect_optional_keys()
+    temporal, temporal_mode = collect_temporal_config()
 
-    temporal_defaults = {
-        "TEMPORAL_ADDRESS": "localhost:7233",
-        "TEMPORAL_NAMESPACE": "default",
-        "TEMPORAL_TASK_QUEUE": "dependency-triage",
-        "TEMPORAL_UI_BASE_URL": "http://localhost:8233",
-    }
-
-    write_env({**temporal_defaults, **github, **optional})
+    write_env({**temporal, **github, **optional})
     print_repo_config()
-    print_next_steps(used_app)
+    print_next_steps(used_app, temporal_mode)
 
 
 if __name__ == "__main__":

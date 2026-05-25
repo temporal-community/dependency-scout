@@ -349,6 +349,16 @@ def _rule_based(signals: PackageSignals) -> Verdict:
             "binary/non-text content found in non-binary file — "
             "possible embedded payload or exfiltrated data (gemstuffer-style attack)"
         )
+    if signals.diff.git_url_dependency_added:
+        flags.append(
+            "new dependency sourced from git/GitHub URL rather than registry — "
+            "bypasses registry malware scanning (Mini Shai-Hulud / TanStack pattern)"
+        )
+    if signals.diff.obfuscated_code:
+        flags.append(
+            "machine-generated obfuscation detected (eval/atob chains, _0x vars, or >100KB single line) — "
+            "review for hidden credential harvesting or C2 payload"
+        )
     if signals.maintainer.maintainer_changed:
         flags.append("maintainer changed")
     if signals.attestation.publisher_changed:

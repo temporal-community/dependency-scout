@@ -7,7 +7,7 @@ import pkgutil
 import activities as _activities_pkg
 from dotenv import load_dotenv
 from temporalio.activity import _Definition
-from temporalio.client import Client
+from temporalio.client import Client, TLSConfig
 from temporalio.contrib.pydantic import pydantic_data_converter
 from temporalio.worker import Worker
 
@@ -109,8 +109,19 @@ async def main() -> None:
     address = os.environ.get("TEMPORAL_ADDRESS", "localhost:7233")
     namespace = os.environ.get("TEMPORAL_NAMESPACE", "default")
     task_queue = os.environ.get("TEMPORAL_TASK_QUEUE", "dependency-triage")
+
+    tls: TLSConfig | bool = False
+    cert_path = os.environ.get("TEMPORAL_TLS_CERT")
+    key_path = os.environ.get("TEMPORAL_TLS_KEY")
+    if cert_path and key_path:
+        tls = TLSConfig(
+            client_cert=open(cert_path, "rb").read(),
+            client_private_key=open(key_path, "rb").read(),
+        )
+        logger.info("TLS enabled — connecting to Temporal Cloud at %s", address)
+
     client = await Client.connect(
-        address, namespace=namespace, data_converter=pydantic_data_converter
+        address, namespace=namespace, tls=tls, data_converter=pydantic_data_converter
     )
     worker = Worker(
         client,
