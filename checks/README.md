@@ -30,6 +30,10 @@ Each check function is registered under a string name (e.g. `"activities.metadat
 
 This codebase uses string names deliberately: `_CHECK_REGISTRY` is a data structure mapping field names to check names and result types, making it easy to add or reorder checks without touching workflow control flow. The trade-off is that name mismatches are caught at runtime rather than import time — see [CLAUDE.md](../CLAUDE.md) for the full convention.
 
+## Attack signature patterns
+
+The [`signatures/`](signatures/README.md) subdirectory contains the YAML pattern files used by `package_diff.py` to detect suspicious code in package archives — network calls, obfuscation, persistence mechanisms, and dangerous file types. Add a new pattern there; no Python required.
+
 ## Worker auto-discovery
 
 The worker (`worker.py`) automatically discovers and registers every check function found in `checks/*.py` and `pr_actions/*.py`. **You do not need to manually register new checks** — just put the file in this directory and restart the worker.
