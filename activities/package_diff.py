@@ -61,7 +61,7 @@ NOISE_FILENAMES = {
     "npm-shrinkwrap.json",
 }
 
-HIGH_SIGNAL_NAMES = {
+HIGH_RISK_NAMES = {
     "setup.py",
     "setup.cfg",
     "pyproject.toml",
@@ -81,7 +81,7 @@ HIGH_SIGNAL_NAMES = {
     ".cursorrules",
     "CLAUDE.md",
 }
-HIGH_SIGNAL_SUFFIXES = {".pth", ".gemspec"}
+HIGH_RISK_SUFFIXES = {".pth", ".gemspec"}
 
 # Files that have no business appearing in a published package archive.
 # A version bump that suddenly includes these is an immediate red flag.
@@ -110,7 +110,7 @@ _SUSPICIOUS_PACKAGE_PREFIXES = frozenset(
     }
 )
 
-# Subset of HIGH_SIGNAL_NAMES that execute code on install — changes are an explicit red/yellow flag.
+# Subset of HIGH_RISK_NAMES that execute code on install — changes are an explicit red/yellow flag.
 INSTALL_HOOK_NAMES = {
     "setup.py",  # pip: customises build/install steps
     "install.js",  # npm: install lifecycle script
@@ -404,6 +404,7 @@ _OBFUSCATION_PATTERNS: dict[str, list[re.Pattern[str]]] = {
             r"\bchr\s*\(\s*\d{2,3}\s*\)\s*\.\s*chr\s*\(",  # chr(X).chr(Y) hostname obfuscation (Laravel Lang May 2026)
             r"array_map\s*\(\s*['\"]chr['\"]\s*,",  # array_map('chr', [...]) char-code domain construction
             r"fileinode\s*\(\s*__FILE__",  # per-host execution fingerprinting via inode (Laravel Lang stealth, May 2026)
+            r"md5\s*\([^)]*__DIR__[^)]*php_uname",  # host deduplication fingerprint: md5(__DIR__ . php_uname('m') . ...) execution gate (Laravel Lang RCE May 2026)
         ],
         ".cs": [
             r"\[ModuleInitializer\]",  # auto-executes on DLL load (NuGet Chinese UI attack)
@@ -439,6 +440,7 @@ _PERSISTENCE_PATTERNS: list[re.Pattern[str]] = [
         r"github\.com/[^/\s]+/[^/\s]+/releases/download/bun-v",  # Bun runtime bootstrap (Shai-Hulud)
         r"\btrufflehog\b|\bgitleaks\b|\bdetect-secrets\b",  # weaponised secrets scanner
         r"rm\s+-rf\s+(?:~/|~[/\\]|\$HOME[/\\])",  # home dir wipe (Mini Shai-Hulud scorched-earth)
+        r"(?:writeFile|writeFileSync|open|write)\s*[(\s,]*['\"](?:\.cursorrules|CLAUDE\.md|\.cursor/rules|\.aider\.conf)",  # AI coding assistant context hijacking (TrapDoor May 2026)
     ]
 ]
 
@@ -694,7 +696,7 @@ def _is_noise(rel: str) -> bool:
         return True
     if Path(name).suffix in NOISE_SUFFIXES:
         return True
-    if Path(name).suffix in HIGH_SIGNAL_SUFFIXES:
+    if Path(name).suffix in HIGH_RISK_SUFFIXES:
         return False  # explicitly keep high-signal suffixes like .pth
     return False
 
@@ -907,7 +909,7 @@ def _build_diff(
             if _NPM_CRED_READ_RE.search(new_text) and _NPM_PUBLISH_RE.search(new_text):
                 worm_propagation_pattern = True
 
-        if name in HIGH_SIGNAL_NAMES or p.suffix in HIGH_SIGNAL_SUFFIXES:
+        if name in HIGH_RISK_NAMES or p.suffix in HIGH_RISK_SUFFIXES:
             patch = _unified_diff(old_text, new_text, rel)
             high_signal_changed.append((rel, patch))
         else:
