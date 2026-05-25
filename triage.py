@@ -98,11 +98,51 @@ async def _fetch_pr(url: str) -> tuple[str, str, str, str]:
     return parsed.ecosystem, parsed.package, parsed.old_version, parsed.new_version
 
 
-def _label(verdict: str) -> str:
-    colors = {"green": "\033[32m", "yellow": "\033[33m", "red": "\033[31m"}
-    reset = "\033[0m"
-    c = colors.get(verdict, "")
-    return f"{c}{verdict.upper()}{reset}"
+# ---------------------------------------------------------------------------
+# Terminal output helpers
+# ---------------------------------------------------------------------------
+
+_G = "\033[32m"
+_Y = "\033[33m"
+_R = "\033[31m"
+_DIM = "\033[2m"
+_B = "\033[1m"
+_RST = "\033[0m"
+
+
+def _g(s: str) -> str:
+    return f"{_G}{s}{_RST}"
+
+
+def _y(s: str) -> str:
+    return f"{_Y}{s}{_RST}"
+
+
+def _r(s: str) -> str:
+    return f"{_R}{s}{_RST}"
+
+
+def _dim(s: str) -> str:
+    return f"{_DIM}{s}{_RST}"
+
+
+# (terminal icon, markdown icon, text-colouring function)
+_STATUS: dict[str, tuple[str, str, object]] = {
+    "ok": (_g("✓"), "✅", _g),
+    "bad": (_r("✗"), "❌", _r),
+    "warn": (_y("!"), "⚠️", _y),
+    "na": (_dim("─"), "—", _dim),
+    "fail": (_y("!"), "⚠️", _y),
+}
+
+_VERDICT_EMOJI = {"green": "🟢", "yellow": "🟡", "red": "🔴"}
+_VERDICT_COLOR = {"green": _G, "yellow": _Y, "red": _R}
+
+
+def _verdict_label(v: str) -> str:
+    e = _VERDICT_EMOJI.get(v, "")
+    c = _VERDICT_COLOR.get(v, "")
+    return f"{e} {c}{_B}{v.upper()}{_RST}"
 
 
 async def run(ecosystem: str, package: str, old_version: str, new_version: str) -> None:
@@ -154,82 +194,128 @@ async def run(ecosystem: str, package: str, old_version: str, new_version: str) 
 
     verdict = await env.run(_classifier_mod.classify, pkg)
 
-    # Print a brief summary of each check result.
-    m = pkg.metadata
-    checks_summary = [
-        (
-            "metadata",
-            f"{m.weekly_downloads:,} weekly downloads"
-            if m.weekly_downloads
-            else "no download data",
-        ),
-        (
-            "socket",
-            f"score {pkg.socket.socket_score}/100"
-            if pkg.socket.socket_score is not None
-            else "no data",
-        ),
-        (
-            "osv",
-            f"{len(pkg.osv.osv_vulnerabilities)} known vulnerabilities"
-            if pkg.osv.osv_vulnerabilities
-            else "no known vulnerabilities",
-        ),
-        (
-            "diff",
-            "install script added" if pkg.diff.install_script_added else "no suspicious patterns",
-        ),
-        (
-            "maintainer",
-            "maintainer changed" if pkg.maintainer.maintainer_changed else "no maintainer changes",
-        ),
-        (
-            "age",
-            f"released {pkg.age.release_age_hours:.0f}h ago"
-            if pkg.age.release_age_hours
-            else "release age unknown",
-        ),
-        (
-            "attestation",
-            "build-origin verified" if pkg.attestation.has_attestation else "no attestation",
-        ),
-        (
-            "release_notes",
-            "release found" if pkg.release.github_release_exists else "no GitHub release",
-        ),
-        (
-            "version_lineage",
-            "on latest version line"
-            if not pkg.version_lineage.stale_version_line
-            else "stale version line",
-        ),
-        (
-            "deps_dev",
-            "deprecated: " + (pkg.deps_dev.deprecated_reason or "yes")
-            if pkg.deps_dev.is_deprecated
-            else "not deprecated",
-        ),
-        (
-            "scorecard",
-            f"score {pkg.scorecard.scorecard_score:.1f}/10"
-            if pkg.scorecard.scorecard_score
-            else "no scorecard data",
-        ),
-    ]
-    width = max(len(name) for name, _ in checks_summary)
-    for name, summary in checks_summary:
-        print(f"  {name:<{width}}  {summary}")
+    # Determine which checks raised exceptions (vs returned degraded defaults).
+    failed = {field for (field, _), result in zip(_CHECKS, raw) if isinstance(result, Exception)}
+    has_socket_key = bool(os.environ.get("SOCKET_API_KEY"))
 
-    print(f"\nVerdict: {_label(verdict.classification)}  (confidence {verdict.confidence:.0%})\n")
+    # Build rows: (name, status, plain_text)
+    # status ∈ {"ok", "bad", "warn", "na", "fail"}
+    m = pkg.metadata
+    rows: list[tuple[str, str, str]] = []
+
+    def _row(name: str, status: str, text: str) -> None:
+        rows.append((name, "fail" if name in failed else status, text))
+
+    h = pkg.age.release_age_hours
+    if m.weekly_downloads is not None:
+        _row("metadata", "na", f"{m.weekly_downloads:,} weekly downloads")
+    else:
+        _row("metadata", "na", "N/A — no download data for this ecosystem")
+
+    if not has_socket_key:
+        _row("socket", "na", "no SOCKET_API_KEY — set for Socket.dev analysis")
+    elif pkg.socket.socket_score is not None:
+        s = pkg.socket.socket_score
+        _row("socket", "ok" if s >= 70 else ("warn" if s >= 40 else "bad"), f"score {s}/100")
+    else:
+        _row("socket", "na", "no data")
+
+    if pkg.osv.osv_vulnerabilities:
+        _row("osv", "bad", f"{len(pkg.osv.osv_vulnerabilities)} known vulnerabilities")
+    else:
+        _row("osv", "ok", "no known vulnerabilities")
+
+    if pkg.diff.install_script_added:
+        _row("diff", "bad", "install script added")
+    else:
+        _row("diff", "ok", "no suspicious patterns")
+
+    if pkg.maintainer.maintainer_changed:
+        _row("maintainer", "warn", "maintainer changed")
+    else:
+        _row("maintainer", "ok", "no changes detected")
+
+    if h is not None:
+        age_status = "warn" if h < 168 else "ok"
+        _row("age", age_status, f"released {h:.0f}h ago")
+    else:
+        _row("age", "na", "release age unknown")
+
+    if pkg.attestation.has_attestation:
+        _row("attestation", "ok", "build provenance verified")
+    else:
+        _row("attestation", "na", "no attestation")
+
+    if pkg.release.github_release_exists:
+        _row("release_notes", "ok", "GitHub release found")
+    else:
+        _row("release_notes", "na", "no GitHub release")
+
+    if pkg.version_lineage.stale_version_line:
+        _row("version_lineage", "warn", "stale version line")
+    else:
+        _row("version_lineage", "ok", "on latest version line")
+
+    if pkg.deps_dev.is_deprecated:
+        _row("deps_dev", "bad", "deprecated: " + (pkg.deps_dev.deprecated_reason or "yes"))
+    else:
+        _row("deps_dev", "ok", "not deprecated")
+
+    if pkg.scorecard.scorecard_score is not None:
+        sc = pkg.scorecard.scorecard_score
+        _row("scorecard", "ok" if sc >= 7 else ("warn" if sc >= 4 else "bad"), f"score {sc:.1f}/10")
+    else:
+        _row("scorecard", "na", "no scorecard data")
+
+    # Print check summary.
+    width = max(len(name) for name, _, _ in rows)
+    for name, status, text in rows:
+        icon_ansi, _, text_fn = _STATUS[status]
+        print(f"  {name:<{width}}  {icon_ansi}  {text_fn(text)}")  # type: ignore[operator]
+
+    # Verdict line.
+    print(
+        f"\nVerdict: {_verdict_label(verdict.classification)}  (confidence {verdict.confidence:.0%})\n"
+    )
     print(f"  {verdict.reasoning}\n")
     if verdict.flags:
         for flag in verdict.flags:
-            print(f"  ! {flag}")
+            print(f"  {_y('⚠')} {flag}")
         print()
 
+    # Draft PR comment (markdown, no ANSI).
+    _, _, v = verdict.classification, verdict.confidence, verdict.classification
+    e = _VERDICT_EMOJI.get(v, "")
+    comment_lines = [
+        f"### {e} dependency-scout: {v.upper()} — {package} `{old_version}` → `{new_version}`",
+        "",
+        "| Check | Status |",
+        "|:------|:-------|",
+    ]
+    for name, status, text in rows:
+        _, md_icon, _ = _STATUS[status]
+        comment_lines.append(f"| {name} | {md_icon} {text} |")
+    comment_lines += [
+        "",
+        f"**Analysis:** {verdict.reasoning}",
+    ]
+    if verdict.flags:
+        flags_str = " · ".join(f"`{f}`" for f in verdict.flags)
+        comment_lines.append(f"\n**Flags:** {flags_str}")
+    comment_lines += [
+        "",
+        "<sub>Generated by dependency-scout</sub>",
+    ]
+    comment = "\n".join(comment_lines)
     print("─" * 60)
-    print("To run this automatically on every PR with durable retry,")
-    print("auto-merge, and human-approval: see docs/deployment.md")
+    print("Draft PR comment (copy/paste into GitHub):\n")
+    print(comment)
+    print()
+
+    print("─" * 60)
+    print("To run this automatically on every Dependabot/Renovate PR,")
+    print("with durable retry and human-approval loops powered by")
+    print("Temporal, see docs/deployment.md")
     print("─" * 60)
 
 
