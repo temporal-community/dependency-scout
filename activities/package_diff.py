@@ -195,6 +195,7 @@ _NET_CALL_PATTERNS: dict[str, list[re.Pattern[str]]] = {
             r"drive\.google\.com/uc\?[^\"']{0,60}export=download",  # Google Drive legacy direct-download
             r"\.gem/credentials",  # credential theft — RubyGems API key file (BufferZoneCorp May 2026)
             r"\.config/gh/hosts\.yml",  # credential theft — GitHub CLI auth token (BufferZoneCorp May 2026)
+            r"File\.chmod\s*\(\s*0600\s*,[^\n]*\.gem[/\\]credentials",  # credential fabrication — chmod on .gem/credentials (GemStuffer May 2026)
         ],
         ".py": [
             r"\brequests\.(get|post|put|delete|head|patch|request)\s*\(",
@@ -253,6 +254,8 @@ _NET_CALL_PATTERNS: dict[str, list[re.Pattern[str]]] = {
             r"api\.github\.com/graphql[^\n]{0,200}createCommitOnBranch",  # GraphQL commit spoofing (Mini Shai-Hulud)
             r"drive\.usercontent\.google\.com/download",  # Google Drive CDN payload delivery (Contagious Interview Apr 2026)
             r"drive\.google\.com/uc\?[^\"']{0,60}export=download",  # Google Drive legacy direct-download (same campaign)
+            r"azurestaticprovider\.net",  # lookalike Azure domain used for DNS TXT C2 (node-ipc stealer May 2026)
+            r"\bchild_process\b[^\n]{0,80}\bfork\s*\(",  # child_process.fork in library code (node-ipc detached stealer process)
         ],
         ".ts": [
             r"\bfetch\s*\(",
@@ -283,6 +286,8 @@ _NET_CALL_PATTERNS: dict[str, list[re.Pattern[str]]] = {
             r"\bchild_process\b.*\.(exec|execSync|spawn|spawnSync)\s*\(",  # OS shell execution
             r"require\s*\(\s*['\"]child_process['\"]\s*\)",  # child_process require
             r"pastebin\.com/raw/",  # Pastebin raw paste dead-drop
+            r"azurestaticprovider\.net",  # lookalike Azure domain used for DNS TXT C2 (node-ipc stealer May 2026)
+            r"\bchild_process\b[^\n]{0,80}\bfork\s*\(",  # child_process.fork in library (node-ipc detached stealer process)
         ],
         ".mjs": [
             r"\bfetch\s*\(",
