@@ -441,28 +441,34 @@ def test_pr_parser_composer_symfony():
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("name", [
-    "drupal/views",
-    "drupal/token",
-    "drupal/core",
-    "laravel/framework",
-    "symfony/console",
-    "vendor/package-name",
-    "vendor/package.name",
-    "A/B",                      # uppercase allowed by Composer spec
-])
+@pytest.mark.parametrize(
+    "name",
+    [
+        "drupal/views",
+        "drupal/token",
+        "drupal/core",
+        "laravel/framework",
+        "symfony/console",
+        "vendor/package-name",
+        "vendor/package.name",
+        "A/B",  # uppercase allowed by Composer spec
+    ],
+)
 def test_name_re_valid(name):
     assert ComposerProvider.name_re.match(name)
 
 
-@pytest.mark.parametrize("name", [
-    "novendor",                 # missing slash
-    "../evil/path",             # path traversal
-    "vendor/",                  # empty package name
-    "/package",                 # empty vendor
-    "vendor/pkg/extra",         # too many slashes
-    "a" * 101 + "/b",           # vendor too long
-])
+@pytest.mark.parametrize(
+    "name",
+    [
+        "novendor",  # missing slash
+        "../evil/path",  # path traversal
+        "vendor/",  # empty package name
+        "/package",  # empty vendor
+        "vendor/pkg/extra",  # too many slashes
+        "a" * 101 + "/b",  # vendor too long
+    ],
+)
 def test_name_re_rejects_invalid(name):
     assert not ComposerProvider.name_re.match(name)
 

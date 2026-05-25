@@ -8,7 +8,6 @@ Shared helpers used by multiple classifier implementations.
 import json
 
 from models import PackageChecks, Verdict
-from helpers.prompts import CLASSIFIER_SYSTEM  # noqa: F401 — re-exported for classifiers
 
 
 def _build_message(signals: PackageChecks) -> str:

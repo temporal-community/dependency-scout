@@ -63,7 +63,11 @@ def _discover_activities() -> list:
             mod = importlib.import_module(mod_info.name)
             for attr_name in dir(mod):
                 obj = getattr(mod, attr_name)
-                if callable(obj) and id(obj) not in seen and _Definition.from_callable(obj) is not None:
+                if (
+                    callable(obj)
+                    and id(obj) not in seen
+                    and _Definition.from_callable(obj) is not None
+                ):
                     seen.add(id(obj))
                     fns.append(obj)
     return fns
