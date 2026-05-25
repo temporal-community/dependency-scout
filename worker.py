@@ -109,9 +109,9 @@ def _discover_activity_check_plugins() -> list:
     return fns
 
 
-# Auto-discovered from activities/*.py — adding a new built-in activity file is sufficient,
-# no manual registration needed.
-# Exposed at module level for test_signal_wiring.py.
+# Auto-discovered from activities/*.py plus any installed dependency_scout.activity_checks plugins.
+# Adding a new built-in activity file is sufficient — no manual registration needed.
+# Exposed at module level for test_check_wiring.py.
 ACTIVITIES = _discover_activities() + _discover_activity_check_plugins()
 
 
