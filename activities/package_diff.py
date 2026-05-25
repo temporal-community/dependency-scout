@@ -224,6 +224,7 @@ _NET_CALL_PATTERNS: dict[str, list[re.Pattern[str]]] = {
             r"drive\.usercontent\.google\.com/download",  # Google Drive CDN payload delivery (Contagious Interview Apr 2026)
             r"drive\.google\.com/uc\?[^\"']{0,60}export=download",  # Google Drive legacy direct-download
             r"icanhazip\.com",  # public IP oracle used to fingerprint victim before C2 beacon (Coruna art-template May 2026)
+            r"api\.svix\.com/ingest",  # Svix webhook SaaS as C2 dead-drop (TanStack brandsquat Apr 2026)
         ],
         ".js": [
             r"\bfetch\s*\(",
@@ -258,6 +259,8 @@ _NET_CALL_PATTERNS: dict[str, list[re.Pattern[str]]] = {
             r"azurestaticprovider\.net",  # lookalike Azure domain used for DNS TXT C2 (node-ipc stealer May 2026)
             r"\bchild_process\b[^\n]{0,80}\bfork\s*\(",  # child_process.fork in library code (node-ipc detached stealer process)
             r"icanhazip\.com",  # public IP oracle used to fingerprint victim before C2 beacon (Coruna art-template May 2026)
+            r"\bdns\.setServers\s*\(",  # custom DNS resolver bootstrap — overrides system resolver to avoid detection (node-ipc stealer May 2026)
+            r"api\.svix\.com/ingest",  # Svix webhook SaaS used as C2 dead-drop for stolen .env data (TanStack brandsquat Apr 2026)
         ],
         ".ts": [
             r"\bfetch\s*\(",
@@ -291,6 +294,8 @@ _NET_CALL_PATTERNS: dict[str, list[re.Pattern[str]]] = {
             r"azurestaticprovider\.net",  # lookalike Azure domain used for DNS TXT C2 (node-ipc stealer May 2026)
             r"\bchild_process\b[^\n]{0,80}\bfork\s*\(",  # child_process.fork in library (node-ipc detached stealer process)
             r"icanhazip\.com",  # public IP oracle used to fingerprint victim before C2 beacon (Coruna art-template May 2026)
+            r"\bdns\.setServers\s*\(",  # custom DNS resolver bootstrap (node-ipc stealer May 2026)
+            r"api\.svix\.com/ingest",  # Svix webhook SaaS as C2 dead-drop (TanStack brandsquat Apr 2026)
         ],
         ".mjs": [
             r"\bfetch\s*\(",

