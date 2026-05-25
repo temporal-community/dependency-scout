@@ -1,5 +1,7 @@
 # Models
 
+**When do you need a new model?** When you're adding a new check activity and need somewhere to store its results — if you're writing an activity that returns structured data and `PackageChecks` doesn't have a field for it yet.
+
 All data structures used across the codebase are [Pydantic](https://docs.pydantic.dev) models — plain Python classes with type-checked fields and automatic validation. `__init__.py` re-exports everything so `from models import X` works regardless of which file `X` lives in.
 
 | File | What's in it |

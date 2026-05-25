@@ -1,5 +1,7 @@
 # Classifiers
 
+**When do you need a new classifier?** When you want to use a different LLM or decision engine to turn the collected checks into a verdict — for example, to use a model your company already has a contract with, or to run fully offline.
+
 A classifier takes all the checks gathered by `PackageTriageWorkflow` and produces a **GREEN / YELLOW / RED** verdict with a human-readable explanation. Swapping classifiers is how you trade cost, latency, and accuracy against each other.
 
 ## Built-in classifiers

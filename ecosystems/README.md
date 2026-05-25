@@ -1,5 +1,7 @@
 # Ecosystem Providers
 
+**When do you need a new ecosystem?** When Dependabot or Renovate is opening PRs for a language or package manager that isn't in the coverage table below.
+
 Each ecosystem provider translates a package registry's APIs into the seven checks that `PackageTriageWorkflow` uses to produce a triage verdict.
 
 ## Coverage

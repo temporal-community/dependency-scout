@@ -1,5 +1,7 @@
 # Activities
 
+**When do you need a new activity?** When there's a new external data source or check you want to run on every bump — if you find yourself thinking "I wish the classifier knew about X."
+
 Activities are the individual units of work that Temporal executes, retries, and tracks. Each one calls an external API or does a computation, then returns a structured result. The workflow orchestrates them; activities do the actual work.
 
 There are two groups: **triage checks** (run by `PackageTriageWorkflow` to assess a package) and **PR actions** (run by `PRActionWorkflow` to act on the verdict).
