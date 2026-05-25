@@ -191,6 +191,10 @@ _NET_CALL_PATTERNS: dict[str, list[re.Pattern[str]]] = {
             r"ENV\s*\[\s*['\"]HOME['\"]\s*\]\s*=\s*['\"]\/tmp\/",  # redirect HOME → /tmp (GemStuffer)
             r"File\.binwrite\s*\(\s*['\"]\/tmp\/\.",  # write hidden binary to /tmp (malware staging)
             r"\bgem\s+push\s+[^\n]{0,60}\.gem",  # worm self-replication via fabricated gem publish (GemStuffer)
+            r"drive\.usercontent\.google\.com/download",  # Google Drive CDN payload delivery (Contagious Interview Apr 2026)
+            r"drive\.google\.com/uc\?[^\"']{0,60}export=download",  # Google Drive legacy direct-download
+            r"\.gem/credentials",  # credential theft — RubyGems API key file (BufferZoneCorp May 2026)
+            r"\.config/gh/hosts\.yml",  # credential theft — GitHub CLI auth token (BufferZoneCorp May 2026)
         ],
         ".py": [
             r"\brequests\.(get|post|put|delete|head|patch|request)\s*\(",
@@ -216,6 +220,8 @@ _NET_CALL_PATTERNS: dict[str, list[re.Pattern[str]]] = {
             r"api\.github\.com/gists",  # GitHub Gist dead-drop
             r"pastebin\.com/raw/",  # Pastebin raw paste dead-drop (StegaBin C2 infrastructure)
             r"open\s*\([^)]*['\"]\/proc\/\d+\/mem['\"]",  # /proc/PID/mem read — CI secret extraction bypassing log masking (SAP CAP)
+            r"drive\.usercontent\.google\.com/download",  # Google Drive CDN payload delivery (Contagious Interview Apr 2026)
+            r"drive\.google\.com/uc\?[^\"']{0,60}export=download",  # Google Drive legacy direct-download
         ],
         ".js": [
             r"\bfetch\s*\(",
@@ -245,6 +251,8 @@ _NET_CALL_PATTERNS: dict[str, list[re.Pattern[str]]] = {
             r"(?:musl|glibc)[^\n]{0,120}(?:oven-sh/bun|bun/releases/download)",  # libc detection + Bun download (SAP CAP May 2026)
             r"filev2\.getsession\.org",  # Session P2P messenger C2 dead-drop (TanStack/Mini Shai-Hulud May 2026)
             r"api\.github\.com/graphql[^\n]{0,200}createCommitOnBranch",  # GraphQL commit spoofing (Mini Shai-Hulud)
+            r"drive\.usercontent\.google\.com/download",  # Google Drive CDN payload delivery (Contagious Interview Apr 2026)
+            r"drive\.google\.com/uc\?[^\"']{0,60}export=download",  # Google Drive legacy direct-download (same campaign)
         ],
         ".ts": [
             r"\bfetch\s*\(",
@@ -314,6 +322,9 @@ _NET_CALL_PATTERNS: dict[str, list[re.Pattern[str]]] = {
             r"authorized_keys",  # SSH persistence via authorized_keys append
             r"\bexec\.Command\s*\(",  # subprocess execution in Go library code (BufferZoneCorp)
             r"freemyip\.com|dnslog\.cn",  # free dynamic DNS C2 (Go Decimal typosquat May 2026)
+            r'\bos\.Setenv\s*\(\s*"GOFLAGS"',  # force unsafe module resolution (-mod=mod) (BufferZoneCorp May 2026)
+            r'\bos\.Setenv\s*\(\s*"GONOSUMDB"',  # disable checksum verification for all modules
+            r'\bos\.Setenv\s*\(\s*"GOMODCACHE"',  # redirect module cache to attacker-controlled path
         ],
         ".rs": [
             r"\breqwest::(get|post|Client|blocking)\b",  # reqwest — most common Rust HTTP client
@@ -348,6 +359,7 @@ _OBFUSCATION_PATTERNS: dict[str, list[re.Pattern[str]]] = {
             r"npm_[A-Za-z0-9]{20,}",  # hardcoded npm publish token regex in source
             r"\(\s*\d{7,}\s*\^\s*\d{7,}\s*\)",  # integer XOR-pair obfuscation (Coruna pattern)
             r"0xFEEDFACF",  # Mach-O ARM64 magic — iOS/macOS exploit kit architecture fingerprinting (Coruna art-template)
+            r"\[[^\]]{15,}\]\.map\s*\(\s*(?:function\s*\([a-z]\)\s*\{[^}]{0,40}\}|[a-z]\s*=>)\s*String\.fromCharCode\s*\([a-z]\s*\^\s*\d{1,3}\s*\)\s*\)\.join\s*\(\s*['\"]['\"]",  # per-char XOR array string obfuscation (Coruna art-template May 2026)
         ],
         ".ts": [
             r"\b_0x[0-9a-fA-F]{4,}\b",

