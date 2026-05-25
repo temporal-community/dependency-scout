@@ -217,3 +217,5 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 .claude/
+# But DO track project-level Claude Code skills (shared with all contributors)
+!.claude/commands/
