@@ -261,13 +261,13 @@ tests/          pytest test suite — one file per module, plus test_workflow_re
 
 The split between `checks/` + `platform/` and the top-level packages is intentional: `ecosystems/`, `platforms/`, and `classifiers/` are stable public extension points. Plugin authors import from them directly without needing to know anything about Temporal.
 
-`checks/signatures/` is the lowest-barrier extension point: adding a new network-call signature for a language you know is a two-line YAML edit.
+`checks/signatures/` is the lowest-barrier built-in extension point: adding a new network-call signature for a language you know is a two-line YAML edit. Third-party packages can also ship additional signature sets via `dependency_scout.signatures` (YAML directory) or `dependency_scout.signature_providers` (Python callable returning a `SignatureContribution`).
 
 ---
 
 ## Extension points
 
-Three things can be extended by third-party packages without forking the Scout. See [docs/extending.md](extending.md) for full worked examples of each.
+Six things can be extended by third-party packages without forking the Scout. See [docs/extending.md](extending.md) for full worked examples of each.
 
 | What to extend | Entry point group | When to use |
 |---|---|---|
@@ -276,6 +276,8 @@ Three things can be extended by third-party packages without forking the Scout. 
 | Custom checks | `dependency_scout.checks` | Fast API calls, <30s |
 | Advanced check activities | `dependency_scout.activity_checks` | Long-running work, needs heartbeating |
 | New platform | `dependency_scout.platforms` | Support a new code-hosting platform |
+| Attack signatures (YAML) | `dependency_scout.signatures` | Ship additional regex pattern files — no Python expertise required |
+| Attack signatures (Python) | `dependency_scout.signature_providers` | Dynamically generated patterns, e.g. from a threat-intel feed |
 
 ---
 
