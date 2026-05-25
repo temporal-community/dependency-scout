@@ -45,6 +45,8 @@ This is required for determinism. Never import activity functions directly into 
 
 **Plugin / entry points:** `ecosystems/`, `platforms/`, `classifiers/`, and `checks/signatures/` are all pluggable via Python entry points. Discovery happens at runtime via `importlib.metadata.entry_points` — there is no manual registry. Patch `importlib.metadata.entry_points` (not the module's own reference) when testing this path. Signature plugins use two groups: `dependency_scout.signatures` (callable returning a `Path` to a YAML directory) and `dependency_scout.signature_providers` (callable returning a `SignatureContribution`).
 
+**Ecosystem registry is metadata-first and lazy-per-provider:** `ecosystems/_registry.py` holds all built-in metadata (slug, osv_name, name_re) as stdlib-only data — no provider modules are imported just to answer "is this ecosystem supported?". `get_provider(name)` imports exactly one provider module on demand. Plugin ecosystems register an `EcosystemMeta` instance (not a provider class) under `dependency_scout.ecosystems` — the `module`/`class_name` fields tell the loader where to find the provider.
+
 **`models/` is split into multiple files:** `pr.py`, `checks.py`, `verdict.py`, `package.py`. The package `__init__.py` re-exports everything, so `from models import Verdict` still works — but if you're adding a new model, put it in the right file.
 
 ## Commands

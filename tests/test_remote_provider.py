@@ -233,11 +233,12 @@ async def test_fetch_release_exists():
 
 
 def test_remote_base_class_not_in_registry():
-    from ecosystems import _build_provider_registry
+    from ecosystems import _get_metadata_registry
 
-    registry = _build_provider_registry()
-    # The base class has no ecosystem_name value, so it must not be registered
-    for name, provider in registry.items():
-        assert type(provider).__name__ != "RemoteEcosystemProvider", (
-            "RemoteEcosystemProvider itself was auto-discovered — it should only be a base class"
+    # The metadata registry is explicit (BUILTIN_ECOSYSTEMS + entry points), not a
+    # module scan, so RemoteEcosystemProvider can never appear as a registered name.
+    registry = _get_metadata_registry()
+    for name, meta in registry.items():
+        assert meta.class_name != "RemoteEcosystemProvider", (
+            "RemoteEcosystemProvider itself was registered — it should only be a base class"
         )

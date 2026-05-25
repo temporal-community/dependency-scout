@@ -106,6 +106,17 @@ def _label(verdict: str) -> str:
 
 
 async def run(ecosystem: str, package: str, old_version: str, new_version: str) -> None:
+    from ecosystems import get_dependabot_slug_map, get_provider
+
+    try:
+        get_provider(ecosystem)
+    except ValueError:
+        supported = ", ".join(sorted(get_dependabot_slug_map().values()))
+        sys.exit(
+            f"Ecosystem {ecosystem!r} is not supported by dependency-scout.\n"
+            f"Supported ecosystems: {supported}"
+        )
+
     env = ActivityEnvironment()
     args = [ecosystem, package, old_version, new_version]
 

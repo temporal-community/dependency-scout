@@ -129,6 +129,12 @@ def _detect_ecosystem(package: str, branch: str) -> str:
             slug_map = get_dependabot_slug_map()
             if slug in slug_map:
                 return slug_map[slug]
+            # Recognised Dependabot branch but no registered provider (e.g.
+            # github_actions, docker, terraform). Return the raw slug so callers
+            # can surface a clear "unsupported ecosystem" message instead of
+            # silently treating the package as pip.
+            if slug:
+                return slug
 
     # Renovate branch names sometimes encode the manager/datasource as a prefix:
     # renovate/{manager}-{package}-{version}.x  (e.g. renovate/npm-lodash-4.x)

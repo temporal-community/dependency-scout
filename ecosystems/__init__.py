@@ -2,24 +2,27 @@
 Ecosystem abstraction layer.
 
 To add a new ecosystem (built-in):
-  1. Create ecosystems/{name}.py with a class that inherits EcosystemProviderBase
-     (set ecosystem_name = "<key>" as a class attribute — get_provider() discovers it automatically)
-  2. Add the ecosystem name to the Literal types in models/__init__.py
-  3. Add the branch slug to helpers/pr_parser.py's _DEPENDABOT_ECOSYSTEM_MAP
-  4. Add a name-validation regex entry in api/webhook.py's _NAME_RE_BY_ECOSYSTEM
+  1. Create ecosystems/{name}.py with a class that inherits EcosystemProviderBase.
+  2. Add an EcosystemMeta entry to ecosystems/_registry.py's BUILTIN_ECOSYSTEMS list.
+  3. Add the ecosystem name to the Literal types in models/__init__.py.
 
 To add a new ecosystem (plugin):
-  Inherit from EcosystemProviderBase and register under the dependency_scout.ecosystems
-  entry point group.  New optional signal methods added to EcosystemProviderBase in future
-  releases will have safe no-op defaults, so your provider won't break on upgrade.
+  1. Create a lightweight _meta.py in your package (stdlib + EcosystemMeta only — no httpx):
+       from ecosystems._registry import EcosystemMeta
+       import re
+       MY_META = EcosystemMeta(name="myeco", dependabot_slug="myeco", ...)
+  2. Register via entry point:
+       [project.entry-points."dependency_scout.ecosystems"]
+       myeco = "my_package._meta:MY_META"
+  The provider class is loaded lazily on first get_provider("myeco") call.
+  New optional signal methods added to EcosystemProviderBase will have safe no-op
+  defaults, so your provider won't break on upgrade.
 """
 
 from __future__ import annotations
 
 import importlib
-import inspect
 import os
-import pkgutil
 import re
 import stat
 import tarfile
@@ -122,73 +125,66 @@ class EcosystemProviderBase:
         raise NotImplementedError
 
 
-_PROVIDERS: dict[str, EcosystemProvider] | None = None
+from ecosystems._registry import BUILTIN_ECOSYSTEMS, EcosystemMeta
+
+# Metadata registry: built lazily on first access, no provider modules imported.
+_METADATA: dict[str, EcosystemMeta] | None = None
+# Provider cache: populated one entry at a time as get_provider() is called.
+_PROVIDER_CACHE: dict[str, EcosystemProvider] = {}
 
 
-def _build_provider_registry() -> dict[str, EcosystemProvider]:
-    """Scan built-in providers then entry points for classes with an ecosystem_name attribute.
+def _get_metadata_registry() -> dict[str, EcosystemMeta]:
+    """Return {ecosystem_name: EcosystemMeta} without importing any provider module.
 
-    Built-in providers: ecosystems/*.py (pkgutil scan).
-    External plugins: declare an entry point in group "dependency_scout.ecosystems":
-        [project.entry-points."dependency_scout.ecosystems"]
-        my_ecosystem = "my_package:MyProvider"
-
-    Called lazily on first get_provider() call to avoid circular imports at
-    module load time (providers import helpers from this same __init__.py).
-    Built-in providers take precedence over plugins with the same ecosystem_name.
+    Built-ins come from ecosystems/_registry.py (stdlib-only).  Plugins register
+    an EcosystemMeta instance under the ``dependency_scout.ecosystems`` entry point
+    group — built-ins take precedence over plugins with the same name.
     """
-    import ecosystems as _pkg
+    global _METADATA
+    if _METADATA is not None:
+        return _METADATA
 
-    registry: dict[str, EcosystemProvider] = {}
-
-    for mod_info in pkgutil.iter_modules(_pkg.__path__, prefix="ecosystems."):
-        mod = importlib.import_module(mod_info.name)
-        for _, obj in inspect.getmembers(mod, inspect.isclass):
-            name = getattr(obj, "ecosystem_name", None)
-            if name and obj.__module__ == mod_info.name:
-                registry[name] = obj()
+    registry: dict[str, EcosystemMeta] = {m.name: m for m in BUILTIN_ECOSYSTEMS}
 
     try:
         from importlib.metadata import entry_points
 
         for ep in entry_points(group="dependency_scout.ecosystems"):
             try:
-                cls = ep.load()
-                name = getattr(cls, "ecosystem_name", None)
-                if name and name not in registry:
-                    registry[name] = cls()
+                meta = ep.load()
+                if isinstance(meta, EcosystemMeta) and meta.name not in registry:
+                    registry[meta.name] = meta
             except Exception:  # noqa: BLE001
                 pass
     except Exception:  # noqa: BLE001
         pass
 
-    return registry
+    _METADATA = registry
+    return _METADATA
 
 
 def get_provider(ecosystem: str) -> EcosystemProvider:
-    global _PROVIDERS
-    if _PROVIDERS is None:
-        _PROVIDERS = _build_provider_registry()
-    if ecosystem not in _PROVIDERS:
+    """Return the provider for *ecosystem*, importing its module on first call."""
+    if ecosystem in _PROVIDER_CACHE:
+        return _PROVIDER_CACHE[ecosystem]
+    meta = _get_metadata_registry().get(ecosystem)
+    if meta is None:
         raise ValueError(f"Unknown ecosystem: {ecosystem!r}")
-    return _PROVIDERS[ecosystem]
+    mod = importlib.import_module(meta.module)
+    provider: EcosystemProvider = getattr(mod, meta.class_name)()
+    _PROVIDER_CACHE[ecosystem] = provider
+    return provider
 
 
 def get_dependabot_slug_map() -> dict[str, str]:
-    """Return {dependabot_slug: ecosystem_name} built from provider attributes."""
-    global _PROVIDERS
-    if _PROVIDERS is None:
-        _PROVIDERS = _build_provider_registry()
-    return {p.dependabot_slug: name for name, p in _PROVIDERS.items()}
+    """Return {dependabot_slug: ecosystem_name} without importing any provider module."""
+    return {m.dependabot_slug: name for name, m in _get_metadata_registry().items()}
 
 
 def get_name_re(ecosystem: str) -> re.Pattern | None:
     """Return the package name validation regex for this ecosystem, or None."""
-    global _PROVIDERS
-    if _PROVIDERS is None:
-        _PROVIDERS = _build_provider_registry()
-    p = _PROVIDERS.get(ecosystem)
-    return p.name_re if p is not None else None
+    meta = _get_metadata_registry().get(ecosystem)
+    return meta.name_re if meta is not None else None
 
 
 # ---------------------------------------------------------------------------

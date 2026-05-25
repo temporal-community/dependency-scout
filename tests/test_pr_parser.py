@@ -205,13 +205,25 @@ def test_dependabot_bundler_maps_to_rubygems():
     assert result.ecosystem == "rubygems"
 
 
-def test_dependabot_unknown_ecosystem_slug_falls_back():
+def test_dependabot_unregistered_slug_returns_raw_slug():
+    # Branch slug recognised as Dependabot but no provider registered → return slug
+    # so callers can give a clear "unsupported ecosystem" error instead of silently
+    # treating the package as pip.
     result = parse_pr(
-        "Bump some-pkg from 1.0.0 to 1.1.0",
-        branch="dependabot/gradle/some-pkg-1.1.0",  # gradle not in the map
+        "Bump actions/checkout from 4 to 6",
+        branch="dependabot/github_actions/actions/checkout-6",
     )
     assert result is not None
-    assert result.ecosystem == "pip"  # unknown slug → default
+    assert result.ecosystem == "github_actions"
+
+
+def test_dependabot_no_branch_unknown_package_defaults_to_pip():
+    result = parse_pr(
+        "Bump some-pkg from 1.0.0 to 1.1.0",
+        branch="feature/my-branch",  # not a Dependabot branch at all
+    )
+    assert result is not None
+    assert result.ecosystem == "pip"  # non-Dependabot branch → default
 
 
 def test_dependabot_cargo_detected():

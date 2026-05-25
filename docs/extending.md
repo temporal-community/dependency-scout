@@ -22,27 +22,34 @@ Six extension points exist:
 
 Use this to add support for a package registry that isn't in the built-in coverage table. The plugin provides the seven ecosystem-specific methods; the Scout handles Temporal, caching, and security.
 
+The registration model is **metadata-first**: the entry point points to a lightweight `EcosystemMeta` descriptor, not a provider class. This lets the Scout answer "is this ecosystem supported?" and build the Dependabot slug map without importing your (potentially heavy) provider module. The provider is lazy-loaded on first use.
+
 ### Python-native plugin
 
-Inherit `EcosystemProviderBase` and register via entry points:
-
-```toml
-# pyproject.toml in your plugin package
-[project.entry-points."dependency_scout.ecosystems"]
-django = "my_package:DjangoProvider"
-```
+**Step 1** — Create a lightweight `_meta.py` in your package. It may only import `EcosystemMeta` and stdlib modules — no httpx, no temporalio, no models:
 
 ```python
+# my_package/_meta.py
 import re
+from ecosystems._registry import EcosystemMeta
+
+DJANGO_META = EcosystemMeta(
+    name="django",
+    dependabot_slug="django",        # Requires Renovate custom datasource
+    osv_name="PyPI",                 # Django packages are indexed by OSV as PyPI
+    name_re=re.compile(r"^django-[a-z][a-z0-9-]*$"),
+    module="my_package",             # dotted import path of your provider module
+    class_name="DjangoProvider",     # class within that module
+)
+```
+
+**Step 2** — Implement the provider in `my_package/__init__.py` (or any module):
+
+```python
 from ecosystems import EcosystemProviderBase, validate_archive_url
 from models import AttestationChecks, MaintainerChecks, MetadataChecks, ReleaseAgeChecks, ReleaseChecks
 
 class DjangoProvider(EcosystemProviderBase):
-    ecosystem_name  = "django"
-    osv_name        = "PyPI"           # Django packages are indexed by OSV as PyPI packages
-    dependabot_slug = "django"         # Requires Renovate custom datasource — Dependabot has no native django ecosystem
-    name_re         = re.compile(r"^django-[a-z][a-z0-9-]*$")  # e.g. django-crispy-forms, django-debug-toolbar
-
     async def fetch_metadata(self, package, old_version, new_version) -> MetadataChecks: ...
     async def fetch_release_age(self, package, new_version) -> ReleaseAgeChecks: ...
     async def fetch_maintainer(self, package, old_version, new_version) -> MaintainerChecks: ...
@@ -50,6 +57,14 @@ class DjangoProvider(EcosystemProviderBase):
     def extract_archive(self, archive_bytes, filename, dest) -> None: ...
     async def fetch_attestations(self, package, old_version, new_version) -> AttestationChecks: ...
     async def fetch_release(self, package, old_version, version) -> ReleaseChecks: ...
+```
+
+**Step 3** — Register the metadata (not the class) via entry points:
+
+```toml
+# pyproject.toml
+[project.entry-points."dependency_scout.ecosystems"]
+django = "my_package._meta:DJANGO_META"
 ```
 
 `EcosystemProviderBase` is a concrete base class, not a pure Protocol. Required methods raise `NotImplementedError`; future optional check methods added to the class will have safe empty-model defaults so your provider won't break on upgrade.
@@ -60,19 +75,27 @@ See any built-in provider in `ecosystems/` for a complete template.
 
 ### Non-Python bridge plugin (PHP, Go, Rust, …)
 
-If your ecosystem logic lives in a non-Python stack, subclass `RemoteEcosystemProvider` from `ecosystems/remote.py`. It implements all seven protocol methods by POSTing to your service — your bridge package is ~10 lines of Python that configure the URL and ecosystem metadata:
+If your ecosystem logic lives in a non-Python stack, subclass `RemoteEcosystemProvider` from `ecosystems/remote.py`. It implements all seven protocol methods by POSTing to your service. Same two-file split: a lightweight `_meta.py` and the bridge class:
 
 ```python
-# dependency_scout_drupal/__init__.py
+# dependency_scout_drupal/_meta.py
 import re
+from ecosystems._registry import EcosystemMeta
+
+DRUPAL_META = EcosystemMeta(
+    name="drupal",
+    dependabot_slug="drupal",
+    osv_name="Packagist",
+    name_re=re.compile(r"^drupal/[a-z][a-z0-9_]*$"),
+    module="dependency_scout_drupal",
+    class_name="DrupalProvider",
+)
+
+# dependency_scout_drupal/__init__.py
 from ecosystems.remote import RemoteEcosystemProvider
 
 class DrupalProvider(RemoteEcosystemProvider):
-    ecosystem_name  = "drupal"
-    osv_name        = "Packagist"
-    dependabot_slug = "drupal"         # Requires Renovate custom datasource — Dependabot has no native drupal ecosystem
-    name_re         = re.compile(r"^drupal/[a-z][a-z0-9_]*$")  # e.g. drupal/views, drupal/token
-    remote_base_url = "https://drupal-bridge.example.com/triage/v1"  # your PHP service wrapping api.drupal.org
+    remote_base_url = "https://drupal-bridge.example.com/triage/v1"
 ```
 
 Your service must expose `POST {base_url}/{method_name}` endpoints. Each endpoint receives the method parameters as a JSON body and responds with the corresponding check model fields as JSON. The full request/response spec is in the docstrings in `ecosystems/remote.py`.
@@ -109,7 +132,7 @@ function fetch_metadata(array $p): array {
 
 ### Notes on both paths
 
-Once installed, `get_provider("django")` returns your provider automatically — no changes to this repo needed. Built-in providers take precedence over plugins with the same `ecosystem_name`, so core ecosystems cannot be shadowed.
+Once installed, `get_provider("django")` returns your provider automatically — no changes to this repo needed. Built-in providers take precedence over plugins with the same `name`, so core ecosystems cannot be shadowed.
 
 **Security note:** plugin code loads into the same process as the core worker. This is the same trust boundary as any `pip install` dependency — the operator deploying Dependency Scout implicitly trusts the packages they install.
 

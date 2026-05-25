@@ -107,7 +107,7 @@ def test_get_provider_raises_for_unknown_ecosystem():
 def test_get_dependabot_slug_map_reinitializes_if_none(monkeypatch):
     import ecosystems as eco
 
-    monkeypatch.setattr(eco, "_PROVIDERS", None)
+    monkeypatch.setattr(eco, "_METADATA", None)
     result = eco.get_dependabot_slug_map()
     assert isinstance(result, dict)
     assert len(result) > 0
@@ -116,7 +116,7 @@ def test_get_dependabot_slug_map_reinitializes_if_none(monkeypatch):
 def test_get_name_re_reinitializes_if_none(monkeypatch):
     import ecosystems as eco
 
-    monkeypatch.setattr(eco, "_PROVIDERS", None)
+    monkeypatch.setattr(eco, "_METADATA", None)
     result = eco.get_name_re("pip")
     assert result is not None
 
@@ -124,7 +124,7 @@ def test_get_name_re_reinitializes_if_none(monkeypatch):
 def test_get_name_re_returns_none_for_unknown(monkeypatch):
     import ecosystems as eco
 
-    monkeypatch.setattr(eco, "_PROVIDERS", None)
+    monkeypatch.setattr(eco, "_METADATA", None)
     result = eco.get_name_re("unknown_eco")
     assert result is None
 

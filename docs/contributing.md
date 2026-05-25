@@ -43,16 +43,13 @@ Also see [ecosystems/README.md](../ecosystems/README.md) for the coverage table 
 
 **Step 1 — Create `ecosystems/{name}.py`**
 
-Implement the `EcosystemProvider` Protocol. Copy an existing provider (e.g. `rubygems.py`) as a starting point. Set `ecosystem_name` to the canonical key — `get_provider()` discovers it automatically:
+Implement the `EcosystemProvider` Protocol by inheriting from `EcosystemProviderBase`. Copy an existing provider (e.g. `rubygems.py`) as a starting point:
 
 ```python
-from ecosystems import is_major, parse_upload_time, validate_archive_url
+from ecosystems import EcosystemProviderBase, is_major, parse_upload_time, validate_archive_url
 from models import AttestationChecks, MaintainerChecks, MetadataChecks, ReleaseAgeChecks
 
-class ComposerProvider:
-    ecosystem_name = "composer"  # auto-discovered by get_provider()
-    osv_name = "Packagist"       # must match the ecosystem name used by api.osv.dev
-
+class ComposerProvider(EcosystemProviderBase):
     async def fetch_metadata(self, package, old_version, new_version) -> MetadataChecks: ...
     async def fetch_release_age(self, package, new_version) -> ReleaseAgeChecks: ...
     async def fetch_maintainer(self, package, old_version, new_version) -> MaintainerChecks: ...
@@ -64,23 +61,32 @@ class ComposerProvider:
 
 `get_archive_url` returns `(url, filename, integrity_string)`. Call `validate_archive_url(url)` before returning — this enforces the CDN allowlist. Add your registry's CDN host to `ALLOWED_CDN_HOSTS` in `ecosystems/__init__.py`.
 
-**Step 2 — Update the type model**
+**Step 2 — Register metadata in `ecosystems/_registry.py`**
+
+Add an `EcosystemMeta` entry to `BUILTIN_ECOSYSTEMS`. This is the single place that controls the ecosystem name, Dependabot slug, OSV ecosystem string, and package-name validation regex:
+
+```python
+EcosystemMeta(
+    name="composer",
+    dependabot_slug="composer",
+    osv_name="Packagist",
+    name_re=re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,99}/[A-Za-z0-9][A-Za-z0-9._-]{0,99}$"),
+    module="ecosystems.composer",
+    class_name="ComposerProvider",
+),
+```
+
+This replaces what previously required edits in three separate files (`pr_parser.py`, `api/webhook.py`, and the class attributes). `get_provider()`, `get_dependabot_slug_map()`, and `get_name_re()` all read from here.
+
+**Step 3 — Update the type model**
 
 In `models/__init__.py`, add the new ecosystem name to the `Literal[...]` types for ecosystem names.
 
-**Step 3 — Wire up Dependabot branch parsing**
-
-In `helpers/pr_parser.py`, add the `dependabot_slug` → `ecosystem_name` mapping to `_DEPENDABOT_ECOSYSTEM_MAP`.
-
-**Step 4 — Add package name validation**
-
-In `api/webhook.py`, add a `name_re` entry to `_NAME_RE_BY_ECOSYSTEM` (or rely on `get_name_re()` from `ecosystems/__init__.py` if the webhook already calls that).
-
-**Step 5 — Write tests**
+**Step 4 — Write tests**
 
 Add a test file under `tests/` following the existing patterns (e.g. `tests/test_pip_*.py` or `tests/test_npm_*.py`). Use `respx` for HTTP mocking and `ActivityEnvironment` for the activity harness. Each method needs at minimum: success case, 404/not-found case, and (for attestations) a no-attestation case. Aim to keep overall coverage above 95%.
 
-**Step 6 — Regenerate replay fixtures (if needed)**
+**Step 5 — Regenerate replay fixtures (if needed)**
 
 If you changed any workflow code (unlikely for a pure ecosystem add, but possible):
 
@@ -249,7 +255,7 @@ CLASSIFIER=rule_based   # or: claude
 - **Checks are nested, not flat** — `PackageChecks` holds typed sub-models (`signals.age.release_age_hours`, not `signals.release_age_hours`). Field name collisions between checks are structurally impossible.
 - **The registry is the source of truth** — `_CHECK_REGISTRY` in `package_triage_workflow.py` drives the gather order, the `CHECK_ACTIVITY_NAMES` constant, and the worker registration test. When adding a check, the registry row is the one required workflow-layer edit.
 - **Worker registration is automatic** — `worker.py` scans `checks/*.py` and `platform/*.py` at startup for `@activity.defn`-decorated functions. Creating a new activity file is sufficient; no manual entry in `ACTIVITIES` is needed.
-- **Ecosystem provider registration is automatic** — `get_provider()` scans `ecosystems/*.py` for classes with an `ecosystem_name` attribute, then checks the `dependency_scout.ecosystems` entry points group for installed plugins. Creating a new provider file (or installing a plugin package) is sufficient; no manual registration is needed.
+- **Ecosystem registry is explicit and metadata-first** — `ecosystems/_registry.py` holds all built-in metadata (slug, OSV name, name regex, module path) as stdlib-only data. `get_provider()` lazy-imports exactly one provider module on first use. Plugin providers register an `EcosystemMeta` instance via the `dependency_scout.ecosystems` entry point — no module scan, no class-attribute sniffing.
 
 ---
 
