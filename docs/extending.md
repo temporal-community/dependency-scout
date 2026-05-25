@@ -37,9 +37,9 @@ from models import AttestationChecks, MaintainerChecks, MetadataChecks, ReleaseA
 
 class DrupalProvider(EcosystemProviderBase):
     ecosystem_name  = "drupal"
-    osv_name        = "Packagist"      # must match ecosystem name used by api.osv.dev
-    dependabot_slug = "drupal"         # Dependabot branch prefix
-    name_re         = re.compile(r"^[a-z0-9_-]+/[a-z0-9_-]+$")
+    osv_name        = "Packagist"      # Drupal modules are indexed by OSV as Packagist packages
+    dependabot_slug = "drupal"         # Requires Renovate custom datasource — Dependabot has no native drupal ecosystem
+    name_re         = re.compile(r"^drupal/[a-z][a-z0-9_]*$")  # e.g. drupal/views, drupal/token
 
     async def fetch_metadata(self, package, old_version, new_version) -> MetadataChecks: ...
     async def fetch_release_age(self, package, new_version) -> ReleaseAgeChecks: ...
@@ -68,12 +68,14 @@ from ecosystems.remote import RemoteEcosystemProvider
 class DrupalProvider(RemoteEcosystemProvider):
     ecosystem_name  = "drupal"
     osv_name        = "Packagist"
-    dependabot_slug = "drupal"
-    name_re         = re.compile(r"^[a-z0-9_-]+/[a-z0-9_-]+$")
-    remote_base_url = "https://drupal-bridge.example.com/triage/v1"
+    dependabot_slug = "drupal"         # Requires Renovate custom datasource — Dependabot has no native drupal ecosystem
+    name_re         = re.compile(r"^drupal/[a-z][a-z0-9_]*$")  # e.g. drupal/views, drupal/token
+    remote_base_url = "https://drupal-bridge.example.com/triage/v1"  # your PHP service wrapping api.drupal.org
 ```
 
 Your service must expose `POST {base_url}/{method_name}` endpoints. Each endpoint receives the method parameters as a JSON body and responds with the corresponding check model fields as JSON. The full request/response spec is in the docstrings in `ecosystems/remote.py`.
+
+**Note for Drupal specifically:** Drupal module source lives on [git.drupalcode.org](https://git.drupalcode.org), a self-hosted GitLab instance. Set `GITLAB_BASE_URL=https://git.drupalcode.org` and the built-in release-note and tag-signature checks will resolve against it automatically — no custom code needed for that part.
 
 ### Notes on both paths
 
