@@ -64,43 +64,10 @@ def _discover_activities() -> list:
     return fns
 
 
-def _discover_plugin_activities() -> list:
-    """Load @activity.defn-decorated functions from the dependency_scout.activities entry point group.
-
-    Plugin packages declare activities in their pyproject.toml:
-        [project.entry-points."dependency_scout.activities"]
-        my_signal = "my_package.activities:check"
-
-    Each entry point must point to a single @activity.defn-decorated callable.
-    Non-activity callables and load failures are silently skipped.
-
-    Security note: plugin activities run in-process alongside core activities — the same
-    trust boundary as any installed pip dependency or dependency_scout.ecosystems plugin.
-    Results land in PackageChecks.custom_checks which is rendered in the sandboxed
-    <untrusted_custom> section of the LLM prompt, not the trusted checks block.
-    """
-    try:
-        from importlib.metadata import entry_points
-    except ImportError:
-        return []
-
-    seen: set[int] = set()
-    fns = []
-    for ep in entry_points(group="dependency_scout.activities"):
-        try:
-            fn = ep.load()
-            if callable(fn) and id(fn) not in seen and _Definition.from_callable(fn) is not None:
-                seen.add(id(fn))
-                fns.append(fn)
-        except Exception:  # noqa: BLE001
-            pass
-    return fns
-
-
-# Auto-discovered from activities/*.py plus any installed dependency_scout.activities plugins.
-# Adding a new built-in activity file is sufficient — no manual registration needed.
+# Auto-discovered from activities/*.py — adding a new built-in activity file is sufficient,
+# no manual registration needed.
 # Exposed at module level for test_signal_wiring.py.
-ACTIVITIES = _discover_activities() + _discover_plugin_activities()
+ACTIVITIES = _discover_activities()
 
 
 async def main() -> None:

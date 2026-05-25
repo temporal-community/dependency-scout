@@ -5,6 +5,7 @@ from temporalio.common import RetryPolicy
 
 with workflow.unsafe.imports_passed_through():
     from models import (
+        CheckContext,
         PackageChecks,
         Verdict,
         MetadataChecks,
@@ -43,7 +44,10 @@ _CHECK_REGISTRY: list[tuple[str, str, type, bool]] = [
 ]
 
 # Derived from the registry — used by tests/test_check_wiring.py to verify worker registration.
-CHECK_ACTIVITY_NAMES: list[str] = [name for _, name, _, _ in _CHECK_REGISTRY]
+# Includes the custom_checks runner which is always called even when no plugins are installed.
+CHECK_ACTIVITY_NAMES: list[str] = [name for _, name, _, _ in _CHECK_REGISTRY] + [
+    "activities.custom_checks.run_all"
+]
 
 
 @workflow.defn
@@ -63,7 +67,6 @@ class PackageTriageWorkflow:
         package: str,
         old_version: str,
         new_version: str,
-        extra_check_activities: list[str] = [],
     ) -> Verdict:
         retry = RetryPolicy(maximum_attempts=5, initial_interval=timedelta(seconds=2))
         default_opts: dict = dict(
@@ -104,32 +107,24 @@ class PackageTriageWorkflow:
             else:
                 check_kwargs[field] = result
 
-        custom_checks: dict[str, object] = {}
-        if extra_check_activities:
-            custom_raw = await asyncio.gather(
-                *(
-                    workflow.execute_activity(
-                        name,
-                        args=args,
-                        result_type=dict,
-                        **default_opts,
-                    )
-                    for name in extra_check_activities
-                ),
-                return_exceptions=True,
-            )
-            for name, result in zip(extra_check_activities, custom_raw):
-                if isinstance(result, Exception):
-                    workflow.logger.warning(f"Custom check '{name}' failed: {result!r} — skipped")
-                else:
-                    custom_checks[name] = result
+        custom_checks_result = await workflow.execute_activity(
+            "activities.custom_checks.run_all",
+            CheckContext(
+                package=package,
+                ecosystem=ecosystem,
+                old_version=old_version,
+                new_version=new_version,
+            ),
+            result_type=dict,
+            **default_opts,
+        )
 
         package_checks = PackageChecks(
             ecosystem=ecosystem,
             package_name=package,
             old_version=old_version,
             new_version=new_version,
-            custom_checks=custom_checks,
+            custom_checks=custom_checks_result,
             **check_kwargs,  # type: ignore[arg-type]
         )
 

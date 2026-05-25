@@ -19,6 +19,7 @@ from temporalio.worker import Worker
 
 from models import (
     AttestationChecks,
+    CheckContext,
     DepsDevChecks,
     PackageDiffChecks,
     MaintainerChecks,
@@ -219,6 +220,14 @@ def _scorecard():
     return fetch
 
 
+def _custom_checks():
+    @activity.defn(name="activities.custom_checks.run_all")
+    async def run_all(_: CheckContext) -> dict:
+        return {}
+
+    return run_all
+
+
 # ---------------------------------------------------------------------------
 # Scenarios: (fixture_name, verdict_class, repo_config, human_signal | None)
 # ---------------------------------------------------------------------------
@@ -276,6 +285,7 @@ async def _run_scenario(
         _version_lineage(),
         _depsdev(),
         _scorecard(),
+        _custom_checks(),
         _classifier(classification),
         _repo_config(config),
         _comment(),

@@ -271,35 +271,39 @@ class DrupalProvider(RemoteEcosystemProvider):
 
 Your service must expose `POST {base_url}/{method_name}` endpoints. Each endpoint receives the method parameters as a JSON body and responds with the corresponding signal model fields as JSON. The full request/response spec is in the docstrings in `ecosystems/remote.py`.
 
-### Adding custom check activities
+### Adding custom checks
 
-Plugins can also contribute new check-gathering activities. Declare them in `pyproject.toml`:
+Plugins can contribute extra supply-chain checks via a clean entry-point API — no Temporal internals required. Declare an async function and register it in `pyproject.toml`:
+
+```python
+# dependency_scout_drupal/vuln_check.py
+from models import CheckContext
+
+async def run(ctx: CheckContext) -> dict:
+    """ctx has: package, ecosystem, old_version, new_version."""
+    result = await my_internal_db.lookup(ctx.package, ctx.ecosystem)
+    return {"internal_vuln_count": result.count}
+```
 
 ```toml
-[project.entry-points."dependency_scout.activities"]
-drupal_check = "dependency_scout_drupal.activities:check"
+# pyproject.toml
+[project.entry-points."dependency_scout.checks"]
+drupal_vuln = "dependency_scout_drupal.vuln_check:run"
 ```
 
-`check` must be decorated with `@activity.defn`. It receives `(ecosystem, package, old_version, new_version)` and must return a JSON-serialisable dict. The worker loads it automatically at startup alongside built-in activities.
+The `activities.custom_checks.run_all` activity discovers all installed `dependency_scout.checks` entry points at runtime and runs them in parallel. Results land in `PackageChecks.custom_checks` under the entry-point name and are surfaced to the LLM in a sandboxed `<untrusted_custom>` block — the same way package descriptions and diff content are handled. They cannot override or poison the core trusted checks.
 
-To invoke it, the target repo adds the activity name to `.github/dependency-scout.yml`:
-
-```yaml
-extra_check_activities:
-  - "dependency_scout_drupal.activities:check"
-```
-
-Results land in `PackageChecks.custom_checks` and are surfaced to the LLM in a sandboxed `<untrusted_custom>` block — the same way package descriptions and diff content are handled. They cannot override or poison the core trusted checks.
+No config file changes are needed in target repos — plugins are discovered automatically from the installed packages.
 
 **How the classifier handles your check results:**
 
 - **LLM classifiers (Claude, OpenAI, Ollama)** — your results appear automatically in the prompt as labeled JSON. The LLM reasons over them without any code changes on your part. No schema registration needed; the LLM infers meaning from the key names and values.
-- **Rule-based classifier** — ignores `custom_checks` by design. Deterministic threshold rules can only be written for checks whose structure is known at compile time. If you need rule-based support for your check, contribute it as a built-in check (see "Adding a new check" above) rather than a plugin activity.
+- **Rule-based classifier** — ignores `custom_checks` by design. Deterministic threshold rules can only be written for checks whose structure is known at compile time. If you need rule-based support for your check, contribute it as a built-in check (see "Adding a new check" above) rather than a plugin.
 
 This means plugins work best when an LLM classifier is configured. The rule-based fallback will still run and post a verdict — it just won't factor in your custom check.
 
 ### In both cases
 
-Once installed, `get_provider("drupal")` returns your provider and `check` is registered with the worker automatically — no changes to this repo needed. Built-in providers take precedence over plugins with the same `ecosystem_name`, so core ecosystems cannot be shadowed.
+Once installed, `get_provider("drupal")` returns your provider and custom checks run automatically — no changes to this repo needed. Built-in providers take precedence over plugins with the same `ecosystem_name`, so core ecosystems cannot be shadowed.
 
-**Security note:** both entry point groups (`dependency_scout.ecosystems` and `dependency_scout.activities`) load plugin code into the same process as the core worker. This is the same trust boundary as any `pip install` dependency — the operator who deploys Dependency Scout is implicitly trusting the packages they install. Plugin results in `custom_checks` are rendered in the sandboxed `<untrusted_custom>` section of the LLM prompt and cannot influence the trusted checks block.
+**Security note:** both entry point groups (`dependency_scout.ecosystems` and `dependency_scout.checks`) load plugin code into the same process as the core worker. This is the same trust boundary as any `pip install` dependency — the operator who deploys Dependency Scout is implicitly trusting the packages they install. Plugin results in `custom_checks` are rendered in the sandboxed `<untrusted_custom>` section of the LLM prompt and cannot influence the trusted checks block.

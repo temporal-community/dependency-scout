@@ -170,7 +170,6 @@ A ready-to-copy template is at [`.github/dependency-scout.yml.example`](.github/
 | `reviewers` | `[]` | GitHub usernames to request review on YELLOW verdicts |
 | `block_classifications` | `["red"]` | Close the PR and add a label for these verdicts |
 | `max_new_dependencies` | `5` | Flag as YELLOW when a bump adds more than this many new direct deps |
-| `extra_check_activities` | `[]` | Additional Temporal activity names to call (for ecosystem plugins) |
 
 **Minimal "just auto-merge safe stuff" config:**
 
@@ -244,7 +243,7 @@ Everything that varies between deployments is pluggable via Python entry points 
 |---|---|---|
 | New package ecosystem | `dependency_scout.ecosystems` | Implement `EcosystemProvider`, or use `RemoteEcosystemProvider` for non-Python stacks |
 | Custom classifier (OpenAI, Gemini, …) | `dependency_scout.classifiers` | Implement `async def classify(checks) -> Verdict`, set `CLASSIFIER=name` |
-| Extra check activities | `dependency_scout.activities` | Decorate with `@activity.defn`, list in `extra_check_activities` config |
+| Custom checks | `dependency_scout.checks` | Write `async def run(ctx: CheckContext) -> dict` — no Temporal required |
 | New dependency bot (PyUp, etc.) | call `register_bot_parser()` | Implement `BotParser` with `bot_logins` and `parse()` |
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for full examples of each.
@@ -263,7 +262,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for full examples of each.
 - [x] Replay test fixtures (workflow determinism guarantee)
 - [x] Ecosystem plugin architecture — entry points + `RemoteEcosystemProvider` HTTP bridge for non-Python stacks
 - [x] Pluggable classifier — Claude, OpenAI, Ollama, or any `dependency_scout.classifiers` plugin
-- [x] Check activity plugin architecture — third-party checks via `dependency_scout.activities` entry points, surfaced to LLM automatically
+- [x] Custom check plugin architecture — third-party checks via `dependency_scout.checks` entry points, no Temporal internals required, surfaced to LLM automatically
 - [x] Temporal Cloud support — TLS credentials in `.env`, no code changes needed vs local dev
 - [x] Renovate full support — title variants with/without `dependency` keyword, arrow and from/to body extraction, pre-release versions, false-positive prevention
 

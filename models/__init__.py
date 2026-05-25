@@ -34,6 +34,15 @@ class PRContext(BaseModel):
         return _validate_ecosystem_name(v)
 
 
+class CheckContext(BaseModel):
+    """Passed to every dependency_scout.checks plugin function."""
+
+    package: str
+    ecosystem: str
+    old_version: str
+    new_version: str
+
+
 class RepoConfig(BaseModel):
     """Loaded from .github/dependency-scout.yml in target repo. All fields optional.
 
@@ -50,9 +59,6 @@ class RepoConfig(BaseModel):
         "red"
     ]  # close PRs classified as RED by default; set [] to observe-only
     max_new_dependencies: int = 5  # flag as yellow when more direct deps than this are added
-    extra_check_activities: list[
-        str
-    ] = []  # additional Temporal activity names to call; each receives (ecosystem, package, old_version, new_version) and must return a JSON-serializable dict
 
 
 # Partial check models — one per check activity, nested into PackageChecks in the workflow.

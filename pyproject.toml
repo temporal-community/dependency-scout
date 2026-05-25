@@ -37,6 +37,15 @@ rule_based = "classifiers:RuleBasedClassifier"
 github = "platforms.github:create_client"
 gitlab = "platforms.gitlab:create_client"
 
+[project.entry-points."dependency_scout.checks"]
+# Custom supply-chain checks. Each entry point must point to an async function with signature:
+#   async def run(ctx: CheckContext) -> dict
+# where CheckContext is importable from models (i.e. `from models import CheckContext`).
+# The function's return value is merged into PackageChecks.custom_checks under the entry-point name.
+# Example in your plugin's pyproject.toml:
+#   [project.entry-points."dependency_scout.checks"]
+#   internal_vuln = "my_package.vuln_check:run"
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"

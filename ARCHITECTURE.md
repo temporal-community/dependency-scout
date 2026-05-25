@@ -289,16 +289,26 @@ gemini = "my_package:GeminiClassifier"
 
 Select it with `CLASSIFIER=gemini` in `.env`.
 
-### Extra check activities
+### Custom checks via `dependency_scout.checks`
 
-Per-repo custom checks can be added without writing a plugin package. Any Temporal activity registered with the worker can be listed in `.github/dependency-scout.yml`:
+Third-party check plugins can extend the analysis without touching Temporal internals. A plugin just registers an async function:
 
-```yaml
-extra_check_activities:
-  - my_company.internal_vuln_db.check
+```python
+# my_plugin/vuln_check.py
+from models import CheckContext
+
+async def run(ctx: CheckContext) -> dict:
+    result = await my_internal_db.lookup(ctx.package, ctx.ecosystem)
+    return {"internal_vuln_count": result.count}
 ```
 
-The activity receives `(ecosystem, package, old_version, new_version)` and must return a JSON-serializable dict. Results land in `PackageChecks.custom_checks` and are included in the LLM prompt.
+```toml
+# pyproject.toml
+[project.entry-points."dependency_scout.checks"]
+internal_vuln = "my_plugin.vuln_check:run"
+```
+
+No Temporal, no config changes. The `activities.custom_checks.run_all` activity discovers all installed `dependency_scout.checks` entry points and runs them in parallel. Results land in `PackageChecks.custom_checks` under the entry-point name and are included in the LLM prompt.
 
 ---
 
