@@ -4,7 +4,7 @@ Each ecosystem provider translates a package registry's APIs into the seven sign
 
 ## Coverage
 
-| Ecosystem | `ecosystem_name` | Language(s) | Registry | Build-origin verified? (attestation) | Notes |
+| Ecosystem | `ecosystem_name` | Language(s) | Registry | Build-origin verified? (attestation) | Implementation quirks |
 |---|---|---|---|---|---|
 | pip (PyPI) | `pip` | Python | [pypi.org](https://pypi.org) | Yes — via [Sigstore](https://www.sigstore.dev) | Registry can prove the package was built by a specific CI pipeline, not uploaded manually |
 | npm | `npm` | JavaScript / TypeScript / Node.js | [npmjs.com](https://www.npmjs.com) | Yes — via [Sigstore](https://www.sigstore.dev) | Same build-origin verification as pip |
