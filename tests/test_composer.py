@@ -599,7 +599,7 @@ async def test_fetch_release_with_github_source(monkeypatch):
 
 @respx.mock
 async def test_version_lineage_composer_stale():
-    from activities.version_lineage import check as lineage_check
+    from checks.version_lineage import check as lineage_check
 
     now = time.time()
     one_year = 365 * 24 * 3600
@@ -630,7 +630,7 @@ async def test_version_lineage_composer_stale():
 
 @respx.mock
 async def test_version_lineage_composer_current():
-    from activities.version_lineage import check as lineage_check
+    from checks.version_lineage import check as lineage_check
 
     now = time.time()
 
@@ -658,7 +658,7 @@ async def test_version_lineage_composer_current():
 
 @respx.mock
 async def test_version_lineage_composer_filters_dev_branches():
-    from activities.version_lineage import check as lineage_check
+    from checks.version_lineage import check as lineage_check
 
     now = time.time()
 

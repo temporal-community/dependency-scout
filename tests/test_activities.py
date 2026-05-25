@@ -12,10 +12,10 @@ import respx
 from temporalio.exceptions import ApplicationError
 from temporalio.testing import ActivityEnvironment
 
-from activities.metadata import fetch as metadata_fetch
-from activities.osv import check as osv_check
-from activities.release_age import check as release_age_check
-from activities.maintainer import history as maintainer_history
+from checks.metadata import fetch as metadata_fetch
+from checks.osv import check as osv_check
+from checks.release_age import check as release_age_check
+from checks.maintainer import history as maintainer_history
 
 
 # ---------------------------------------------------------------------------

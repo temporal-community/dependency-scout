@@ -6,7 +6,7 @@ import pytest
 import respx
 from temporalio.testing import ActivityEnvironment
 
-from activities.platform_activities import fetch_repo_config as fetch
+from pr_actions.actions import fetch_repo_config as fetch
 from models import PRContext, RepoConfig
 from helpers.config_provider import EnvConfigProvider
 

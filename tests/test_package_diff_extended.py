@@ -22,7 +22,7 @@ from temporalio.testing import ActivityEnvironment
 import json as _json
 
 import ecosystems as ecosystems_module
-import activities.package_diff as pkg_diff_module
+import checks.package_diff as pkg_diff_module
 from ecosystems import safe_zip_extractall as _safe_zip_extractall
 from ecosystems import validate_archive_url as _validate_archive_url
 from models import PackageChecks, PackageDiffChecks, ReleaseAgeChecks
@@ -30,7 +30,7 @@ from detections import (
     SUSPICIOUS_PACKAGE_FILES as _SUSPICIOUS_PACKAGE_FILES,
     SUSPICIOUS_PACKAGE_PREFIXES as _SUSPICIOUS_PACKAGE_PREFIXES,
 )
-from activities.package_diff import (
+from checks.package_diff import (
     _added_lines_have_net_calls,
     _build_diff,
     _cargo_git_deps_added,
@@ -496,7 +496,7 @@ async def test_compute_sha256_mismatch_raises(monkeypatch):
 
 
 def test_read_text_returns_empty_on_unreadable_path(tmp_path):
-    from activities.package_diff import _read_text
+    from checks.package_diff import _read_text
 
     # A directory is not readable as text → exception → returns ""
     assert _read_text(tmp_path) == ""
@@ -670,7 +670,7 @@ def test_validate_archive_url_accepts_npm_registry():
 
 
 def test_verify_integrity_sha256_valid():
-    from activities.package_diff import _verify_integrity
+    from checks.package_diff import _verify_integrity
 
     data = b"hello world"
     digest = hashlib.sha256(data).hexdigest()
@@ -678,7 +678,7 @@ def test_verify_integrity_sha256_valid():
 
 
 def test_verify_integrity_sha256_mismatch_raises():
-    from activities.package_diff import _verify_integrity
+    from checks.package_diff import _verify_integrity
     from temporalio.exceptions import ApplicationError
 
     with pytest.raises(ApplicationError, match="SHA-256"):
@@ -687,7 +687,7 @@ def test_verify_integrity_sha256_mismatch_raises():
 
 def test_verify_integrity_sha512_sri_valid():
     import base64
-    from activities.package_diff import _verify_integrity
+    from checks.package_diff import _verify_integrity
 
     data = b"npm package content"
     digest_b64 = base64.b64encode(hashlib.sha512(data).digest()).decode()
@@ -696,7 +696,7 @@ def test_verify_integrity_sha512_sri_valid():
 
 def test_verify_integrity_sha512_sri_mismatch_raises():
     import base64
-    from activities.package_diff import _verify_integrity
+    from checks.package_diff import _verify_integrity
     from temporalio.exceptions import ApplicationError
 
     bad_b64 = base64.b64encode(b"\x00" * 64).decode()
@@ -706,7 +706,7 @@ def test_verify_integrity_sha512_sri_mismatch_raises():
 
 def test_verify_integrity_unknown_format_logs_warning(caplog):
     import logging
-    from activities.package_diff import _verify_integrity
+    from checks.package_diff import _verify_integrity
 
     with caplog.at_level(logging.WARNING):
         _verify_integrity(b"data", "md5-abcdef", "https://registry.npmjs.org/pkg.tgz")
@@ -885,31 +885,31 @@ async def test_rubygems_compute_version_missing_from_list_returns_stub():
 
 @respx.mock
 async def test_rubygems_rbc_files_are_noise():
-    from activities.package_diff import _is_noise
+    from checks.package_diff import _is_noise
 
     assert _is_noise("lib/foo.rbc") is True
 
 
 def test_rubygems_bundle_is_dangerous():
-    from activities.package_diff import DANGEROUS_BINARY_SUFFIXES
+    from checks.package_diff import DANGEROUS_BINARY_SUFFIXES
 
     assert ".bundle" in DANGEROUS_BINARY_SUFFIXES
 
 
 def test_rubygems_gemspec_is_high_signal():
-    from activities.package_diff import HIGH_RISK_SUFFIXES
+    from checks.package_diff import HIGH_RISK_SUFFIXES
 
     assert ".gemspec" in HIGH_RISK_SUFFIXES
 
 
 def test_rubygems_rakefile_is_high_signal():
-    from activities.package_diff import HIGH_RISK_NAMES
+    from checks.package_diff import HIGH_RISK_NAMES
 
     assert "Rakefile" in HIGH_RISK_NAMES
 
 
 def test_cargo_build_rs_is_install_hook():
-    from activities.package_diff import INSTALL_HOOK_NAMES
+    from checks.package_diff import INSTALL_HOOK_NAMES
 
     assert "build.rs" in INSTALL_HOOK_NAMES
 
@@ -1610,13 +1610,13 @@ def test_has_obfuscation_php_clean_file(tmp_path):
 
 
 def test_nuget_install_ps1_is_install_hook():
-    from activities.package_diff import INSTALL_HOOK_NAMES
+    from checks.package_diff import INSTALL_HOOK_NAMES
 
     assert "tools/install.ps1" in INSTALL_HOOK_NAMES
 
 
 def test_nuget_init_ps1_is_install_hook():
-    from activities.package_diff import INSTALL_HOOK_NAMES
+    from checks.package_diff import INSTALL_HOOK_NAMES
 
     assert "tools/init.ps1" in INSTALL_HOOK_NAMES
 
@@ -1638,7 +1638,7 @@ def test_build_diff_nuget_install_ps1_sets_install_added(tmp_path):
 
 
 def test_cargo_toml_is_high_signal():
-    from activities.package_diff import HIGH_RISK_NAMES
+    from checks.package_diff import HIGH_RISK_NAMES
 
     assert "Cargo.toml" in HIGH_RISK_NAMES
 
@@ -2066,13 +2066,13 @@ def test_build_diff_cursorrules_flagged_in_diff_summary(tmp_path):
 
 
 def test_cursorrules_is_high_signal():
-    from activities.package_diff import HIGH_RISK_NAMES
+    from checks.package_diff import HIGH_RISK_NAMES
 
     assert ".cursorrules" in HIGH_RISK_NAMES
 
 
 def test_claude_md_is_high_signal():
-    from activities.package_diff import HIGH_RISK_NAMES
+    from checks.package_diff import HIGH_RISK_NAMES
 
     assert "CLAUDE.md" in HIGH_RISK_NAMES
 
@@ -2553,7 +2553,7 @@ async def test_compare_artifact_to_source_clean(monkeypatch):
     async def fake_fetch(platform, owner, repo, version, path, token):
         return source_text
 
-    monkeypatch.setattr("activities.package_diff.fetch_vcs_file_at_tag", fake_fetch)
+    monkeypatch.setattr("checks.package_diff.fetch_vcs_file_at_tag", fake_fetch)
 
     import httpx as _httpx
 
@@ -2591,7 +2591,7 @@ async def test_compare_artifact_to_source_detects_injection(monkeypatch):
     async def fake_fetch(platform, owner, repo, version, path, token):
         return source_text
 
-    monkeypatch.setattr("activities.package_diff.fetch_vcs_file_at_tag", fake_fetch)
+    monkeypatch.setattr("checks.package_diff.fetch_vcs_file_at_tag", fake_fetch)
 
     import httpx as _httpx
 
@@ -4358,7 +4358,7 @@ async def test_compare_artifact_to_source_vcs_fetch_exception_skipped(monkeypatc
     async def raise_fetch(platform, owner, repo, version, path, token):
         raise RuntimeError("network error")
 
-    monkeypatch.setattr("activities.package_diff.fetch_vcs_file_at_tag", raise_fetch)
+    monkeypatch.setattr("checks.package_diff.fetch_vcs_file_at_tag", raise_fetch)
 
     import httpx as _httpx
 

@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, patch
 
 from temporalio.testing import ActivityEnvironment
 
-from activities.custom_checks import run_all
+from checks.custom_checks import run_all
 from models import CheckContext
 
 _CTX = CheckContext(

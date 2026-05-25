@@ -11,7 +11,7 @@ from temporalio.exceptions import ApplicationError
 from temporalio.testing import ActivityEnvironment
 
 from ecosystems import detect_stale_version_line
-from activities.version_lineage import check as lineage_check
+from checks.version_lineage import check as lineage_check
 from models import (
     VersionLineageChecks,
     PackageChecks,

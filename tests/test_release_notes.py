@@ -9,7 +9,7 @@ import respx
 from temporalio.testing import ActivityEnvironment
 
 from ecosystems import parse_github_repo
-from activities.release_notes import check as release_check
+from checks.release_notes import check as release_check
 from models import (
     ReleaseChecks,
     PackageChecks,

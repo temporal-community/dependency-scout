@@ -2,7 +2,7 @@
 Detection pattern loader.
 
 Loads all YAML detection files at import time, compiles regexes, and exports
-named constants that mirror the original names in activities/package_diff.py.
+named constants that mirror the original names in checks/package_diff.py.
 
 To add a new attack pattern: edit the appropriate YAML file — no Python required.
 """

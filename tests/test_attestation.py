@@ -9,7 +9,7 @@ import httpx
 import respx
 from temporalio.testing import ActivityEnvironment
 
-from activities.attestation import check as attestation_check
+from checks.attestation import check as attestation_check
 from models import (
     AttestationChecks,
     PackageChecks,
@@ -700,7 +700,7 @@ async def test_pypi_attestation_oidc_first_time_true():
         return_value=httpx.Response(200, json=_pypi_provenance(repo="org/pkg"))
     )
 
-    from activities.attestation import check as attestation_check
+    from checks.attestation import check as attestation_check
 
     env = ActivityEnvironment()
     result = await env.run(attestation_check, "pip", "pkg", "1.0.0", "1.1.0")
@@ -720,7 +720,7 @@ async def test_pypi_attestation_oidc_first_time_false_when_both_had_attestation(
             return_value=httpx.Response(200, json=_pypi_provenance(repo="org/pkg"))
         )
 
-    from activities.attestation import check as attestation_check
+    from checks.attestation import check as attestation_check
 
     env = ActivityEnvironment()
     result = await env.run(attestation_check, "pip", "pkg", "1.0.0", "1.1.0")

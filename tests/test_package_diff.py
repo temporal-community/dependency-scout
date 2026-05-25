@@ -11,7 +11,7 @@ import httpx
 import respx
 from temporalio.testing import ActivityEnvironment
 
-from activities.package_diff import compute
+from checks.package_diff import compute
 from tests.helpers import make_tar_gz as _make_tar_gz
 
 PYPI_BASE = "https://pypi.org/pypi"

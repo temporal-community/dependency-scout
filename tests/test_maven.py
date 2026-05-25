@@ -457,7 +457,7 @@ async def test_fetch_release_with_github_pom(monkeypatch):
 
 @respx.mock
 async def test_version_lineage_maven_stale():
-    from activities.version_lineage import check as lineage_check
+    from checks.version_lineage import check as lineage_check
     import time
 
     now_ms = int(time.time() * 1000)
@@ -485,7 +485,7 @@ async def test_version_lineage_maven_stale():
 
 @respx.mock
 async def test_version_lineage_maven_current():
-    from activities.version_lineage import check as lineage_check
+    from checks.version_lineage import check as lineage_check
     import time
 
     now_ms = int(time.time() * 1000)
@@ -510,7 +510,7 @@ async def test_version_lineage_maven_current():
 
 @respx.mock
 async def test_version_lineage_maven_filters_snapshots():
-    from activities.version_lineage import check as lineage_check
+    from checks.version_lineage import check as lineage_check
     import time
 
     now_ms = int(time.time() * 1000)

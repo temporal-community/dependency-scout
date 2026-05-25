@@ -4,7 +4,8 @@ import logging
 import os
 import pkgutil
 
-import activities as _activities_pkg
+import checks as _checks_pkg
+import pr_actions as _pr_actions_pkg
 from dotenv import load_dotenv
 from temporalio.activity import _Definition
 from temporalio.client import Client, TLSConfig
@@ -48,19 +49,23 @@ def _check_config() -> None:
 
 
 def _discover_activities() -> list:
-    """Return every @activity.defn-decorated function found in activities/*.py (non-recursive).
+    """Return every @activity.defn-decorated function found in checks/*.py and pr_actions/*.py.
 
-    Scans only top-level modules — activities/ecosystems/ contains provider helpers, not activities.
+    Scans both packages at the top level — checks/ contains triage check functions,
+    pr_actions/ contains PR side-effect functions (comment, merge, label, etc.).
+    Security note: both entry point groups (dependency_scout.ecosystems and
+    dependency_scout.checks) load plugin code into the same process as the core worker.
     """
     seen: set[int] = set()
     fns = []
-    for mod_info in pkgutil.iter_modules(_activities_pkg.__path__, prefix="activities."):
-        mod = importlib.import_module(mod_info.name)
-        for attr_name in dir(mod):
-            obj = getattr(mod, attr_name)
-            if callable(obj) and id(obj) not in seen and _Definition.from_callable(obj) is not None:
-                seen.add(id(obj))
-                fns.append(obj)
+    for pkg, prefix in ((_checks_pkg, "checks."), (_pr_actions_pkg, "pr_actions.")):
+        for mod_info in pkgutil.iter_modules(pkg.__path__, prefix=prefix):
+            mod = importlib.import_module(mod_info.name)
+            for attr_name in dir(mod):
+                obj = getattr(mod, attr_name)
+                if callable(obj) and id(obj) not in seen and _Definition.from_callable(obj) is not None:
+                    seen.add(id(obj))
+                    fns.append(obj)
     return fns
 
 
@@ -109,8 +114,9 @@ def _discover_activity_check_plugins() -> list:
     return fns
 
 
-# Auto-discovered from activities/*.py plus any installed dependency_scout.activity_checks plugins.
-# Adding a new built-in activity file is sufficient — no manual registration needed.
+# Auto-discovered from checks/*.py and pr_actions/*.py, plus any installed
+# dependency_scout.activity_checks plugins — adding a new built-in activity file is sufficient,
+# no manual registration needed.
 # Exposed at module level for test_check_wiring.py.
 ACTIVITIES = _discover_activities() + _discover_activity_check_plugins()
 

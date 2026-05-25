@@ -7,8 +7,8 @@ import pytest
 import respx
 from temporalio.testing import ActivityEnvironment
 
-from activities.depsdev import fetch as depsdev_fetch
-from activities.scorecard import fetch as scorecard_fetch
+from checks.depsdev import fetch as depsdev_fetch
+from checks.scorecard import fetch as scorecard_fetch
 from models import (
     PackageChecks,
     MetadataChecks,

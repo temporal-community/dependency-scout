@@ -4,7 +4,7 @@ import respx
 from temporalio.exceptions import ApplicationError
 from temporalio.testing import ActivityEnvironment
 
-from activities.socket import score
+from checks.socket import score
 
 PURL_URL = "https://api.socket.dev/v0/purl"
 

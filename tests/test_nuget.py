@@ -496,7 +496,7 @@ def test_parse_owners_empty_list():
 @pytest.mark.asyncio
 @respx.mock
 async def test_nuget_stale_version_line_detected():
-    from activities.version_lineage import check
+    from checks.version_lineage import check
 
     respx.get(f"{_FLAT}/{ID_LOWER}/index.json").mock(
         return_value=httpx.Response(
@@ -514,7 +514,7 @@ async def test_nuget_stale_version_line_detected():
 @pytest.mark.asyncio
 @respx.mock
 async def test_nuget_not_stale_when_patching_latest():
-    from activities.version_lineage import check
+    from checks.version_lineage import check
 
     respx.get(f"{_FLAT}/{ID_LOWER}/index.json").mock(
         return_value=httpx.Response(200, json={"versions": ["12.0.3", "13.0.1"]})
@@ -528,7 +528,7 @@ async def test_nuget_not_stale_when_patching_latest():
 @pytest.mark.asyncio
 @respx.mock
 async def test_nuget_version_lineage_404_raises():
-    from activities.version_lineage import check
+    from checks.version_lineage import check
 
     respx.get(f"{_FLAT}/{ID_LOWER}/index.json").mock(return_value=httpx.Response(404))
 
