@@ -18,15 +18,6 @@ from classifiers import (
     _build_message,
     _rule_based,
 )
-from models import (
-    PackageSignals,
-    PyPISignals,
-    SocketSignals,
-    OSVSignals,
-    DiffSignals,
-    ReleaseAgeSignals,
-    AttestationSignals,
-)
 
 
 # ---------------------------------------------------------------------------

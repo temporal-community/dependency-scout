@@ -333,6 +333,36 @@ def _rule_based(signals: PackageSignals) -> Verdict:
             new_dependency_count=signals.diff.new_dependency_count,
         )
 
+    # Hard RED: OS-level persistence mechanism in install hook (LaunchAgent, pm2, systemd, Bun)
+    if signals.diff.persistence_mechanism_added:
+        return Verdict(
+            classification="red",
+            confidence=0.95,
+            reasoning=(
+                "Install hook contains OS-level persistence code — "
+                "LaunchAgent, systemd user service, pm2 daemon, Bun bootstrap, or home-dir wipe detected."
+            ),
+            flags=[
+                "persistence mechanism in install hook (LaunchAgent/pm2/systemd/Bun/scorched-earth)"
+            ],
+            release_age_hours=signals.age.release_age_hours,
+            new_dependency_count=signals.diff.new_dependency_count,
+        )
+
+    # Hard RED: npm worm self-propagation (reads npm/GitHub creds + calls publish endpoint)
+    if signals.diff.worm_propagation_pattern:
+        return Verdict(
+            classification="red",
+            confidence=0.95,
+            reasoning=(
+                "Package reads npm/GitHub credentials and calls a registry publish endpoint — "
+                "classic npm worm self-propagation pattern (Shai-Hulud / Mini Shai-Hulud)."
+            ),
+            flags=["npm worm propagation: credential theft + self-publish"],
+            release_age_hours=signals.age.release_age_hours,
+            new_dependency_count=signals.diff.new_dependency_count,
+        )
+
     # Hard RED: Socket detected malware or protestware
     _SOCKET_RED_TYPES = {"malware", "protestware"}
     if any(t in _SOCKET_RED_TYPES for t in signals.socket.socket_alert_types):
