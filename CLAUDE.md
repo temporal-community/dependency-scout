@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-Guidance for Claude Code when working in this repo. See [ARCHITECTURE.md](ARCHITECTURE.md) for design details.
+Guidance for Claude Code when working in this repo. See [docs/architecture.md](docs/architecture.md) for design details.
 
 ## What this is
 

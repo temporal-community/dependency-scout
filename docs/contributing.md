@@ -1,5 +1,11 @@
 # Contributing
 
+How to contribute to the Dependency Scout codebase — adding checks, ecosystems, detection patterns, fixing bugs, or improving the classifier.
+
+To build *on top of* the Scout without modifying this repo (custom ecosystems, classifiers, or check plugins), see [extending.md](extending.md) instead.
+
+---
+
 ## Adding a detection pattern for a new attack
 
 This is the lowest-barrier contribution: a two-line YAML edit, no Python required.
@@ -29,13 +35,15 @@ Use the `/add-detection` Claude Code skill for a guided walkthrough in Claude Co
 
 ---
 
-## Adding a new ecosystem
+## Adding a new built-in ecosystem
 
-The plugin architecture makes this straightforward. Adding Composer, NuGet, or any other ecosystem is approximately 150 lines in one file.
+The plugin architecture makes this straightforward. Adding a new ecosystem is approximately 150 lines in one file.
+
+Also see [ecosystems/README.md](../ecosystems/README.md) for the coverage table and required-method reference.
 
 **Step 1 — Create `ecosystems/{name}.py`**
 
-Implement the `EcosystemProvider` Protocol. Copy an existing provider (e.g. `rubygems.py`) as a starting point. Set `ecosystem_name` to the canonical key used everywhere else — `get_provider()` discovers it automatically:
+Implement the `EcosystemProvider` Protocol. Copy an existing provider (e.g. `rubygems.py`) as a starting point. Set `ecosystem_name` to the canonical key — `get_provider()` discovers it automatically:
 
 ```python
 from ecosystems import is_major, parse_upload_time, validate_archive_url
@@ -56,13 +64,33 @@ class ComposerProvider:
 
 `get_archive_url` returns `(url, filename, integrity_string)`. Call `validate_archive_url(url)` before returning — this enforces the CDN allowlist. Add your registry's CDN host to `ALLOWED_CDN_HOSTS` in `ecosystems/__init__.py`.
 
-**Step 2 — Tests**
+**Step 2 — Update the type model**
 
-Add a test section for your ecosystem following the existing npm/rubygems patterns in `tests/test_activities.py`. Each method needs at minimum: success case, 404/not-found case, and (for attestations) a no-attestation case. Aim to keep overall coverage above 95%.
+In `models/__init__.py`, add the new ecosystem name to the `Literal[...]` types for ecosystem names.
+
+**Step 3 — Wire up Dependabot branch parsing**
+
+In `helpers/pr_parser.py`, add the `dependabot_slug` → `ecosystem_name` mapping to `_DEPENDABOT_ECOSYSTEM_MAP`.
+
+**Step 4 — Add package name validation**
+
+In `api/webhook.py`, add a `name_re` entry to `_NAME_RE_BY_ECOSYSTEM` (or rely on `get_name_re()` from `ecosystems/__init__.py` if the webhook already calls that).
+
+**Step 5 — Write tests**
+
+Add a test file under `tests/` following the existing patterns (e.g. `tests/test_pip_*.py` or `tests/test_npm_*.py`). Use `respx` for HTTP mocking and `ActivityEnvironment` for the activity harness. Each method needs at minimum: success case, 404/not-found case, and (for attestations) a no-attestation case. Aim to keep overall coverage above 95%.
+
+**Step 6 — Regenerate replay fixtures (if needed)**
+
+If you changed any workflow code (unlikely for a pure ecosystem add, but possible):
+
+```bash
+uv run python tests/generate_fixtures.py
+```
 
 ---
 
-## Adding a new check
+## Adding a new built-in check
 
 Each check is a parallel activity that gathers one category of supply chain data and returns a typed sub-model. All checks run at the same time; a failing check gets degraded defaults rather than crashing the workflow.
 
@@ -120,7 +148,7 @@ async def check(ecosystem, package, old_version, new_version):
     return result
 ```
 
-Tests are isolated automatically — a `conftest.py` fixture clears all caches before and after each test, so you don't need to worry about cache state leaking between tests.
+Tests are isolated automatically — a `conftest.py` fixture clears all caches before and after each test.
 
 **Step 3 — Add to `_CHECK_REGISTRY` in `workflows/package_triage_workflow.py`**
 
@@ -187,6 +215,8 @@ uv run python tests/generate_fixtures.py
 
 Commit the updated files in `tests/fixtures/`. The CI `pytest` run will catch any determinism regression.
 
+See [architecture.md](architecture.md#workflow-determinism-and-replay-tests) for the design rationale.
+
 ---
 
 ## Swapping the classifier
@@ -200,27 +230,13 @@ The built-in classifiers (`AnthropicClassifier`, `RuleBasedClassifier`) are sele
 CLASSIFIER=rule_based   # or: claude
 ```
 
-**Register a third-party classifier** in your plugin package:
+**Add a new built-in classifier to this repo:**
 
-```python
-# my_package/__init__.py
-from models import PackageChecks, Verdict
+1. Create `classifiers/{name}.py` with a class implementing `async def classify(self, signals: PackageChecks) -> Verdict`
+2. In `classifiers/__init__.py`, add an entry to `_BUILTIN_CLASSIFIERS`
+3. Write tests following the patterns in `tests/test_classifier.py`
 
-class OpenAIClassifier:
-    async def classify(self, signals: PackageChecks) -> Verdict:
-        # call OpenAI, return Verdict(...)
-        ...
-```
-
-```toml
-# pyproject.toml
-[project.entry-points."dependency_scout.classifiers"]
-my_openai = "my_package:OpenAIClassifier"
-```
-
-Then set `CLASSIFIER=my_openai` in `.env`. The worker picks it up automatically — no code changes needed.
-
-The classifier receives the full `PackageChecks` object including `custom_checks` (plugin check activity results). Return a `Verdict` with `classification`, `confidence`, `reasoning`, and `flags`.
+**Register a third-party classifier** in a plugin package — see [extending.md](extending.md#classifier-plugins).
 
 ---
 
@@ -237,109 +253,18 @@ The classifier receives the full `PackageChecks` object including `custom_checks
 
 ---
 
-## Extending from outside this repo (plugin API)
+## Roadmap
 
-Third-party packages can register ecosystem providers without modifying this codebase.
-
-### Python-native plugins
-
-Declare an entry point in your `pyproject.toml`:
-
-```toml
-[project.entry-points."dependency_scout.ecosystems"]
-django_packages = "dependency_scout_django:DjangoPackagesProvider"
-```
-
-`DjangoPackagesProvider` must implement the `EcosystemProvider` Protocol: the four class attributes (`ecosystem_name`, `osv_name`, `dependabot_slug`, `name_re`) and the seven async methods. See any built-in provider in `ecosystems/` for a template.
-
-### Non-Python bridge packages (PHP, Go, Rust, …)
-
-If your logic lives in a non-Python stack, subclass `RemoteEcosystemProvider` from `ecosystems/remote.py`. It implements all seven protocol methods by POSTing to your service — your bridge package is ~10 lines of Python that configure the URL and ecosystem metadata:
-
-```python
-# dependency_scout_drupal/__init__.py
-import re
-from ecosystems.remote import RemoteEcosystemProvider
-
-class DrupalProvider(RemoteEcosystemProvider):
-    ecosystem_name  = "drupal"
-    osv_name        = "Packagist"
-    dependabot_slug = "drupal"
-    name_re         = re.compile(r"^[a-z0-9_-]+/[a-z0-9_-]+$")
-    remote_base_url = "https://drupal-bridge.example.com/triage/v1"
-```
-
-Your service must expose `POST {base_url}/{method_name}` endpoints. Each endpoint receives the method parameters as a JSON body and responds with the corresponding check model fields as JSON. The full request/response spec is in the docstrings in `ecosystems/remote.py`.
-
-### Adding custom checks
-
-Plugins can contribute extra supply-chain checks via a clean entry-point API — no Temporal internals required. Declare an async function and register it in `pyproject.toml`:
-
-```python
-# dependency_scout_drupal/vuln_check.py
-from models import CheckContext
-
-async def run(ctx: CheckContext) -> dict:
-    """ctx has: package, ecosystem, old_version, new_version."""
-    result = await my_internal_db.lookup(ctx.package, ctx.ecosystem)
-    return {"internal_vuln_count": result.count}
-```
-
-```toml
-# pyproject.toml
-[project.entry-points."dependency_scout.checks"]
-drupal_vuln = "dependency_scout_drupal.vuln_check:run"
-```
-
-The `activities.custom_checks.run_all` activity discovers all installed `dependency_scout.checks` entry points at runtime and runs them in parallel. Results land in `PackageChecks.custom_checks` under the entry-point name and are surfaced to the LLM in a sandboxed `<untrusted_custom>` block — the same way package descriptions and diff content are handled. They cannot override or poison the core trusted checks.
-
-No config file changes are needed in target repos — plugins are discovered automatically from the installed packages.
-
-**How the classifier handles your check results:**
-
-- **LLM classifiers (Claude, OpenAI, Ollama)** — your results appear automatically in the prompt as labeled JSON. The LLM reasons over them without any code changes on your part. No schema registration needed; the LLM infers meaning from the key names and values.
-- **Rule-based classifier** — ignores `custom_checks` by design. Deterministic threshold rules can only be written for checks whose structure is known at compile time. If you need rule-based support for your check, contribute it as a built-in check (see "Adding a new check" above) rather than a plugin.
-
-This means plugins work best when an LLM classifier is configured. The rule-based fallback will still run and post a verdict — it just won't factor in your custom check.
-
-### In both cases
-
-Once installed, `get_provider("drupal")` returns your provider and custom checks run automatically — no changes to this repo needed. Built-in providers take precedence over plugins with the same `ecosystem_name`, so core ecosystems cannot be shadowed.
-
-**Security note:** both entry point groups (`dependency_scout.ecosystems` and `dependency_scout.checks`) load plugin code into the same process as the core worker. This is the same trust boundary as any `pip install` dependency — the operator who deploys Dependency Scout is implicitly trusting the packages they install. Plugin results in `custom_checks` are rendered in the sandboxed `<untrusted_custom>` section of the LLM prompt and cannot influence the trusted checks block.
-
-### Advanced checks via `dependency_scout.activity_checks`
-
-For checks that need full Temporal control — heartbeating, custom retry policies, or activity-level cancellation — use the advanced plugin path. The built-in `checks/package_diff.py` is the reference example: it downloads and diffs package archives, requiring a 2-minute start-to-close timeout and a 45-second heartbeat timeout to detect stuck downloads.
-
-```python
-# my_plugin/activities.py
-from temporalio import activity
-from models import CheckContext
-
-@activity.defn(name="my_company.deep_archive_scan")
-async def deep_archive_scan(ctx: CheckContext) -> dict:
-    # Call activity.heartbeat() periodically for long-running work
-    activity.heartbeat()
-    # ... long-running analysis ...
-    return {"suspicious_patterns": ["..."]}
-```
-
-```toml
-# pyproject.toml
-[project.entry-points."dependency_scout.activity_checks"]
-deep_scan = "my_plugin.activities:deep_archive_scan"
-```
-
-```yaml
-# .github/dependency-scout.yml (opt-in per repo)
-extra_check_activities:
-  - my_company.deep_archive_scan
-```
-
-The worker auto-discovers and registers `@activity.defn` functions from all `dependency_scout.activity_checks` entry points at startup. Per-repo opt-in via `extra_check_activities` is required — the activity is available to the worker but only invoked for repos that list it. Results are merged into `PackageChecks.custom_checks` under the activity name string (from `@activity.defn`).
-
-**When to use each plugin path:**
-
-- **`dependency_scout.checks`** — fast API calls, <30 seconds, no Temporal knowledge needed. Plain `async def run(ctx) -> dict`.
-- **`dependency_scout.activity_checks`** — long-running work (archive downloads, corpus scanning), needs heartbeating or custom retry. Requires `@activity.defn` and Temporal knowledge. Modelled on `checks/package_diff.py`.
+- [x] pip, npm, RubyGems, Maven (Java/JVM), Composer (PHP), NuGet (.NET), Cargo (Rust), Go Modules
+- [x] Eleven parallel check sources (OSV, Socket.dev, diff, release age, maintainer, SLSA/Sigstore, OpenSSF Scorecard, deps.dev deprecation, version staleness, PR file audit, metadata)
+- [x] LLM classifier with rule-based fallback
+- [x] GitHub and GitLab support
+- [x] FastAPI webhook receiver
+- [x] Per-repo config via `.github/dependency-scout.yml`
+- [x] Observe-only safe default (comment-only with no config file)
+- [x] Replay test fixtures (workflow determinism guarantee)
+- [x] Ecosystem plugin architecture — entry points + `RemoteEcosystemProvider` HTTP bridge for non-Python stacks
+- [x] Pluggable classifier — Claude, OpenAI, Ollama, or any `dependency_scout.classifiers` plugin
+- [x] Custom check plugin architecture — third-party checks via `dependency_scout.checks` entry points, no Temporal internals required, surfaced to LLM automatically
+- [x] Temporal Cloud support — TLS credentials in `.env`, no code changes needed vs local dev
+- [x] Renovate full support — title variants with/without `dependency` keyword, arrow and from/to body extraction, pre-release versions, false-positive prevention

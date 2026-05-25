@@ -29,7 +29,7 @@ A PR comes in as a `PRContext`. The workflow runs all the check activities and c
 Everything known about the pull request: repo, PR number, platform (GitHub/GitLab), ecosystem, package name, old and new versions. Created at the webhook boundary and passed to `PRActionWorkflow`.
 
 ### `RepoConfig`
-Per-repo settings loaded from `.github/dependency-scout.yml`. Controls auto-merge thresholds, which verdicts trigger a close, minimum release age before auto-merging, and which reviewers to notify. All fields have safe defaults — no config file is required.
+Per-repo settings loaded from `.github/dependency-scout.yml`. Controls auto-merge thresholds, which verdicts trigger a close, minimum release age before auto-merging, and which reviewers to notify. All fields have safe defaults — no config file is required. See [docs/configuration.md](../docs/configuration.md) for the full field reference.
 
 ### `PackageChecks`
 The central data structure: one instance per package triage run. Contains the package identity fields plus one nested check model per activity. Every field defaults to an empty/safe value so a failed or skipped activity doesn't break the classifier.
@@ -71,8 +71,4 @@ Each of the following holds the raw results from one activity. They are delibera
 | `ScorecardChecks` | `scorecard_score`, `scorecard_dangerous_workflow`, `scorecard_branch_protection` |
 | `PRFilesChecks` | `unexpected_files` (paths that shouldn't appear in a dep-bump PR) |
 
-## Adding a new check model
-
-1. Add a new `class MyChecks(BaseModel)` to `__init__.py`
-2. Add a field `my_check: MyChecks = Field(default_factory=MyChecks)` to `PackageChecks`
-3. Create the corresponding activity in `activities/` — see [`activities/README.md`](../activities/README.md)
+To add a new check model, see [docs/contributing.md](../docs/contributing.md#adding-a-new-built-in-check).

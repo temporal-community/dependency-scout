@@ -2,19 +2,7 @@
 
 This guide covers running the Scout in production — secrets management, Temporal server options, webhook ingress, and monitoring. For local dev, `uv run python setup.py` is all you need.
 
----
-
-## Architecture overview
-
-Three processes need to run:
-
-| Process | Command | Purpose |
-|---|---|---|
-| Temporal server | see below | Workflow orchestration + storage |
-| Worker | `uv run python -m worker` | Executes check activities and workflows |
-| Webhook API | `uv run uvicorn api.webhook:app` | Receives GitHub webhook events |
-
-The webhook API and worker are stateless and can be scaled horizontally. Temporal is the stateful component.
+For a description of the three-process architecture (Temporal server, worker, webhook API), see [architecture.md](architecture.md).
 
 ---
 

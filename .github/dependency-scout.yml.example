@@ -7,7 +7,7 @@
 # it will post a verdict comment on every Dependabot/Renovate PR but
 # never merge, close, or request review.
 #
-# See the full reference: https://github.com/temporal-community/dependency-scout#full-config-reference
+# See the full reference: https://github.com/temporal-community/dependency-scout/blob/main/docs/configuration.md
 
 
 # ---------------------------------------------------------------------------
