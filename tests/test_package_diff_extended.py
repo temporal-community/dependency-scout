@@ -4697,12 +4697,7 @@ def test_obfuscation_js_string_split_require_not_in_lib(tmp_path):
     old = _write_files(tmp_path / "old", {})
     new = _write_files(
         tmp_path / "new",
-        {
-            "lib/loader.js": (
-                "const proc = require('chi' + 'ld_process');\n"
-                "proc.exec(cmd);\n"
-            )
-        },
+        {"lib/loader.js": ("const proc = require('chi' + 'ld_process');\nproc.exec(cmd);\n")},
     )
     _, _, _, _, _, _, _, obfuscated, _, _ = _build_diff(old, new)
     assert obfuscated is True

@@ -14,7 +14,12 @@ import textwrap
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from checks.signatures import SignatureContribution, _load_plugins, _merge_contribution, _merge_yaml_dir
+from checks.signatures import (
+    SignatureContribution,
+    _load_plugins,
+    _merge_contribution,
+    _merge_yaml_dir,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -27,58 +32,105 @@ def _write(directory: Path, filename: str, content: str) -> None:
 
 
 def test_merge_yaml_dir_net_calls(tmp_path):
-    _write(tmp_path, "net_calls.yaml", """
+    _write(
+        tmp_path,
+        "net_calls.yaml",
+        """
         .py:
           - pattern: 'evil_sdk\\.call\\b'
             desc: test
-    """)
-    acc = {"net_calls": {}, "obfuscation": {}, "persistence": [],
-           "suspicious_files": [], "suspicious_prefixes": [],
-           "dangerous_binary": [], "install_hooks": [], "npm_install_scripts": []}
+    """,
+    )
+    acc = {
+        "net_calls": {},
+        "obfuscation": {},
+        "persistence": [],
+        "suspicious_files": [],
+        "suspicious_prefixes": [],
+        "dangerous_binary": [],
+        "install_hooks": [],
+        "npm_install_scripts": [],
+    }
     _merge_yaml_dir(tmp_path, acc)
     assert ".py" in acc["net_calls"]
     assert any(e["pattern"] == r"evil_sdk\.call\b" for e in acc["net_calls"][".py"])
 
 
 def test_merge_yaml_dir_extends_existing_extension(tmp_path):
-    _write(tmp_path, "net_calls.yaml", """
+    _write(
+        tmp_path,
+        "net_calls.yaml",
+        """
         .py:
           - pattern: 'new_pattern'
-    """)
-    acc = {"net_calls": {".py": [{"pattern": "existing"}]}, "obfuscation": {},
-           "persistence": [], "suspicious_files": [], "suspicious_prefixes": [],
-           "dangerous_binary": [], "install_hooks": [], "npm_install_scripts": []}
+    """,
+    )
+    acc = {
+        "net_calls": {".py": [{"pattern": "existing"}]},
+        "obfuscation": {},
+        "persistence": [],
+        "suspicious_files": [],
+        "suspicious_prefixes": [],
+        "dangerous_binary": [],
+        "install_hooks": [],
+        "npm_install_scripts": [],
+    }
     _merge_yaml_dir(tmp_path, acc)
     assert len(acc["net_calls"][".py"]) == 2
 
 
 def test_merge_yaml_dir_obfuscation(tmp_path):
-    _write(tmp_path, "obfuscation.yaml", """
+    _write(
+        tmp_path,
+        "obfuscation.yaml",
+        """
         patterns:
           .js:
             - pattern: '_0xdeadbeef'
-    """)
-    acc = {"net_calls": {}, "obfuscation": {}, "persistence": [],
-           "suspicious_files": [], "suspicious_prefixes": [],
-           "dangerous_binary": [], "install_hooks": [], "npm_install_scripts": []}
+    """,
+    )
+    acc = {
+        "net_calls": {},
+        "obfuscation": {},
+        "persistence": [],
+        "suspicious_files": [],
+        "suspicious_prefixes": [],
+        "dangerous_binary": [],
+        "install_hooks": [],
+        "npm_install_scripts": [],
+    }
     _merge_yaml_dir(tmp_path, acc)
     assert ".js" in acc["obfuscation"]
 
 
 def test_merge_yaml_dir_persistence(tmp_path):
-    _write(tmp_path, "persistence.yaml", """
+    _write(
+        tmp_path,
+        "persistence.yaml",
+        """
         patterns:
           - pattern: 'evil\\.cron'
-    """)
-    acc = {"net_calls": {}, "obfuscation": {}, "persistence": [],
-           "suspicious_files": [], "suspicious_prefixes": [],
-           "dangerous_binary": [], "install_hooks": [], "npm_install_scripts": []}
+    """,
+    )
+    acc = {
+        "net_calls": {},
+        "obfuscation": {},
+        "persistence": [],
+        "suspicious_files": [],
+        "suspicious_prefixes": [],
+        "dangerous_binary": [],
+        "install_hooks": [],
+        "npm_install_scripts": [],
+    }
     _merge_yaml_dir(tmp_path, acc)
     assert any(e["pattern"] == r"evil\.cron" for e in acc["persistence"])
 
 
 def test_merge_yaml_dir_file_types(tmp_path):
-    _write(tmp_path, "file_types.yaml", """
+    _write(
+        tmp_path,
+        "file_types.yaml",
+        """
         suspicious_filenames:
           - evil.cfg
         suspicious_path_prefixes:
@@ -89,10 +141,18 @@ def test_merge_yaml_dir_file_types(tmp_path):
           - evil_install.sh
         npm_install_scripts:
           - evil_install
-    """)
-    acc = {"net_calls": {}, "obfuscation": {}, "persistence": [],
-           "suspicious_files": [], "suspicious_prefixes": [],
-           "dangerous_binary": [], "install_hooks": [], "npm_install_scripts": []}
+    """,
+    )
+    acc = {
+        "net_calls": {},
+        "obfuscation": {},
+        "persistence": [],
+        "suspicious_files": [],
+        "suspicious_prefixes": [],
+        "dangerous_binary": [],
+        "install_hooks": [],
+        "npm_install_scripts": [],
+    }
     _merge_yaml_dir(tmp_path, acc)
     assert "evil.cfg" in acc["suspicious_files"]
     assert ".evil/" in acc["suspicious_prefixes"]
@@ -102,9 +162,16 @@ def test_merge_yaml_dir_file_types(tmp_path):
 
 
 def test_merge_yaml_dir_missing_files_are_skipped(tmp_path):
-    acc = {"net_calls": {}, "obfuscation": {}, "persistence": [],
-           "suspicious_files": [], "suspicious_prefixes": [],
-           "dangerous_binary": [], "install_hooks": [], "npm_install_scripts": []}
+    acc = {
+        "net_calls": {},
+        "obfuscation": {},
+        "persistence": [],
+        "suspicious_files": [],
+        "suspicious_prefixes": [],
+        "dangerous_binary": [],
+        "install_hooks": [],
+        "npm_install_scripts": [],
+    }
     _merge_yaml_dir(tmp_path, acc)  # no files present — should not raise
     assert acc["net_calls"] == {}
     assert acc["persistence"] == []
@@ -117,18 +184,32 @@ def test_merge_yaml_dir_missing_files_are_skipped(tmp_path):
 
 def test_merge_contribution_net_calls():
     contrib = SignatureContribution(net_call_patterns={".py": [r"evil\.fetch\b"]})
-    acc = {"net_calls": {}, "obfuscation": {}, "persistence": [],
-           "suspicious_files": [], "suspicious_prefixes": [],
-           "dangerous_binary": [], "install_hooks": [], "npm_install_scripts": []}
+    acc = {
+        "net_calls": {},
+        "obfuscation": {},
+        "persistence": [],
+        "suspicious_files": [],
+        "suspicious_prefixes": [],
+        "dangerous_binary": [],
+        "install_hooks": [],
+        "npm_install_scripts": [],
+    }
     _merge_contribution(contrib, acc)
     assert r"evil\.fetch\b" in acc["net_calls"][".py"]
 
 
 def test_merge_contribution_extends_existing():
     contrib = SignatureContribution(net_call_patterns={".py": ["new"]})
-    acc = {"net_calls": {".py": ["existing"]}, "obfuscation": {}, "persistence": [],
-           "suspicious_files": [], "suspicious_prefixes": [],
-           "dangerous_binary": [], "install_hooks": [], "npm_install_scripts": []}
+    acc = {
+        "net_calls": {".py": ["existing"]},
+        "obfuscation": {},
+        "persistence": [],
+        "suspicious_files": [],
+        "suspicious_prefixes": [],
+        "dangerous_binary": [],
+        "install_hooks": [],
+        "npm_install_scripts": [],
+    }
     _merge_contribution(contrib, acc)
     assert "existing" in acc["net_calls"][".py"]
     assert "new" in acc["net_calls"][".py"]
@@ -136,9 +217,16 @@ def test_merge_contribution_extends_existing():
 
 def test_merge_contribution_persistence():
     contrib = SignatureContribution(persistence_patterns=[r"crontab.*evil"])
-    acc = {"net_calls": {}, "obfuscation": {}, "persistence": [],
-           "suspicious_files": [], "suspicious_prefixes": [],
-           "dangerous_binary": [], "install_hooks": [], "npm_install_scripts": []}
+    acc = {
+        "net_calls": {},
+        "obfuscation": {},
+        "persistence": [],
+        "suspicious_files": [],
+        "suspicious_prefixes": [],
+        "dangerous_binary": [],
+        "install_hooks": [],
+        "npm_install_scripts": [],
+    }
     _merge_contribution(contrib, acc)
     assert r"crontab.*evil" in acc["persistence"]
 
@@ -151,9 +239,16 @@ def test_merge_contribution_file_types():
         install_hook_names=["evil.sh"],
         npm_install_scripts=["evil_install"],
     )
-    acc = {"net_calls": {}, "obfuscation": {}, "persistence": [],
-           "suspicious_files": [], "suspicious_prefixes": [],
-           "dangerous_binary": [], "install_hooks": [], "npm_install_scripts": []}
+    acc = {
+        "net_calls": {},
+        "obfuscation": {},
+        "persistence": [],
+        "suspicious_files": [],
+        "suspicious_prefixes": [],
+        "dangerous_binary": [],
+        "install_hooks": [],
+        "npm_install_scripts": [],
+    }
     _merge_contribution(contrib, acc)
     assert "evil.cfg" in acc["suspicious_files"]
     assert ".evil/" in acc["suspicious_prefixes"]
@@ -164,9 +259,16 @@ def test_merge_contribution_file_types():
 
 def test_merge_contribution_empty_is_noop():
     contrib = SignatureContribution()
-    acc = {"net_calls": {"existing": ["x"]}, "obfuscation": {}, "persistence": ["y"],
-           "suspicious_files": [], "suspicious_prefixes": [],
-           "dangerous_binary": [], "install_hooks": [], "npm_install_scripts": []}
+    acc = {
+        "net_calls": {"existing": ["x"]},
+        "obfuscation": {},
+        "persistence": ["y"],
+        "suspicious_files": [],
+        "suspicious_prefixes": [],
+        "dangerous_binary": [],
+        "install_hooks": [],
+        "npm_install_scripts": [],
+    }
     before = {k: list(v) if isinstance(v, list) else dict(v) for k, v in acc.items()}
     _merge_contribution(contrib, acc)
     assert acc["net_calls"] == before["net_calls"]
@@ -186,9 +288,16 @@ def test_load_plugins_signatures_entry_point(tmp_path):
     ep.name = "test_plugin"
     ep.load.return_value = lambda: tmp_path
 
-    acc = {"net_calls": {}, "obfuscation": {}, "persistence": [],
-           "suspicious_files": [], "suspicious_prefixes": [],
-           "dangerous_binary": [], "install_hooks": [], "npm_install_scripts": []}
+    acc = {
+        "net_calls": {},
+        "obfuscation": {},
+        "persistence": [],
+        "suspicious_files": [],
+        "suspicious_prefixes": [],
+        "dangerous_binary": [],
+        "install_hooks": [],
+        "npm_install_scripts": [],
+    }
 
     def fake_entry_points(group):
         if group == "dependency_scout.signatures":
@@ -209,9 +318,16 @@ def test_load_plugins_signature_providers_entry_point():
     ep.name = "test_provider"
     ep.load.return_value = lambda: contrib
 
-    acc = {"net_calls": {}, "obfuscation": {}, "persistence": [],
-           "suspicious_files": [], "suspicious_prefixes": [],
-           "dangerous_binary": [], "install_hooks": [], "npm_install_scripts": []}
+    acc = {
+        "net_calls": {},
+        "obfuscation": {},
+        "persistence": [],
+        "suspicious_files": [],
+        "suspicious_prefixes": [],
+        "dangerous_binary": [],
+        "install_hooks": [],
+        "npm_install_scripts": [],
+    }
 
     def fake_entry_points(group):
         if group == "dependency_scout.signature_providers":
@@ -230,9 +346,16 @@ def test_load_plugins_broken_signatures_entry_point_skipped(caplog):
     ep.name = "broken_plugin"
     ep.load.side_effect = RuntimeError("boom")
 
-    acc = {"net_calls": {}, "obfuscation": {}, "persistence": [],
-           "suspicious_files": [], "suspicious_prefixes": [],
-           "dangerous_binary": [], "install_hooks": [], "npm_install_scripts": []}
+    acc = {
+        "net_calls": {},
+        "obfuscation": {},
+        "persistence": [],
+        "suspicious_files": [],
+        "suspicious_prefixes": [],
+        "dangerous_binary": [],
+        "install_hooks": [],
+        "npm_install_scripts": [],
+    }
 
     def fake_entry_points(group):
         if group == "dependency_scout.signatures":
@@ -252,9 +375,16 @@ def test_load_plugins_broken_provider_entry_point_skipped(caplog):
     ep.name = "broken_provider"
     ep.load.return_value = lambda: (_ for _ in ()).throw(ValueError("bad"))
 
-    acc = {"net_calls": {}, "obfuscation": {}, "persistence": [],
-           "suspicious_files": [], "suspicious_prefixes": [],
-           "dangerous_binary": [], "install_hooks": [], "npm_install_scripts": []}
+    acc = {
+        "net_calls": {},
+        "obfuscation": {},
+        "persistence": [],
+        "suspicious_files": [],
+        "suspicious_prefixes": [],
+        "dangerous_binary": [],
+        "install_hooks": [],
+        "npm_install_scripts": [],
+    }
 
     def fake_entry_points(group):
         if group == "dependency_scout.signature_providers":
@@ -270,9 +400,16 @@ def test_load_plugins_broken_provider_entry_point_skipped(caplog):
 
 def test_load_plugins_no_entry_points():
     """No entry points registered — acc is unchanged."""
-    acc = {"net_calls": {"existing": ["x"]}, "obfuscation": {}, "persistence": [],
-           "suspicious_files": [], "suspicious_prefixes": [],
-           "dangerous_binary": [], "install_hooks": [], "npm_install_scripts": []}
+    acc = {
+        "net_calls": {"existing": ["x"]},
+        "obfuscation": {},
+        "persistence": [],
+        "suspicious_files": [],
+        "suspicious_prefixes": [],
+        "dangerous_binary": [],
+        "install_hooks": [],
+        "npm_install_scripts": [],
+    }
 
     with patch("importlib.metadata.entry_points", return_value=[]):
         _load_plugins(acc)
