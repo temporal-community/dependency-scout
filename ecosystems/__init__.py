@@ -35,7 +35,7 @@ from typing import Protocol
 import httpx
 from temporalio.exceptions import ApplicationError
 
-import re as _re
+from ecosystems._registry import BUILTIN_ECOSYSTEMS, EcosystemMeta
 from helpers.http import get_client
 
 from models import (
@@ -125,8 +125,6 @@ class EcosystemProviderBase:
         raise NotImplementedError
 
 
-from ecosystems._registry import BUILTIN_ECOSYSTEMS, EcosystemMeta
-
 # Metadata registry: built lazily on first access, no provider modules imported.
 _METADATA: dict[str, EcosystemMeta] | None = None
 # Provider cache: populated one entry at a time as get_provider() is called.
@@ -201,6 +199,9 @@ ALLOWED_CDN_HOSTS: frozenset[str] = frozenset(
         "api.nuget.org",
         "static.crates.io",
         "proxy.golang.org",
+        "repo.hex.pm",  # Hex (Elixir/Mix) tarballs
+        "pub.dev",  # Dart/Flutter pub.dev tarballs
+        "gitlab.com",  # GitLab archive CDN (Swift packages, Composer)
     }
 )
 
@@ -227,7 +228,7 @@ def is_major(old: str, new: str) -> bool:
         return False
 
 
-_PRE_RE = _re.compile(r"(a|b|rc|alpha|beta|dev|pre|preview|post)[\d]*$", _re.IGNORECASE)
+_PRE_RE = re.compile(r"(a|b|rc|alpha|beta|dev|pre|preview|post)[\d]*$", re.IGNORECASE)
 
 
 def detect_stale_version_line(

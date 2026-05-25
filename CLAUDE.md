@@ -6,7 +6,7 @@ Guidance for Claude Code when working in this repo. See [docs/architecture.md](d
 
 **dependency-scout** — vets Dependabot/Renovate PRs by gathering supply chain risk checks in parallel, classifying GREEN/YELLOW/RED, and acting on the verdict. Key principle: graceful degradation — zero API keys works (rule-based, log-only); gets smarter as keys are added.
 
-Ecosystems implemented: pip, npm, RubyGems, Maven, NuGet, Cargo, Go modules, Composer.
+Ecosystems implemented: pip/uv, npm, RubyGems, Maven/Gradle, NuGet, Cargo, Go modules, Composer, GitHub Actions, Mix (Hex), Pub (Dart), Elm, Docker, Terraform, Swift.
 
 ## Module map
 

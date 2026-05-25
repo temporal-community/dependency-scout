@@ -261,7 +261,7 @@ CLASSIFIER=rule_based   # or: claude
 
 ## Roadmap
 
-- [x] pip, npm, RubyGems, Maven (Java/JVM), Composer (PHP), NuGet (.NET), Cargo (Rust), Go Modules
+- [x] pip/uv, npm, RubyGems, Maven/Gradle (Java/JVM), Composer (PHP), NuGet (.NET), Cargo (Rust), Go Modules, GitHub Actions, Mix/Hex (Elixir), Pub (Dart/Flutter), Elm, Docker, Terraform, Swift
 - [x] Eleven parallel check sources (OSV, Socket.dev, diff, release age, maintainer, SLSA/Sigstore, OpenSSF Scorecard, deps.dev deprecation, version staleness, PR file audit, metadata)
 - [x] LLM classifier with rule-based fallback
 - [x] GitHub and GitLab support

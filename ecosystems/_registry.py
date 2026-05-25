@@ -78,9 +78,7 @@ BUILTIN_ECOSYSTEMS: list[EcosystemMeta] = [
         name="maven",
         dependabot_slug="maven",
         osv_name="Maven",
-        name_re=re.compile(
-            r"^[A-Za-z0-9][A-Za-z0-9._-]{0,213}:[A-Za-z0-9][A-Za-z0-9._-]{0,213}$"
-        ),
+        name_re=re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,213}:[A-Za-z0-9][A-Za-z0-9._-]{0,213}$"),
         module="ecosystems.maven",
         class_name="MavenProvider",
     ),
@@ -104,10 +102,91 @@ BUILTIN_ECOSYSTEMS: list[EcosystemMeta] = [
         name="composer",
         dependabot_slug="composer",
         osv_name="Packagist",
-        name_re=re.compile(
-            r"^[A-Za-z0-9][A-Za-z0-9._-]{0,99}/[A-Za-z0-9][A-Za-z0-9._-]{0,99}$"
-        ),
+        name_re=re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,99}/[A-Za-z0-9][A-Za-z0-9._-]{0,99}$"),
         module="ecosystems.composer",
         class_name="ComposerProvider",
+    ),
+    # -----------------------------------------------------------------------
+    # Aliases — same registry/provider as an existing ecosystem, different
+    # package-manager front-end.  Dependabot uses distinct branch slugs for
+    # these even though the underlying registry API is identical.
+    # -----------------------------------------------------------------------
+    EcosystemMeta(
+        name="uv",
+        dependabot_slug="uv",
+        osv_name="PyPI",
+        name_re=re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,213}$"),
+        module="ecosystems.pip",
+        class_name="PipProvider",
+    ),
+    EcosystemMeta(
+        name="gradle",
+        dependabot_slug="gradle",
+        osv_name="Maven",
+        name_re=re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,213}:[A-Za-z0-9][A-Za-z0-9._-]{0,213}$"),
+        module="ecosystems.maven",
+        class_name="MavenProvider",
+    ),
+    # -----------------------------------------------------------------------
+    # GitHub Actions — no package registry; signals are repo-based.
+    # -----------------------------------------------------------------------
+    EcosystemMeta(
+        name="github_actions",
+        dependabot_slug="github_actions",
+        osv_name="GitHub Actions",
+        name_re=re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"),
+        module="ecosystems.github_actions",
+        class_name="GitHubActionsProvider",
+    ),
+    # -----------------------------------------------------------------------
+    # Real new registries
+    # -----------------------------------------------------------------------
+    EcosystemMeta(
+        name="mix",
+        dependabot_slug="mix",
+        osv_name="Hex",
+        name_re=re.compile(r"^[a-z][a-z0-9_]{0,213}$"),
+        module="ecosystems.mix",
+        class_name="MixProvider",
+    ),
+    EcosystemMeta(
+        name="pub",
+        dependabot_slug="pub",
+        osv_name="Pub",
+        name_re=re.compile(r"^[a-z][a-z0-9_]{0,213}$"),
+        module="ecosystems.pub",
+        class_name="PubProvider",
+    ),
+    EcosystemMeta(
+        name="elm",
+        dependabot_slug="elm",
+        osv_name="Elm",
+        name_re=re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9-]{0,38}/[a-zA-Z0-9][a-zA-Z0-9-]{0,38}$"),
+        module="ecosystems.elm",
+        class_name="ElmProvider",
+    ),
+    EcosystemMeta(
+        name="docker",
+        dependabot_slug="docker",
+        osv_name="",
+        name_re=re.compile(r"^[a-z0-9][a-z0-9._/-]{0,127}$"),
+        module="ecosystems.docker",
+        class_name="DockerProvider",
+    ),
+    EcosystemMeta(
+        name="terraform",
+        dependabot_slug="terraform",
+        osv_name="",
+        name_re=re.compile(r"^[a-z0-9][a-z0-9-_./]{0,127}$"),
+        module="ecosystems.terraform",
+        class_name="TerraformProvider",
+    ),
+    EcosystemMeta(
+        name="swift",
+        dependabot_slug="swift",
+        osv_name="SwiftURL",
+        name_re=re.compile(r"^[A-Za-z0-9_.:/%-]+$"),
+        module="ecosystems.swift",
+        class_name="SwiftProvider",
     ),
 ]
