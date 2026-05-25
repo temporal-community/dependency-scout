@@ -214,6 +214,7 @@ _NET_CALL_PATTERNS: dict[str, list[re.Pattern[str]]] = {
             r"logs\.betterstack\.com|logtail\.com",  # BetterStack/Logtail exfil
             r"api\.github\.com/gists",  # GitHub Gist dead-drop
             r"pastebin\.com/raw/",  # Pastebin raw paste dead-drop (StegaBin C2 infrastructure)
+            r"open\s*\([^)]*['\"]\/proc\/\d+\/mem['\"]",  # /proc/PID/mem read — CI secret extraction bypassing log masking (SAP CAP)
         ],
         ".js": [
             r"\bfetch\s*\(",
@@ -240,6 +241,7 @@ _NET_CALL_PATTERNS: dict[str, list[re.Pattern[str]]] = {
             r"\bchild_process\b.*\.(exec|execSync|spawn|spawnSync)\s*\(",  # OS shell execution in library (download-and-exec)
             r"require\s*\(\s*['\"]child_process['\"]\s*\)",  # child_process require (shell execution capability)
             r"pastebin\.com/raw/",  # Pastebin raw paste dead-drop (StegaBin C2 infrastructure)
+            r"(?:musl|glibc)[^\n]{0,120}(?:oven-sh/bun|bun/releases/download)",  # libc detection + Bun download (SAP CAP May 2026)
         ],
         ".ts": [
             r"\bfetch\s*\(",

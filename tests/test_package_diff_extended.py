@@ -3138,3 +3138,58 @@ def test_net_calls_dnslog_cn_go():
         )
         is True
     )
+
+
+# ---------------------------------------------------------------------------
+# /proc/PID/mem CI secret extraction + glibc/musl Bun download (loop iteration 9)
+# ---------------------------------------------------------------------------
+
+
+def test_net_calls_proc_mem_py():
+    """/proc/PID/mem read in Python sets network_calls_in_lib (CI secret bypass, SAP CAP)."""
+    assert (
+        _added_lines_have_net_calls(
+            ["with open('/proc/1234/mem', 'rb') as f:"],
+            ".py",
+        )
+        is True
+    )
+
+
+def test_proc_mem_in_new_py_file_sets_net_calls(tmp_path):
+    """New Python lib file reading /proc/PID/mem sets network_calls_in_lib."""
+    old = _write_files(tmp_path / "old", {})
+    new = _write_files(
+        tmp_path / "new",
+        {
+            "pkg/secrets.py": (
+                "import struct\n"
+                "with open('/proc/1234/mem', 'rb') as f:\n"
+                "    data = f.read(4096)\n"
+            )
+        },
+    )
+    _, _, _, _, net_calls, *_ = _build_diff(old, new)
+    assert net_calls is True
+
+
+def test_net_calls_musl_bun_download_js():
+    """musl variant check followed by Bun download URL sets network_calls_in_lib (SAP CAP)."""
+    assert (
+        _added_lines_have_net_calls(
+            ["const variant = musl ? 'oven-sh/bun/releases/download/bun-linux-musl-x64.zip' : 'bun-linux-x64.zip';"],
+            ".js",
+        )
+        is True
+    )
+
+
+def test_net_calls_glibc_bun_download_js():
+    """glibc detection + bun/releases URL in JS sets network_calls_in_lib."""
+    assert (
+        _added_lines_have_net_calls(
+            ["if (glibc) { url = 'https://github.com/oven-sh/bun/releases/download/bun-linux-x64.zip'; }"],
+            ".js",
+        )
+        is True
+    )
