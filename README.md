@@ -23,7 +23,7 @@ It classifies the risk as GREEN / YELLOW / RED, posts a comment explaining its r
 
 ## What it actually does
 
-When a Dependabot or Renovate PR opens on **GitHub or GitLab**, the Scout:
+When a Dependabot (or [Renovate](https://github.com/renovatebot/renovate)) PR opens on GitHub (or GitLab), the Scout:
 
 1. **Runs checks** from public APIs (PyPI/npm/RubyGems, OSV, Socket.dev, pypistats, SLSA provenance) — no API keys required for most checks
 2. **Downloads and diffs** the package archive to see what code actually changed
