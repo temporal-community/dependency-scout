@@ -106,6 +106,7 @@ _SUSPICIOUS_PACKAGE_PREFIXES = frozenset(
         ".vscode/",  # VSCode task/launch configs that auto-execute
         ".idea/",  # JetBrains workspace configs
         ".devcontainer",  # Dev container auto-run config
+        ".github/workflows/",  # CI workflow files — run code on the developer's CI, not a package artifact
     }
 )
 

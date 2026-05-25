@@ -3099,8 +3099,7 @@ def test_bun_subprocess_in_new_py_file_sets_net_calls(tmp_path):
         tmp_path / "new",
         {
             "pkg/_runtime/loader.py": (
-                "import subprocess\n"
-                "subprocess.run(['bun', 'router_runtime.js'])\n"
+                "import subprocess\nsubprocess.run(['bun', 'router_runtime.js'])\n"
             )
         },
     )
