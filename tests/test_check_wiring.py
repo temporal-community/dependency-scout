@@ -30,11 +30,15 @@ def test_all_check_activities_registered_with_worker():
 
 
 def test_all_check_sub_models_used_in_classifier():
-    """Every PackageChecks sub-model field has at least one field access in classifier.py."""
+    """Every PackageChecks sub-model field has at least one field access in the classifiers package."""
     import re
     import classifiers as classifier_module
+    import classifiers._helpers as helpers_module
 
-    source = inspect.getsource(classifier_module)
+    # Combine source from __init__ and the shared helpers module so the check
+    # covers the full classifier package (the _rule_based function that references
+    # all signal fields lives in classifiers/_helpers.py after the refactor).
+    source = inspect.getsource(classifier_module) + inspect.getsource(helpers_module)
     # Strip single-line comments so a field mentioned only in a comment isn't counted as used.
     code_only = re.sub(r"#[^\n]*", "", source)
 
