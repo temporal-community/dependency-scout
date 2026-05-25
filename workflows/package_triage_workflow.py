@@ -10,7 +10,7 @@ with workflow.unsafe.imports_passed_through():
         PyPIChecks,
         SocketChecks,
         OSVChecks,
-        DiffChecks,
+        PackageDiffChecks,
         MaintainerChecks,
         ReleaseAgeChecks,
         AttestationChecks,
@@ -32,7 +32,7 @@ _CHECK_REGISTRY: list[tuple[str, str, type, bool]] = [
     ("pypi", "activities.pypi_metadata.fetch", PyPIChecks, False),
     ("socket", "activities.socket.score", SocketChecks, False),
     ("osv", "activities.osv.check", OSVChecks, False),
-    ("diff", "activities.package_diff.compute", DiffChecks, True),  # archive download
+    ("diff", "activities.package_diff.compute", PackageDiffChecks, True),  # archive download
     ("maintainer", "activities.maintainer.history", MaintainerChecks, False),
     ("age", "activities.release_age.check", ReleaseAgeChecks, False),
     ("attestation", "activities.attestation.check", AttestationChecks, False),

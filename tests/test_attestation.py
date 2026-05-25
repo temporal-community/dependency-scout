@@ -449,7 +449,9 @@ def test_rule_based_classifier_install_script_added_is_red():
         package_name="mypkg",
         old_version="1.0.0",
         new_version="1.0.1",
-        diff=PackageDiffChecks(diff_summary="+ setup.py", diff_size_bytes=100, install_script_added=True),
+        diff=PackageDiffChecks(
+            diff_summary="+ setup.py", diff_size_bytes=100, install_script_added=True
+        ),
     )
     verdict = _rule_based(signals)
     assert verdict.classification == "red"

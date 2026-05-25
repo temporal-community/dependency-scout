@@ -412,7 +412,7 @@ _OBFUSCATION_PATTERNS: dict[str, list[re.Pattern[str]]] = {
             r"PAGE_EXECUTE_READWRITE",  # VirtualAlloc RWX memory for JIT hook — .NET Reactor Necrobit patching clrjit.dll!getJit (NuGet IR.* campaign May 2026)
             r"\bclrjit\b",  # direct reference to CLR JIT library — only present when patching the JIT compiler (NuGet IR.* campaign May 2026)
             r'"[A-Z][a-z]+\s+"\.Trim\(\)\s*\+\s*"[A-Z][a-z]+',  # Win32 API name split across trimmed string literals to evade static scanning (NuGet Chinese UI campaign May 2026)
-            r'ProgramData\\Microsoft OneDrive\\keys\.dat',  # credential staging path used by NuGet IR.* to store harvested secrets before C2 upload (May 2026)
+            r"ProgramData\\Microsoft OneDrive\\keys\.dat",  # credential staging path used by NuGet IR.* to store harvested secrets before C2 upload (May 2026)
         ],
     }.items()
 }
@@ -486,7 +486,9 @@ _ARTIFACT_MISMATCH_THRESHOLD = 5
 
 
 @activity.defn(name="activities.package_diff.compute")
-async def compute(ecosystem: str, package: str, old_version: str, new_version: str) -> PackageDiffChecks:
+async def compute(
+    ecosystem: str, package: str, old_version: str, new_version: str
+) -> PackageDiffChecks:
     key = (ecosystem, package, old_version, new_version)
     if (hit := _cache.get(key)) is not None:
         activity.logger.debug("package_diff cache hit: %s %s→%s", package, old_version, new_version)
