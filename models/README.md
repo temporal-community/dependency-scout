@@ -1,6 +1,13 @@
 # Models
 
-All data structures used across the codebase live here in `__init__.py`. They are [Pydantic](https://docs.pydantic.dev) models — plain Python classes with type-checked fields and automatic validation.
+All data structures used across the codebase are [Pydantic](https://docs.pydantic.dev) models — plain Python classes with type-checked fields and automatic validation. `__init__.py` re-exports everything so `from models import X` works regardless of which file `X` lives in.
+
+| File | What's in it |
+|---|---|
+| `pr.py` | `PRContext`, `PRFilesChecks`, `RepoConfig` |
+| `checks.py` | All per-activity check models (`MetadataChecks`, `OSVChecks`, etc.) |
+| `verdict.py` | `Verdict` |
+| `package.py` | `PackageChecks` (aggregates all check models) |
 
 ## The big picture
 
