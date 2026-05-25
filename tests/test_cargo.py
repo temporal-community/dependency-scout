@@ -260,6 +260,52 @@ async def test_fetch_release_non_200_returns_empty():
     assert result.github_release_exists is False
 
 
+@respx.mock
+async def test_fetch_release_with_github_repo(monkeypatch):
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+    import re
+
+    respx.get(f"{_API}/{PACKAGE}").mock(return_value=httpx.Response(200, json=_crate_response()))
+    # GitHub API calls for release + two tag signatures all return 404
+    respx.get(re.compile(r"https://api\.github\.com/.*")).mock(return_value=httpx.Response(404))
+    env = ActivityEnvironment()
+    provider = CargoProvider()
+    result = await env.run(provider.fetch_release, PACKAGE, OLD_VER, NEW_VER)
+    assert result.metadata_repo == "serde-rs/serde"
+
+
+@respx.mock
+async def test_release_age_empty_created_at():
+    data = _crate_response()
+    for v in data["versions"]:
+        if v["num"] == NEW_VER:
+            v["created_at"] = ""
+    respx.get(f"{_API}/{PACKAGE}").mock(return_value=httpx.Response(200, json=data))
+    env = ActivityEnvironment()
+    provider = CargoProvider()
+    result = await env.run(provider.fetch_release_age, PACKAGE, NEW_VER)
+    assert result.release_age_hours is None
+
+
+@respx.mock
+async def test_maintainer_non_200_returns_false():
+    respx.get(f"{_API}/{PACKAGE}").mock(return_value=httpx.Response(503))
+    env = ActivityEnvironment()
+    provider = CargoProvider()
+    result = await env.run(provider.fetch_maintainer, PACKAGE, OLD_VER, NEW_VER)
+    assert result.maintainer_changed is False
+
+
+@respx.mock
+async def test_get_archive_url_404_raises_non_retryable():
+    respx.get(f"{_API}/{PACKAGE}").mock(return_value=httpx.Response(404))
+    provider = CargoProvider()
+    with pytest.raises(ApplicationError) as exc_info:
+        async with httpx.AsyncClient() as client:
+            await provider.get_archive_url(client, PACKAGE, NEW_VER)
+    assert exc_info.value.non_retryable is True
+
+
 # ---------------------------------------------------------------------------
 # Ecosystem registration
 # ---------------------------------------------------------------------------

@@ -468,6 +468,136 @@ def test_webhook_rejects_composer_path_traversal():
 
 
 @respx.mock
+async def test_fetch_metadata_non_200_returns_signals():
+    respx.get(f"{_PACKAGIST}/packages/example/mypackage.json").mock(
+        return_value=httpx.Response(503)
+    )
+    env = ActivityEnvironment()
+    result = await env.run(ComposerProvider().fetch_metadata, "example/mypackage", "1.0.0", "2.0.0")
+    assert result.is_major_bump is True
+
+
+@respx.mock
+async def test_fetch_release_age_no_time_field():
+    pkg = _pkg_response(
+        versions={
+            "v1.2.3": {
+                "name": "example/mypackage",
+                "version": "v1.2.3",
+                "source": {"type": "git", "url": "https://github.com/example/mypackage.git"},
+                "authors": [],
+                "require": {},
+            }
+        }
+    )
+    respx.get(f"{_PACKAGIST}/packages/example/mypackage.json").mock(
+        return_value=httpx.Response(200, json=pkg)
+    )
+    env = ActivityEnvironment()
+    result = await env.run(ComposerProvider().fetch_release_age, "example/mypackage", "1.2.3")
+    assert result.release_age_hours is None
+
+
+@respx.mock
+async def test_fetch_release_age_invalid_time_format():
+    pkg = _pkg_response(
+        versions={
+            "v1.2.3": {
+                "name": "example/mypackage",
+                "version": "v1.2.3",
+                "time": "not-a-valid-datetime",
+                "source": {"type": "git", "url": "https://github.com/example/mypackage.git"},
+                "authors": [],
+                "require": {},
+            }
+        }
+    )
+    respx.get(f"{_PACKAGIST}/packages/example/mypackage.json").mock(
+        return_value=httpx.Response(200, json=pkg)
+    )
+    env = ActivityEnvironment()
+    result = await env.run(ComposerProvider().fetch_release_age, "example/mypackage", "1.2.3")
+    assert result.release_age_hours is None
+
+
+@respx.mock
+async def test_fetch_maintainer_non_200_returns_false():
+    respx.get(f"{_PACKAGIST}/packages/example/mypackage.json").mock(
+        return_value=httpx.Response(503)
+    )
+    env = ActivityEnvironment()
+    result = await env.run(
+        ComposerProvider().fetch_maintainer, "example/mypackage", "1.0.0", "2.0.0"
+    )
+    assert result.maintainer_changed is False
+
+
+@respx.mock
+async def test_fetch_maintainer_version_not_found():
+    pkg = _pkg_response()  # only has v1.0.0, not v2.0.0
+    respx.get(f"{_PACKAGIST}/packages/example/mypackage.json").mock(
+        return_value=httpx.Response(200, json=pkg)
+    )
+    env = ActivityEnvironment()
+    result = await env.run(
+        ComposerProvider().fetch_maintainer, "example/mypackage", "1.0.0", "2.0.0"
+    )
+    assert result.maintainer_changed is False
+
+
+@respx.mock
+async def test_fetch_maintainer_email_only_author():
+    pkg = _two_version_pkg(
+        old_authors=[{"email": "alice@example.com"}],
+        new_authors=[{"email": "bob@example.com"}],
+    )
+    respx.get(f"{_PACKAGIST}/packages/example/mypackage.json").mock(
+        return_value=httpx.Response(200, json=pkg)
+    )
+    env = ActivityEnvironment()
+    result = await env.run(
+        ComposerProvider().fetch_maintainer, "example/mypackage", "1.0.0", "2.0.0"
+    )
+    assert result.maintainer_changed is True
+
+
+@respx.mock
+async def test_get_archive_url_non_200_returns_none():
+    respx.get(f"{_PACKAGIST}/packages/example/mypackage.json").mock(
+        return_value=httpx.Response(503)
+    )
+    async with httpx.AsyncClient() as client:
+        result = await ComposerProvider().get_archive_url(client, "example/mypackage", "1.0.0")
+    assert result is None
+
+
+@respx.mock
+async def test_get_archive_url_version_not_found():
+    pkg = _pkg_response()  # only has v1.0.0, not v9.9.9
+    respx.get(f"{_PACKAGIST}/packages/example/mypackage.json").mock(
+        return_value=httpx.Response(200, json=pkg)
+    )
+    async with httpx.AsyncClient() as client:
+        result = await ComposerProvider().get_archive_url(client, "example/mypackage", "9.9.9")
+    assert result is None
+
+
+@respx.mock
+async def test_fetch_release_with_github_source(monkeypatch):
+    import re
+
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+    pkg = _two_version_pkg()  # source.url = "https://github.com/example/mypackage.git"
+    respx.get(f"{_PACKAGIST}/packages/example/mypackage.json").mock(
+        return_value=httpx.Response(200, json=pkg)
+    )
+    respx.get(re.compile(r"https://api\.github\.com/.*")).mock(return_value=httpx.Response(404))
+    env = ActivityEnvironment()
+    result = await env.run(ComposerProvider().fetch_release, "example/mypackage", "1.0.0", "2.0.0")
+    assert result.metadata_repo == "example/mypackage"
+
+
+@respx.mock
 async def test_version_lineage_composer_stale():
     from activities.version_lineage import check as lineage_check
 

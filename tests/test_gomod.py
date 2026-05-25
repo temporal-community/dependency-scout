@@ -209,6 +209,33 @@ async def test_fetch_release_non_200_returns_empty():
     assert result.github_release_exists is False
 
 
+@respx.mock
+async def test_fetch_release_age_404_raises_non_retryable():
+    respx.get(f"{_PROXY}/{_ESCAPED}/@v/{NEW_VER}.info").mock(return_value=httpx.Response(404))
+    env = ActivityEnvironment()
+    with pytest.raises(ApplicationError) as exc_info:
+        await env.run(GoModulesProvider().fetch_release_age, MODULE, NEW_VER)
+    assert exc_info.value.non_retryable is True
+
+
+@respx.mock
+async def test_fetch_release_with_github_source_url(monkeypatch):
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+    import re
+
+    respx.get(f"{_PROXY}/{_ESCAPED}/@v/{NEW_VER}.info").mock(
+        return_value=httpx.Response(200, json=_info(NEW_VER, ts=_NEW_TS))
+    )
+    respx.get(f"{_PROXY}/{_ESCAPED}/@v/{OLD_VER}.info").mock(
+        return_value=httpx.Response(200, json=_info(OLD_VER, ts=_OLD_TS))
+    )
+    # Mock all GitHub API calls (release + two tag signatures) as 404
+    respx.get(re.compile(r"https://api\.github\.com/.*")).mock(return_value=httpx.Response(404))
+    env = ActivityEnvironment()
+    result = await env.run(GoModulesProvider().fetch_release, MODULE, OLD_VER, NEW_VER)
+    assert result.metadata_repo == "gorilla/mux"
+
+
 # ---------------------------------------------------------------------------
 # name_re
 # ---------------------------------------------------------------------------

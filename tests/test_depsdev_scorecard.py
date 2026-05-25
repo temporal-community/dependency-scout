@@ -284,3 +284,44 @@ def test_classifier_deprecated_no_reason():
     assert any("deprecated" in f for f in verdict.flags)
     # Should not have "None" in the flag text
     assert not any("None" in f for f in verdict.flags)
+
+
+@respx.mock
+async def test_depsdev_exception_returns_empty():
+    """Network exception during depsdev fetch → empty DepsDevSignals, no exception raised."""
+    respx.get(f"{DEPSDEV_BASE}/pypi/packages/requests/versions/2.32.0").mock(
+        side_effect=httpx.ConnectError("connection refused")
+    )
+    env = ActivityEnvironment()
+    result = await env.run(depsdev_fetch, "pip", "requests", "2.31.0", "2.32.0")
+    assert result.is_deprecated is False
+
+
+@respx.mock
+async def test_scorecard_unknown_ecosystem_returns_empty():
+    """Ecosystems not in the scorecard map (e.g. 'cargo') return empty ScorecardSignals."""
+    env = ActivityEnvironment()
+    result = await env.run(scorecard_fetch, "cargo", "serde", "1.0.0", "1.1.0")
+    assert result.scorecard_maintained is None
+
+
+@respx.mock
+async def test_scorecard_depsdev_non_200_returns_empty():
+    """Non-200 from deps.dev during scorecard fetch → empty ScorecardSignals."""
+    respx.get(f"{DEPSDEV_BASE}/pypi/packages/requests/versions/2.32.0").mock(
+        return_value=httpx.Response(503)
+    )
+    env = ActivityEnvironment()
+    result = await env.run(scorecard_fetch, "pip", "requests", "2.31.0", "2.32.0")
+    assert result.scorecard_maintained is None
+
+
+@respx.mock
+async def test_scorecard_exception_returns_empty():
+    """Network exception during scorecard pipeline → empty ScorecardSignals, no exception raised."""
+    respx.get(f"{DEPSDEV_BASE}/pypi/packages/requests/versions/2.32.0").mock(
+        side_effect=httpx.ConnectError("connection refused")
+    )
+    env = ActivityEnvironment()
+    result = await env.run(scorecard_fetch, "pip", "requests", "2.31.0", "2.32.0")
+    assert result.scorecard_maintained is None

@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 import httpx
 import pytest
 import respx
+from temporalio.exceptions import ApplicationError
 from temporalio.testing import ActivityEnvironment
 
 from ecosystems import detect_stale_version_line
@@ -241,6 +242,134 @@ async def test_rubygems_stale_version_line_detected():
     env = ActivityEnvironment()
     result = await env.run(lineage_check, "rubygems", "mygem", "0.5.0", "0.5.1")
     assert result.stale_version_line is True
+
+
+# ---------------------------------------------------------------------------
+# Activity tests — npm 404
+# ---------------------------------------------------------------------------
+
+
+@respx.mock
+async def test_npm_404_raises_non_retryable():
+    respx.get(f"{NPM_BASE}/nosuchpkg").mock(return_value=httpx.Response(404))
+    env = ActivityEnvironment()
+    with pytest.raises(ApplicationError) as exc_info:
+        await env.run(lineage_check, "npm", "nosuchpkg", "1.0.0", "1.0.1")
+    assert exc_info.value.non_retryable is True
+
+
+# ---------------------------------------------------------------------------
+# Activity tests — RubyGems 404
+# ---------------------------------------------------------------------------
+
+
+@respx.mock
+async def test_rubygems_404_raises_non_retryable():
+    respx.get(f"{RUBYGEMS_VER}/nosuchgem.json").mock(return_value=httpx.Response(404))
+    env = ActivityEnvironment()
+    with pytest.raises(ApplicationError) as exc_info:
+        await env.run(lineage_check, "rubygems", "nosuchgem", "1.0.0", "1.0.1")
+    assert exc_info.value.non_retryable is True
+
+
+# ---------------------------------------------------------------------------
+# Activity tests — Composer edge cases
+# ---------------------------------------------------------------------------
+
+PACKAGIST_BASE = "https://packagist.org/packages"
+
+
+@respx.mock
+async def test_composer_no_slash_returns_empty():
+    env = ActivityEnvironment()
+    result = await env.run(lineage_check, "composer", "noslash", "1.0.0", "1.0.1")
+    assert result == VersionLineSignals()
+
+
+@respx.mock
+async def test_composer_404_raises_non_retryable():
+    respx.get(f"{PACKAGIST_BASE}/vendor/pkg.json").mock(return_value=httpx.Response(404))
+    env = ActivityEnvironment()
+    with pytest.raises(ApplicationError) as exc_info:
+        await env.run(lineage_check, "composer", "vendor/pkg", "1.0.0", "1.0.1")
+    assert exc_info.value.non_retryable is True
+
+
+@respx.mock
+async def test_composer_non_200_returns_empty():
+    respx.get(f"{PACKAGIST_BASE}/vendor/pkg.json").mock(return_value=httpx.Response(503))
+    env = ActivityEnvironment()
+    result = await env.run(lineage_check, "composer", "vendor/pkg", "1.0.0", "1.0.1")
+    assert result == VersionLineSignals()
+
+
+@respx.mock
+async def test_composer_no_versions_returns_empty():
+    respx.get(f"{PACKAGIST_BASE}/vendor/pkg.json").mock(
+        return_value=httpx.Response(200, json={"package": {"versions": {}}})
+    )
+    env = ActivityEnvironment()
+    result = await env.run(lineage_check, "composer", "vendor/pkg", "1.0.0", "1.0.1")
+    assert result == VersionLineSignals()
+
+
+# ---------------------------------------------------------------------------
+# Activity tests — Maven edge cases
+# ---------------------------------------------------------------------------
+
+MAVEN_SEARCH = "https://search.maven.org/solrsearch/select"
+
+
+@respx.mock
+async def test_maven_no_colon_returns_empty():
+    env = ActivityEnvironment()
+    result = await env.run(lineage_check, "maven", "nocolon", "1.0.0", "1.0.1")
+    assert result == VersionLineSignals()
+
+
+@respx.mock
+async def test_maven_non_200_returns_empty():
+    respx.get(MAVEN_SEARCH).mock(return_value=httpx.Response(503))
+    env = ActivityEnvironment()
+    result = await env.run(lineage_check, "maven", "com.example:lib", "1.0.0", "1.0.1")
+    assert result == VersionLineSignals()
+
+
+@respx.mock
+async def test_maven_no_docs_returns_empty():
+    respx.get(MAVEN_SEARCH).mock(
+        return_value=httpx.Response(200, json={"response": {"docs": []}})
+    )
+    env = ActivityEnvironment()
+    result = await env.run(lineage_check, "maven", "com.example:lib", "1.0.0", "1.0.1")
+    assert result == VersionLineSignals()
+
+
+# ---------------------------------------------------------------------------
+# Activity tests — NuGet edge cases
+# ---------------------------------------------------------------------------
+
+NUGET_BASE = "https://api.nuget.org/v3-flatcontainer"
+
+
+@respx.mock
+async def test_nuget_non_200_returns_empty():
+    respx.get(f"{NUGET_BASE}/mypkg/index.json").mock(return_value=httpx.Response(503))
+    env = ActivityEnvironment()
+    result = await env.run(lineage_check, "nuget", "mypkg", "1.0.0", "1.0.1")
+    assert result == VersionLineSignals()
+
+
+# ---------------------------------------------------------------------------
+# Activity tests — unknown ecosystem falls through
+# ---------------------------------------------------------------------------
+
+
+@respx.mock
+async def test_unknown_ecosystem_returns_empty():
+    env = ActivityEnvironment()
+    result = await env.run(lineage_check, "cargo", "serde", "1.0.0", "1.0.1")
+    assert result == VersionLineSignals()
 
 
 # ---------------------------------------------------------------------------

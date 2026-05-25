@@ -454,6 +454,35 @@ def test_get_bot_logins_includes_builtins():
     assert "renovate[bot]" in logins
 
 
+def test_get_bot_logins_builds_registry_when_empty(monkeypatch):
+    """get_bot_logins() calls _build_registry() when _REGISTRY is empty."""
+    import helpers.bot_parsers as bp
+    from helpers.bot_parsers import get_bot_logins
+
+    monkeypatch.setattr(bp, "_REGISTRY", {})
+    logins = get_bot_logins()
+    assert len(logins) > 0
+
+
+def test_ecosystem_validator_rejects_unknown():
+    """PRContext rejects unknown ecosystem names via _validate_ecosystem_name."""
+    import pytest
+    from pydantic import ValidationError
+    from activities.models import PRContext
+
+    with pytest.raises(ValidationError, match="Unknown ecosystem"):
+        PRContext(
+            repo="owner/repo",
+            pr_number=1,
+            pr_author="dependabot[bot]",
+            installation_id=None,
+            ecosystem="nonexistent_xyz_abc",
+            package_name="pkg",
+            old_version="1.0.0",
+            new_version="2.0.0",
+        )
+
+
 def test_register_custom_bot_parser():
     from helpers.bot_parsers import register_bot_parser, get_bot_parser
     from helpers.pr_parser import ParsedPR
@@ -466,3 +495,290 @@ def test_register_custom_bot_parser():
 
     register_bot_parser(PyUpParser())
     assert get_bot_parser("pyup-bot") is not None
+
+
+# ---------------------------------------------------------------------------
+# /webhook/github (non-legacy endpoint)
+# ---------------------------------------------------------------------------
+
+
+async def test_webhook_github_endpoint_starts_workflow(client):
+    ac, mock_tc = client
+    body = _dependabot_payload()
+    resp = await ac.post(
+        "/webhook/github",
+        content=body,
+        headers={"X-Hub-Signature-256": _sign(body), "X-GitHub-Event": "pull_request"},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "started"
+    mock_tc.start_workflow.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# _verify_github_signature — 500 when secret not configured
+# ---------------------------------------------------------------------------
+
+
+async def test_webhook_no_github_secret_returns_500(monkeypatch):
+    monkeypatch.delenv("GITHUB_WEBHOOK_SECRET", raising=False)
+
+    mock_tc = AsyncMock()
+    import api.webhook as webhook_module
+    monkeypatch.setattr(webhook_module, "_temporal_client", mock_tc)
+
+    from api.webhook import app
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as ac:
+        body = _dependabot_payload()
+        resp = await ac.post(
+            "/webhook/github",
+            content=body,
+            headers={"X-Hub-Signature-256": "sha256=fake", "X-GitHub-Event": "pull_request"},
+        )
+    assert resp.status_code == 500
+
+
+# ---------------------------------------------------------------------------
+# _check_config — startup validation (called directly, not via lifespan)
+# ---------------------------------------------------------------------------
+
+
+def test_check_config_logs_missing_github_secret(monkeypatch, caplog):
+    import logging
+
+    monkeypatch.delenv("GITHUB_WEBHOOK_SECRET", raising=False)
+    monkeypatch.delenv("GITLAB_WEBHOOK_SECRET", raising=False)
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+    monkeypatch.delenv("GITHUB_APP_ID", raising=False)
+    monkeypatch.delenv("GITLAB_TOKEN", raising=False)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+
+    from api.webhook import _check_config
+
+    with caplog.at_level(logging.DEBUG):
+        _check_config()
+    assert "GITHUB_WEBHOOK_SECRET" in caplog.text
+
+
+def test_check_config_logs_no_platform_credentials(monkeypatch, caplog):
+    import logging
+
+    monkeypatch.setenv("GITHUB_WEBHOOK_SECRET", "secret")
+    monkeypatch.setenv("GITLAB_WEBHOOK_SECRET", "gl-secret")
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+    monkeypatch.delenv("GITHUB_APP_ID", raising=False)
+    monkeypatch.delenv("GITLAB_TOKEN", raising=False)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+
+    from api.webhook import _check_config
+
+    with caplog.at_level(logging.WARNING):
+        _check_config()
+    assert "No platform credentials" in caplog.text
+
+
+# ---------------------------------------------------------------------------
+# _validate_parsed_package — invalid version string (line 55)
+# ---------------------------------------------------------------------------
+
+
+def test_validate_package_rejects_invalid_version_format():
+    from api.webhook import _validate_parsed_package
+
+    assert _validate_parsed_package("pip", "requests", "2.31.0", "2.32.0; rm -rf /") is not None
+
+
+# ---------------------------------------------------------------------------
+# GitLab webhook — /webhook/gitlab
+# ---------------------------------------------------------------------------
+
+TEST_GITLAB_SECRET = "test-gitlab-secret"
+
+
+@pytest.fixture
+async def gitlab_client(monkeypatch):
+    monkeypatch.setenv("GITLAB_WEBHOOK_SECRET", TEST_GITLAB_SECRET)
+    monkeypatch.setenv("GITHUB_WEBHOOK_SECRET", TEST_SECRET)
+
+    mock_tc = AsyncMock()
+    mock_tc.start_workflow = AsyncMock(return_value=MagicMock(id="wf-id"))
+
+    import api.webhook as webhook_module
+
+    monkeypatch.setattr(webhook_module, "_temporal_client", mock_tc)
+
+    from api.webhook import app
+
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as ac:
+        yield ac, mock_tc
+
+
+def _gitlab_mr_payload(
+    action: str = "open",
+    title: str = "Update dependency requests to v2.32.0",
+    author: str = "renovate[bot]",
+    mr_number: int = 42,
+    repo: str = "owner/repo",
+    branch: str = "renovate/pip/requests-2.32.0",
+    head_sha: str = "abc123def456abc123def456abc123def456abc1",
+) -> bytes:
+    payload = {
+        "object_attributes": {
+            "action": action,
+            "iid": mr_number,
+            "title": title,
+            "description": "",
+            "source_branch": branch,
+            "last_commit": {"id": head_sha},
+        },
+        "user": {"username": author},
+        "project": {"path_with_namespace": repo},
+    }
+    return json.dumps(payload).encode()
+
+
+async def test_gitlab_mr_open_starts_workflow(gitlab_client):
+    ac, mock_tc = gitlab_client
+    body = _gitlab_mr_payload()
+    resp = await ac.post(
+        "/webhook/gitlab",
+        content=body,
+        headers={
+            "X-Gitlab-Token": TEST_GITLAB_SECRET,
+            "X-Gitlab-Event": "Merge Request Hook",
+        },
+    )
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "started"
+    mock_tc.start_workflow.assert_called_once()
+
+
+async def test_gitlab_non_mr_event_ignored(gitlab_client):
+    ac, mock_tc = gitlab_client
+    body = b'{"action": "push"}'
+    resp = await ac.post(
+        "/webhook/gitlab",
+        content=body,
+        headers={
+            "X-Gitlab-Token": TEST_GITLAB_SECRET,
+            "X-Gitlab-Event": "Push Hook",
+        },
+    )
+    assert resp.json()["status"] == "ignored"
+    mock_tc.start_workflow.assert_not_called()
+
+
+async def test_gitlab_non_bot_author_ignored(gitlab_client):
+    ac, mock_tc = gitlab_client
+    body = _gitlab_mr_payload(author="human_developer")
+    resp = await ac.post(
+        "/webhook/gitlab",
+        content=body,
+        headers={
+            "X-Gitlab-Token": TEST_GITLAB_SECRET,
+            "X-Gitlab-Event": "Merge Request Hook",
+        },
+    )
+    assert resp.json()["status"] == "ignored"
+    mock_tc.start_workflow.assert_not_called()
+
+
+async def test_gitlab_unparseable_title_ignored(gitlab_client):
+    ac, mock_tc = gitlab_client
+    body = _gitlab_mr_payload(title="chore: update CI configuration")
+    resp = await ac.post(
+        "/webhook/gitlab",
+        content=body,
+        headers={
+            "X-Gitlab-Token": TEST_GITLAB_SECRET,
+            "X-Gitlab-Event": "Merge Request Hook",
+        },
+    )
+    assert resp.json()["status"] == "ignored"
+    mock_tc.start_workflow.assert_not_called()
+
+
+async def test_gitlab_closed_action_ignored(gitlab_client):
+    ac, mock_tc = gitlab_client
+    body = _gitlab_mr_payload(action="close")
+    resp = await ac.post(
+        "/webhook/gitlab",
+        content=body,
+        headers={
+            "X-Gitlab-Token": TEST_GITLAB_SECRET,
+            "X-Gitlab-Event": "Merge Request Hook",
+        },
+    )
+    assert resp.json()["status"] == "ignored"
+
+
+async def test_gitlab_approval_signals_workflow(gitlab_client):
+    ac, mock_tc = gitlab_client
+    mock_handle = AsyncMock()
+    mock_tc.get_workflow_handle = MagicMock(return_value=mock_handle)
+
+    body = _gitlab_mr_payload(action="approved")
+    resp = await ac.post(
+        "/webhook/gitlab",
+        content=body,
+        headers={
+            "X-Gitlab-Token": TEST_GITLAB_SECRET,
+            "X-Gitlab-Event": "Merge Request Hook",
+        },
+    )
+    assert resp.json()["status"] == "signalled"
+    assert resp.json()["decision"] == "approve"
+    mock_handle.signal.assert_called_once()
+
+
+async def test_gitlab_approval_no_workflow_returns_ignored(gitlab_client):
+    ac, mock_tc = gitlab_client
+    mock_handle = AsyncMock()
+    mock_handle.signal.side_effect = Exception("workflow not found")
+    mock_tc.get_workflow_handle = MagicMock(return_value=mock_handle)
+
+    body = _gitlab_mr_payload(action="approved")
+    resp = await ac.post(
+        "/webhook/gitlab",
+        content=body,
+        headers={
+            "X-Gitlab-Token": TEST_GITLAB_SECRET,
+            "X-Gitlab-Event": "Merge Request Hook",
+        },
+    )
+    assert resp.json()["status"] == "ignored"
+
+
+async def test_gitlab_wrong_token_returns_401(gitlab_client):
+    ac, _ = gitlab_client
+    body = _gitlab_mr_payload()
+    resp = await ac.post(
+        "/webhook/gitlab",
+        content=body,
+        headers={"X-Gitlab-Token": "wrong-token", "X-Gitlab-Event": "Merge Request Hook"},
+    )
+    assert resp.status_code == 401
+
+
+async def test_gitlab_no_secret_configured_returns_500(monkeypatch):
+    monkeypatch.delenv("GITLAB_WEBHOOK_SECRET", raising=False)
+    monkeypatch.setenv("GITHUB_WEBHOOK_SECRET", TEST_SECRET)
+
+    mock_tc = AsyncMock()
+    import api.webhook as webhook_module
+
+    monkeypatch.setattr(webhook_module, "_temporal_client", mock_tc)
+
+    from api.webhook import app
+
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as ac:
+        body = _gitlab_mr_payload()
+        resp = await ac.post(
+            "/webhook/gitlab",
+            content=body,
+            headers={"X-Gitlab-Token": "any", "X-Gitlab-Event": "Merge Request Hook"},
+        )
+    assert resp.status_code == 500

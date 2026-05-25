@@ -401,6 +401,61 @@ def test_webhook_rejects_maven_name_with_injection():
 
 
 @respx.mock
+async def test_fetch_release_age_no_timestamp():
+    """release_age returns None when docs exist but have no timestamp."""
+    respx.get(_SEARCH).mock(
+        return_value=httpx.Response(200, json={"response": {"docs": [{"v": "1.2.3"}]}})
+    )
+    env = ActivityEnvironment()
+    provider = MavenProvider()
+    result = await env.run(provider.fetch_release_age, "com.example:mylib", "1.2.3")
+    assert result.release_age_hours is None
+
+
+@respx.mock
+async def test_fetch_maintainer_no_developers():
+    """fetch_maintainer returns False when POM has no developer entries."""
+    old_url = f"{_CENTRAL}/com/example/mylib/1.0.0/mylib-1.0.0.pom"
+    new_url = f"{_CENTRAL}/com/example/mylib/1.2.3/mylib-1.2.3.pom"
+    respx.get(old_url).mock(return_value=httpx.Response(200, text=_POM_NO_SCM))
+    respx.get(new_url).mock(return_value=httpx.Response(200, text=_POM_NO_SCM))
+    env = ActivityEnvironment()
+    provider = MavenProvider()
+    result = await env.run(provider.fetch_maintainer, "com.example:mylib", "1.0.0", "1.2.3")
+    assert result.maintainer_changed is False
+
+
+def test_parse_pom_email_only_developer():
+    """_parse_pom uses email when developer has no name."""
+    pom = """<?xml version="1.0"?>
+<project>
+  <developers>
+    <developer>
+      <email>anon@example.com</email>
+    </developer>
+  </developers>
+</project>"""
+    result = _parse_pom(pom)
+    assert "anon@example.com" in result["developers"]
+
+
+@respx.mock
+async def test_fetch_release_with_github_pom(monkeypatch):
+    """fetch_release follows POM SCM URL to GitHub and returns metadata_repo when no release."""
+    import re
+
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+    pom_url = f"{_CENTRAL}/com/example/mylib/1.2.3/mylib-1.2.3.pom"
+    respx.get(pom_url).mock(return_value=httpx.Response(200, text=_SIMPLE_POM))
+    respx.get(_SEARCH).mock(return_value=httpx.Response(200, json={"response": {"docs": []}}))
+    respx.get(re.compile(r"https://api\.github\.com/.*")).mock(return_value=httpx.Response(404))
+    env = ActivityEnvironment()
+    provider = MavenProvider()
+    result = await env.run(provider.fetch_release, "com.example:mylib", "1.0.0", "1.2.3")
+    assert result.metadata_repo == "example/mylib"
+
+
+@respx.mock
 async def test_version_lineage_maven_stale():
     from activities.version_lineage import check as lineage_check
     import time

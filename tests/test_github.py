@@ -548,3 +548,82 @@ async def test_slack_channel_failure_is_non_fatal(pr, verdict, monkeypatch):
     await env.run(
         lambda: SlackWebhookChannel("https://hooks.slack.com/test").send_verdict(pr, verdict)
     )
+
+
+@respx.mock
+async def test_slack_channel_uses_gitlab_url_for_gitlab_pr(verdict):
+    """SlackWebhookChannel builds a GitLab MR URL when pr.platform == 'gitlab'."""
+    from helpers.notification import SlackWebhookChannel
+
+    gitlab_pr = PRContext(
+        repo=REPO,
+        pr_number=PR_NUM,
+        pr_author="renovate[bot]",
+        installation_id=None,
+        platform="gitlab",
+        ecosystem="pip",
+        package_name="requests",
+        old_version="2.31.0",
+        new_version="2.32.0",
+    )
+    route = respx.post("https://hooks.slack.com/test").mock(return_value=httpx.Response(200))
+    env = ActivityEnvironment()
+    await env.run(
+        lambda: SlackWebhookChannel("https://hooks.slack.com/test").send_verdict(
+            gitlab_pr, verdict
+        )
+    )
+    assert route.called
+    body = route.calls[0].request.content.decode()
+    assert "merge_requests" in body
+    assert f"!{PR_NUM}" in body
+
+
+@respx.mock
+async def test_webhook_channel_posts_json_payload(pr, verdict):
+    """WebhookChannel POSTs JSON with pr, verdict, and signals."""
+    from helpers.notification import WebhookChannel
+
+    route = respx.post("https://example.com/hook").mock(return_value=httpx.Response(200))
+    env = ActivityEnvironment()
+    await env.run(
+        lambda: WebhookChannel("https://example.com/hook").send_verdict(pr, verdict)
+    )
+    assert route.called
+    import json
+
+    body = json.loads(route.calls[0].request.content)
+    assert "pr" in body
+    assert "verdict" in body
+    assert body["signals"] is None
+
+
+@respx.mock
+async def test_webhook_channel_failure_is_non_fatal(pr, verdict):
+    """WebhookChannel swallows exceptions to avoid disrupting the workflow."""
+    from helpers.notification import WebhookChannel
+
+    respx.post("https://example.com/hook").mock(return_value=httpx.Response(503))
+    env = ActivityEnvironment()
+    # Should not raise
+    await env.run(
+        lambda: WebhookChannel("https://example.com/hook").send_verdict(pr, verdict)
+    )
+
+
+@respx.mock
+async def test_multi_channel_fans_out_to_all_channels(pr, verdict, with_pat):
+    """MultiChannel.send_verdict delivers to all configured channels."""
+    from helpers.notification import MultiChannel, PlatformCommentChannel, SlackWebhookChannel
+
+    comment_route = respx.post(f"{BASE_URL}/issues/{PR_NUM}/comments").mock(
+        return_value=httpx.Response(201, json={})
+    )
+    slack_route = respx.post("https://hooks.slack.com/test").mock(
+        return_value=httpx.Response(200)
+    )
+    ch = MultiChannel([PlatformCommentChannel(), SlackWebhookChannel("https://hooks.slack.com/test")])
+    env = ActivityEnvironment()
+    await env.run(lambda: ch.send_verdict(pr, verdict))
+    assert comment_route.called
+    assert slack_route.called

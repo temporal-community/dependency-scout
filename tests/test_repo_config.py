@@ -165,3 +165,92 @@ async def test_env_provider_selected_via_env_var(monkeypatch):
     env = ActivityEnvironment()
     result = await env.run(fetch, PR)
     assert result.auto_merge_enabled is True
+
+
+async def test_env_provider_reads_auto_merge_classifications(monkeypatch):
+    monkeypatch.setenv("TRIAGE_CONFIG_AUTO_MERGE_CLASSIFICATIONS", "green,yellow")
+    result = await EnvConfigProvider().fetch(PR)
+    assert result.auto_merge_classifications == ["green", "yellow"]
+
+
+async def test_env_provider_reads_block_classifications(monkeypatch):
+    monkeypatch.setenv("TRIAGE_CONFIG_BLOCK_CLASSIFICATIONS", "red")
+    result = await EnvConfigProvider().fetch(PR)
+    assert result.block_classifications == ["red"]
+
+
+async def test_env_provider_reads_max_new_dependencies(monkeypatch):
+    monkeypatch.setenv("TRIAGE_CONFIG_MAX_NEW_DEPENDENCIES", "5")
+    result = await EnvConfigProvider().fetch(PR)
+    assert result.max_new_dependencies == 5
+
+
+async def test_env_provider_invalid_int_falls_back_to_default(monkeypatch):
+    monkeypatch.setenv("TRIAGE_CONFIG_MIN_RELEASE_AGE_HOURS", "not-a-number")
+    result = await EnvConfigProvider().fetch(PR)
+    assert result.min_release_age_hours == RepoConfig().min_release_age_hours
+
+
+# ---------------------------------------------------------------------------
+# GitLabConfigProvider
+# ---------------------------------------------------------------------------
+
+from urllib.parse import quote as _quote
+
+_PR_GITLAB = PRContext(
+    repo="owner/repo",
+    pr_number=1,
+    pr_author="renovate[bot]",
+    installation_id=None,
+    platform="gitlab",
+    ecosystem="pip",
+    package_name="requests",
+    old_version="2.31.0",
+    new_version="2.32.0",
+)
+_GITLAB_FILE_URL = (
+    "https://gitlab.com/api/v4/projects/"
+    + _quote("owner/repo", safe="")
+    + "/repository/files/"
+    + _quote(".gitlab/triage-agent.yml", safe="")
+    + "/raw"
+)
+
+
+@respx.mock
+async def test_gitlab_config_404_returns_defaults(monkeypatch):
+    monkeypatch.setenv("GITLAB_TOKEN", "glpat_test")
+    respx.get(_GITLAB_FILE_URL).mock(return_value=httpx.Response(404))
+    env = ActivityEnvironment()
+    result = await env.run(fetch, _PR_GITLAB)
+    assert result == RepoConfig()
+
+
+@respx.mock
+async def test_gitlab_config_401_raises_non_retryable(monkeypatch):
+    from temporalio.exceptions import ApplicationError
+
+    monkeypatch.setenv("GITLAB_TOKEN", "glpat_test")
+    respx.get(_GITLAB_FILE_URL).mock(return_value=httpx.Response(401))
+    env = ActivityEnvironment()
+    with pytest.raises(ApplicationError) as exc_info:
+        await env.run(fetch, _PR_GITLAB)
+    assert exc_info.value.non_retryable is True
+
+
+@respx.mock
+async def test_gitlab_config_success(monkeypatch):
+    monkeypatch.setenv("GITLAB_TOKEN", "glpat_test")
+    yaml_text = "auto_merge_enabled: true\nreviewers: [carol]\n"
+    respx.get(_GITLAB_FILE_URL).mock(return_value=httpx.Response(200, text=yaml_text))
+    env = ActivityEnvironment()
+    result = await env.run(fetch, _PR_GITLAB)
+    assert result.auto_merge_enabled is True
+    assert result.reviewers == ["carol"]
+
+
+def test_get_config_provider_gitlab_returns_gitlab_provider():
+    from helpers.config_provider import get_config_provider, GitLabConfigProvider
+
+    result = get_config_provider("gitlab")
+    assert isinstance(result, GitLabConfigProvider)
