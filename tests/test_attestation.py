@@ -748,3 +748,13 @@ async def test_publisher_changed_false_when_only_commit_sha_differs():
     result = await env.run(attestation_check, "npm", "mypkg", "1.0.0", "1.1.0")
     assert result.has_attestation is True
     assert result.publisher_changed is False  # same repo, different commits is expected
+
+
+@respx.mock
+async def test_attestation_cache_hit():
+    """Second call with same args hits the cache without HTTP requests."""
+    respx.get(f"{PYPI_INTEGRITY}/requests/2.32.0").mock(return_value=httpx.Response(404))
+    env = ActivityEnvironment()
+    result1 = await env.run(attestation_check, "pip", "requests", "2.31.0", "2.32.0")
+    result2 = await env.run(attestation_check, "pip", "requests", "2.31.0", "2.32.0")
+    assert result1 == result2

@@ -7,6 +7,7 @@ classify() uses ActivityEnvironment + unittest.mock to avoid real LLM calls.
 
 import pytest
 import httpx
+import respx
 from unittest.mock import patch, AsyncMock, MagicMock
 from temporalio.testing import ActivityEnvironment
 from temporalio.exceptions import ApplicationError
@@ -498,3 +499,204 @@ def test_rule_based_socket_malware_takes_priority_over_install_hook(base_signals
     verdict = _rule_based(base_signals)
     assert verdict.classification == "red"
     assert any("malware" in f for f in verdict.flags)
+
+
+# ---------------------------------------------------------------------------
+# _rule_based — additional flag paths
+# ---------------------------------------------------------------------------
+
+
+def test_rule_based_lockfile_integrity_downgraded_is_yellow(base_signals):
+    base_signals.diff.lockfile_integrity_downgraded = True
+    verdict = _rule_based(base_signals)
+    assert verdict.classification == "yellow"
+    assert any("lockfile" in f or "integrity" in f for f in verdict.flags)
+
+
+def test_rule_based_young_maintainer_account_is_yellow(base_signals):
+    base_signals.maintainer.maintainer_changed = True
+    base_signals.maintainer.new_maintainer_account_age_days = 30
+    verdict = _rule_based(base_signals)
+    assert verdict.classification == "yellow"
+    assert any("30-day-old" in f for f in verdict.flags)
+
+
+def test_rule_based_ci_workflow_changed_is_yellow(base_signals):
+    from models import ReleaseChecks
+    base_signals.release = ReleaseChecks(ci_workflow_changed_days_ago=3)
+    verdict = _rule_based(base_signals)
+    assert verdict.classification == "yellow"
+    assert any("3 days ago" in f or "3 day" in f for f in verdict.flags)
+
+
+# ---------------------------------------------------------------------------
+# _build_message — custom_checks included
+# ---------------------------------------------------------------------------
+
+
+def test_build_message_includes_custom_checks(base_signals):
+    base_signals.custom_checks = {"extra_signal": "suspicious"}
+    msg = _build_message(base_signals)
+    assert "CUSTOM CHECKS" in msg
+    assert "extra_signal" in msg
+
+
+# ---------------------------------------------------------------------------
+# classify — new_dependency_count passthrough
+# ---------------------------------------------------------------------------
+
+
+async def test_classify_llm_passes_new_dependency_count_through(base_signals, monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    base_signals.diff.new_dependency_count = 3
+    mock_client = _make_llm_mock(
+        {
+            "classification": "yellow",
+            "confidence": 0.7,
+            "reasoning": "New dep.",
+            "flags": ["new dep"],
+            "new_dependency_count": 0,
+        }
+    )
+    env = ActivityEnvironment()
+    with patch("classifiers.anthropic.anthropic.AsyncAnthropic", return_value=mock_client):
+        verdict = await env.run(classify, base_signals)
+    assert verdict.new_dependency_count == 3
+
+
+# ---------------------------------------------------------------------------
+# OpenAI classifier
+# ---------------------------------------------------------------------------
+
+
+async def test_openai_classifier_no_model_falls_back(base_signals, monkeypatch):
+    from classifiers import OpenAIClassifier
+
+    monkeypatch.delenv("OPENAI_MODEL", raising=False)
+    verdict = await OpenAIClassifier().classify(base_signals)
+    assert verdict.classification in ("green", "yellow", "red")
+    assert "[rule-based]" in verdict.reasoning
+
+
+@respx.mock
+async def test_openai_classifier_success(base_signals, monkeypatch):
+    import json
+    from classifiers import OpenAIClassifier
+
+    monkeypatch.setenv("OPENAI_MODEL", "gpt-4o")
+    tool_call = {
+        "function": {
+            "arguments": json.dumps(
+                {"classification": "green", "confidence": 0.9, "reasoning": "OK.", "flags": []}
+            )
+        }
+    }
+    respx.post("https://api.openai.com/v1/chat/completions").mock(
+        return_value=httpx.Response(
+            200,
+            json={"choices": [{"message": {"tool_calls": [tool_call]}}]},
+        )
+    )
+    verdict = await OpenAIClassifier().classify(base_signals)
+    assert verdict.classification == "green"
+
+
+@respx.mock
+async def test_openai_classifier_exception_falls_back(base_signals, monkeypatch):
+    from classifiers import OpenAIClassifier
+
+    monkeypatch.setenv("OPENAI_MODEL", "gpt-4o")
+    respx.post("https://api.openai.com/v1/chat/completions").mock(
+        side_effect=httpx.ConnectError("openai down")
+    )
+    verdict = await OpenAIClassifier().classify(base_signals)
+    assert verdict.classification in ("green", "yellow", "red")
+    assert "[rule-based]" in verdict.reasoning
+
+
+# ---------------------------------------------------------------------------
+# Ollama classifier
+# ---------------------------------------------------------------------------
+
+
+@respx.mock
+async def test_ollama_classifier_success(base_signals, monkeypatch):
+    import json
+    from classifiers import OllamaClassifier
+
+    monkeypatch.setenv("OLLAMA_MODEL", "llama3")
+    respx.post("http://localhost:11434/api/chat").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "message": {
+                    "content": json.dumps(
+                        {"classification": "green", "confidence": 0.85, "reasoning": "OK.", "flags": []}
+                    )
+                }
+            },
+        )
+    )
+    verdict = await OllamaClassifier().classify(base_signals)
+    assert verdict.classification == "green"
+
+
+@respx.mock
+async def test_ollama_classifier_exception_falls_back(base_signals, monkeypatch):
+    from classifiers import OllamaClassifier
+
+    monkeypatch.setenv("OLLAMA_MODEL", "llama3")
+    respx.post("http://localhost:11434/api/chat").mock(
+        side_effect=httpx.ConnectError("ollama down")
+    )
+    verdict = await OllamaClassifier().classify(base_signals)
+    assert verdict.classification in ("green", "yellow", "red")
+    assert "[rule-based]" in verdict.reasoning
+
+
+# ---------------------------------------------------------------------------
+# get_classifier — entry point exception and explicit built-in name
+# ---------------------------------------------------------------------------
+
+
+def test_get_classifier_entry_point_exception_falls_through(monkeypatch):
+    from classifiers import get_classifier, RuleBasedClassifier
+    from unittest.mock import patch, MagicMock
+
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setenv("CLASSIFIER", "rule_based")
+
+    bad_ep = MagicMock()
+    bad_ep.name = "rule_based"
+    bad_ep.load.side_effect = ImportError("broken")
+
+    with patch("classifiers.entry_points", return_value=[bad_ep]):
+        clf = get_classifier()
+
+    assert isinstance(clf, RuleBasedClassifier)
+
+
+# ---------------------------------------------------------------------------
+# helpers/cache.py — TTL expiry and __len__
+# ---------------------------------------------------------------------------
+
+
+def test_cache_ttl_expiry():
+    import time
+    from helpers.cache import ActivityCache
+
+    cache = ActivityCache(ttl_seconds=0.001)
+    cache.set(("key",), "value")
+    time.sleep(0.05)
+    assert cache.get(("key",)) is None
+
+
+def test_cache_len():
+    from helpers.cache import ActivityCache
+
+    cache = ActivityCache()
+    assert len(cache) == 0
+    cache.set(("a",), 1)
+    assert len(cache) == 1
+    cache.set(("b",), 2)
+    assert len(cache) == 2

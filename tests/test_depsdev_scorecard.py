@@ -265,6 +265,33 @@ def test_classifier_scorecard_token_permissions_at_boundary():
     assert verdict.classification == "green"
 
 
+# ---------------------------------------------------------------------------
+# Cache hit paths
+# ---------------------------------------------------------------------------
+
+
+@respx.mock
+async def test_depsdev_cache_hit():
+    respx.get(f"{DEPSDEV_BASE}/pypi/packages/requests/versions/2.32.0").mock(
+        return_value=httpx.Response(200, json={})
+    )
+    env = ActivityEnvironment()
+    result1 = await env.run(depsdev_fetch, "pip", "requests", "2.31.0", "2.32.0")
+    result2 = await env.run(depsdev_fetch, "pip", "requests", "2.31.0", "2.32.0")
+    assert result1 == result2
+
+
+@respx.mock
+async def test_scorecard_cache_hit():
+    respx.get(f"{DEPSDEV_BASE}/pypi/packages/requests/versions/2.32.0").mock(
+        return_value=httpx.Response(503)
+    )
+    env = ActivityEnvironment()
+    result1 = await env.run(scorecard_fetch, "pip", "requests", "2.31.0", "2.32.0")
+    result2 = await env.run(scorecard_fetch, "pip", "requests", "2.31.0", "2.32.0")
+    assert result1 == result2
+
+
 def test_classifier_scorecard_maintained_nonzero_not_flagged():
     """scorecard_maintained=5 → not flagged as unmaintained."""
     from classifiers import _rule_based

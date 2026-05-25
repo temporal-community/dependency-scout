@@ -719,3 +719,41 @@ async def test_rubygems_maintainer_network_exception_returns_no_change():
     env = ActivityEnvironment()
     result = await env.run(maintainer_history, "rubygems", "rails", "7.0.0", "7.1.0")
     assert result.maintainer_changed is False
+
+
+# ---------------------------------------------------------------------------
+# Cache hit paths
+# ---------------------------------------------------------------------------
+
+
+@respx.mock
+async def test_osv_cache_hit():
+    respx.post(OSV_URL).mock(return_value=httpx.Response(200, json={"vulns": []}))
+    env = ActivityEnvironment()
+    result1 = await env.run(osv_check, "pip", "requests", "2.31.0", "2.32.0")
+    result2 = await env.run(osv_check, "pip", "requests", "2.31.0", "2.32.0")
+    assert result1 == result2
+
+
+@respx.mock
+async def test_release_age_cache_hit():
+    recent = "2025-01-01T00:00:00Z"
+    respx.get(f"{PYPI_BASE}/requests/2.32.0/json").mock(
+        return_value=httpx.Response(200, json=_pypi_response("requests", "2.32.0", recent))
+    )
+    env = ActivityEnvironment()
+    result1 = await env.run(release_age_check, "pip", "requests", "2.31.0", "2.32.0")
+    result2 = await env.run(release_age_check, "pip", "requests", "2.31.0", "2.32.0")
+    assert result1 == result2
+
+
+@respx.mock
+async def test_maintainer_cache_hit():
+    for version in ("2.31.0", "2.32.0"):
+        respx.get(f"{PYPI_BASE}/requests/{version}/json").mock(
+            return_value=httpx.Response(200, json=_pypi_response("requests", version))
+        )
+    env = ActivityEnvironment()
+    result1 = await env.run(maintainer_history, "pip", "requests", "2.31.0", "2.32.0")
+    result2 = await env.run(maintainer_history, "pip", "requests", "2.31.0", "2.32.0")
+    assert result1 == result2

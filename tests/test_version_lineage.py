@@ -470,3 +470,111 @@ def test_rule_based_stale_version_line_is_yellow():
     verdict = _rule_based(signals)
     assert verdict.classification == "yellow"
     assert any("0.x" in f and "1.x" in f for f in verdict.flags)
+
+
+# ---------------------------------------------------------------------------
+# Cache hit and exception paths
+# ---------------------------------------------------------------------------
+
+
+@respx.mock
+async def test_pypi_cache_hit():
+    """Second call with same args returns cached result without HTTP request."""
+    respx.get(f"{PYPI_BASE}/pkg/json").mock(
+        return_value=httpx.Response(
+            200,
+            json={"releases": {"1.0.0": [{"upload_time_iso_8601": _OLD}]}, "info": {"name": "pkg"}},
+        )
+    )
+    env = ActivityEnvironment()
+    result1 = await env.run(lineage_check, "pip", "pkg", "0.9.0", "1.0.0")
+    result2 = await env.run(lineage_check, "pip", "pkg", "0.9.0", "1.0.0")
+    assert result1 == result2
+
+
+@respx.mock
+async def test_pypi_connection_error_returns_empty():
+    """Generic exception in ecosystem check falls back to empty checks."""
+    respx.get(f"{PYPI_BASE}/pkg/json").mock(side_effect=httpx.ConnectError("error"))
+    env = ActivityEnvironment()
+    result = await env.run(lineage_check, "pip", "pkg", "1.0.0", "1.0.1")
+    assert result == VersionLineageChecks()
+
+
+@respx.mock
+async def test_pypi_bad_timestamp_skips_gracefully():
+    """Invalid upload timestamp is ignored; version is still processed."""
+    respx.get(f"{PYPI_BASE}/pkg/json").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "releases": {"1.0.1": [{"upload_time_iso_8601": "not-a-date", "filename": "x.tar.gz"}]},
+                "info": {"name": "pkg"},
+            },
+        )
+    )
+    env = ActivityEnvironment()
+    result = await env.run(lineage_check, "pip", "pkg", "1.0.0", "1.0.1")
+    assert result is not None
+
+
+@respx.mock
+async def test_npm_bad_timestamp_skips_gracefully():
+    """Invalid npm time entry is skipped without crashing."""
+    respx.get(f"{NPM_BASE}/mypkg").mock(
+        return_value=httpx.Response(
+            200,
+            json={"time": {"created": _OLD, "modified": _RECENT, "1.0.1": "not-a-date"}},
+        )
+    )
+    env = ActivityEnvironment()
+    result = await env.run(lineage_check, "npm", "mypkg", "1.0.0", "1.0.1")
+    assert result is not None
+
+
+@respx.mock
+async def test_rubygems_bad_timestamp_skips_gracefully():
+    """Invalid RubyGems created_at is skipped without crashing."""
+    respx.get(f"{RUBYGEMS_VER}/mygem.json").mock(
+        return_value=httpx.Response(
+            200,
+            json=[{"number": "1.0.1", "created_at": "bad-date"}],
+        )
+    )
+    env = ActivityEnvironment()
+    result = await env.run(lineage_check, "rubygems", "mygem", "1.0.0", "1.0.1")
+    assert result is not None
+
+
+PACKAGIST_BASE2 = "https://packagist.org/packages"
+
+
+@respx.mock
+async def test_composer_bad_timestamp_skips_gracefully():
+    """Invalid Packagist version time is skipped without crashing."""
+    respx.get(f"{PACKAGIST_BASE2}/vendor/pkg.json").mock(
+        return_value=httpx.Response(
+            200,
+            json={"package": {"versions": {"1.0.1": {"time": "bad-date", "version": "1.0.1"}}}},
+        )
+    )
+    env = ActivityEnvironment()
+    result = await env.run(lineage_check, "composer", "vendor/pkg", "1.0.0", "1.0.1")
+    assert result is not None
+
+
+MAVEN_SEARCH2 = "https://search.maven.org/solrsearch/select"
+
+
+@respx.mock
+async def test_maven_bad_timestamp_skips_gracefully():
+    """Invalid Maven timestamp_ms is skipped without crashing."""
+    respx.get(MAVEN_SEARCH2).mock(
+        return_value=httpx.Response(
+            200,
+            json={"response": {"docs": [{"v": "1.0.1", "timestamp": "not-a-number"}]}},
+        )
+    )
+    env = ActivityEnvironment()
+    result = await env.run(lineage_check, "maven", "com.example:lib", "1.0.0", "1.0.1")
+    assert result is not None

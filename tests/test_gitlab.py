@@ -17,7 +17,7 @@ from temporalio.exceptions import ApplicationError
 from temporalio.testing import ActivityEnvironment
 
 from platforms.gitlab import GitLabPlatformClient, _is_ci_infra_file
-from models import PRContext, PRFilesChecks as PRFilesSignals, Verdict
+from models import PRContext, PRFilesChecks, Verdict
 
 REPO = "owner/repo"
 PR_NUM = 42
@@ -341,7 +341,7 @@ async def test_label_puts_add_labels(client, pr, with_token):
 async def test_check_pr_files_dry_run_returns_empty(client, pr, dry_run):
     env = ActivityEnvironment()
     result = await env.run(client.check_pr_files, pr)
-    assert result == PRFilesSignals()
+    assert result == PRFilesChecks()
     assert result.unexpected_files == []
 
 

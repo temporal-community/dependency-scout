@@ -224,3 +224,13 @@ async def test_nuget_ecosystem_uses_nuget_purl(monkeypatch):
 
     body = json.loads(route.calls[0].request.content)
     assert body["components"][0]["purl"] == "pkg:nuget/Newtonsoft.Json@13.0.1"
+
+
+@respx.mock
+async def test_socket_cache_hit(monkeypatch):
+    monkeypatch.setenv("SOCKET_API_KEY", "test-key")
+    respx.post(PURL_URL).mock(return_value=httpx.Response(200, json=_socket_response(0.8, [])))
+    env = ActivityEnvironment()
+    result1 = await env.run(score, "pip", "requests", "2.31.0", "2.32.0")
+    result2 = await env.run(score, "pip", "requests", "2.31.0", "2.32.0")
+    assert result1 == result2

@@ -1,8 +1,8 @@
 """
-Tests for shared utility functions in activities/ecosystems/__init__.py.
+Tests for shared utility functions in ecosystems/__init__.py.
 
 Covers: parse_vcs_repo, fetch_vcs_release, fetch_vcs_tag_signature,
-build_release_signals, fetch_vcs_account_age, detect_stale_version_line,
+build_release_checks, fetch_vcs_account_age, detect_stale_version_line,
 and registry helpers (get_provider, get_dependabot_slug_map, get_name_re).
 """
 
@@ -16,15 +16,19 @@ import httpx
 import pytest
 import respx
 
+import base64
+
 from ecosystems import (
-    build_release_checks as build_release_signals,
+    build_release_checks,
     detect_stale_version_line,
     fetch_vcs_account_age,
+    fetch_vcs_ci_workflow_changes,
+    fetch_vcs_file_at_tag,
     fetch_vcs_release,
     fetch_vcs_tag_signature,
     parse_vcs_repo,
 )
-from models import VersionLineageChecks as VersionLineSignals
+from models import VersionLineageChecks
 
 # ---------------------------------------------------------------------------
 # parse_vcs_repo
@@ -75,12 +79,12 @@ def test_parse_vcs_repo_empty_string():
 
 def test_detect_stale_version_line_non_numeric_new_version():
     result = detect_stale_version_line(["1.0.0", "1.1.0"], "not-a-version")
-    assert result == VersionLineSignals()
+    assert result == VersionLineageChecks()
 
 
 def test_detect_stale_version_line_no_stable_versions():
     result = detect_stale_version_line(["1.0.0-alpha", "1.0.0-rc1"], "1.0.0-beta")
-    assert result == VersionLineSignals()
+    assert result == VersionLineageChecks()
 
 
 # ---------------------------------------------------------------------------
@@ -251,11 +255,11 @@ async def test_fetch_tag_signature_compat_alias():
 
 
 # ---------------------------------------------------------------------------
-# build_release_signals — exception paths
+# build_release_checks — exception paths
 # ---------------------------------------------------------------------------
 
 
-def test_build_release_signals_invalid_skew_date_caught():
+def test_build_release_checks_invalid_skew_date_caught():
     release = {
         "created_at": "not-a-valid-datetime",
         "published_at": "also-invalid",
@@ -263,31 +267,31 @@ def test_build_release_signals_invalid_skew_date_caught():
         "author": {"login": "alice"},
     }
     registry_time = datetime.now(timezone.utc)
-    result = build_release_signals(release, registry_time=registry_time)
+    result = build_release_checks(release, registry_time=registry_time)
     assert result.timestamp_skew_minutes is None
     assert result.github_release_exists is True
 
 
-def test_build_release_signals_invalid_published_at_caught():
+def test_build_release_checks_invalid_published_at_caught():
     release = {
         "created_at": "2024-01-15T12:00:00Z",
         "published_at": "not-a-valid-date",  # different from created_at
         "body": "",
         "author": {"login": "alice"},
     }
-    result = build_release_signals(release)
+    result = build_release_checks(release)
     assert result.possible_rerelease is False
     assert result.github_release_exists is True
 
 
-def test_build_release_signals_bot_author_is_automated():
+def test_build_release_checks_bot_author_is_automated():
     release = {
         "created_at": "2024-01-15T12:00:00Z",
         "published_at": "2024-01-15T12:00:00Z",
         "body": "",
         "author": {"login": "github-actions[bot]"},
     }
-    result = build_release_signals(release)
+    result = build_release_checks(release)
     assert result.release_is_automated is True
 
 
@@ -336,3 +340,210 @@ async def test_fetch_github_account_age_compat_alias(monkeypatch):
 
     result = await fetch_github_account_age("owner")
     assert result is None
+
+
+@respx.mock
+async def test_fetch_vcs_account_age_github_exception(monkeypatch):
+    monkeypatch.setenv("GITHUB_TOKEN", "tok")
+    respx.get("https://api.github.com/users/owner").mock(
+        side_effect=httpx.ConnectError("error")
+    )
+    result = await fetch_vcs_account_age("github", "owner")
+    assert result is None
+
+
+@respx.mock
+async def test_fetch_vcs_account_age_gitlab_exception(monkeypatch):
+    monkeypatch.setenv("GITLAB_TOKEN", "tok")
+    respx.get("https://gitlab.com/api/v4/users").mock(
+        side_effect=httpx.ConnectError("error")
+    )
+    result = await fetch_vcs_account_age("gitlab", "owner")
+    assert result is None
+
+
+@respx.mock
+async def test_fetch_vcs_release_github_exception(monkeypatch):
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+    respx.get(re.compile(r"https://api\.github\.com/.*")).mock(
+        side_effect=httpx.ConnectError("error")
+    )
+    result = await fetch_vcs_release("github", "owner", "repo", "1.0.0", None)
+    assert result is None
+
+
+@respx.mock
+async def test_fetch_github_release_compat_alias(monkeypatch):
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+    from ecosystems import fetch_github_release
+
+    respx.get(re.compile(r"https://api\.github\.com/.*")).mock(
+        return_value=httpx.Response(404)
+    )
+    result = await fetch_github_release("owner", "repo", "1.0.0", None)
+    assert result is None
+
+
+# ---------------------------------------------------------------------------
+# fetch_vcs_ci_workflow_changes
+# ---------------------------------------------------------------------------
+
+
+async def test_ci_workflow_non_github_returns_none():
+    result = await fetch_vcs_ci_workflow_changes("gitlab", "owner", "repo")
+    assert result is None
+
+
+async def test_ci_workflow_no_token_returns_none(monkeypatch):
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+    result = await fetch_vcs_ci_workflow_changes("github", "owner", "repo")
+    assert result is None
+
+
+@respx.mock
+async def test_ci_workflow_non_200_returns_none(monkeypatch):
+    monkeypatch.setenv("GITHUB_TOKEN", "tok")
+    respx.get("https://api.github.com/repos/owner/repo/commits").mock(
+        return_value=httpx.Response(503)
+    )
+    result = await fetch_vcs_ci_workflow_changes("github", "owner", "repo")
+    assert result is None
+
+
+@respx.mock
+async def test_ci_workflow_empty_commits_returns_none(monkeypatch):
+    monkeypatch.setenv("GITHUB_TOKEN", "tok")
+    respx.get("https://api.github.com/repos/owner/repo/commits").mock(
+        return_value=httpx.Response(200, json=[])
+    )
+    result = await fetch_vcs_ci_workflow_changes("github", "owner", "repo")
+    assert result is None
+
+
+@respx.mock
+async def test_ci_workflow_no_date_returns_none(monkeypatch):
+    monkeypatch.setenv("GITHUB_TOKEN", "tok")
+    respx.get("https://api.github.com/repos/owner/repo/commits").mock(
+        return_value=httpx.Response(200, json=[{"commit": {"committer": {}}}])
+    )
+    result = await fetch_vcs_ci_workflow_changes("github", "owner", "repo")
+    assert result is None
+
+
+@respx.mock
+async def test_ci_workflow_success_returns_days(monkeypatch):
+    monkeypatch.setenv("GITHUB_TOKEN", "tok")
+    from datetime import datetime, timezone
+    recent_date = (datetime.now(timezone.utc).replace(microsecond=0)).isoformat()
+    respx.get("https://api.github.com/repos/owner/repo/commits").mock(
+        return_value=httpx.Response(
+            200,
+            json=[{"commit": {"committer": {"date": recent_date}}}],
+        )
+    )
+    result = await fetch_vcs_ci_workflow_changes("github", "owner", "repo")
+    assert result is not None
+    assert result >= 0
+
+
+@respx.mock
+async def test_ci_workflow_exception_returns_none(monkeypatch):
+    monkeypatch.setenv("GITHUB_TOKEN", "tok")
+    respx.get("https://api.github.com/repos/owner/repo/commits").mock(
+        side_effect=httpx.ConnectError("error")
+    )
+    result = await fetch_vcs_ci_workflow_changes("github", "owner", "repo")
+    assert result is None
+
+
+# ---------------------------------------------------------------------------
+# fetch_vcs_file_at_tag
+# ---------------------------------------------------------------------------
+
+
+async def test_file_at_tag_non_github_returns_none():
+    result = await fetch_vcs_file_at_tag("gitlab", "owner", "repo", "1.0.0", "README.md", None)
+    assert result is None
+
+
+@respx.mock
+async def test_file_at_tag_success():
+    encoded = base64.b64encode(b"hello world").decode()
+    respx.get(re.compile(r"https://api\.github\.com/repos/owner/repo/contents/.*")).mock(
+        return_value=httpx.Response(
+            200,
+            json={"encoding": "base64", "content": encoded + "\n"},
+        )
+    )
+    result = await fetch_vcs_file_at_tag("github", "owner", "repo", "1.0.0", "README.md", "mytoken")
+    assert result == "hello world"
+
+
+@respx.mock
+async def test_file_at_tag_all_404_returns_none():
+    respx.get(re.compile(r"https://api\.github\.com/repos/owner/repo/contents/.*")).mock(
+        return_value=httpx.Response(404)
+    )
+    result = await fetch_vcs_file_at_tag("github", "owner", "repo", "1.0.0", "README.md", None)
+    assert result is None
+
+
+@respx.mock
+async def test_file_at_tag_exception_returns_none():
+    respx.get(re.compile(r"https://api\.github\.com/repos/owner/repo/contents/.*")).mock(
+        side_effect=httpx.ConnectError("error")
+    )
+    result = await fetch_vcs_file_at_tag("github", "owner", "repo", "1.0.0", "README.md", None)
+    assert result is None
+
+
+# ---------------------------------------------------------------------------
+# platforms/__init__.py fallback paths
+# ---------------------------------------------------------------------------
+
+
+def test_get_platform_client_github_fallback():
+    from unittest.mock import patch
+    from platforms import get_platform_client
+    from platforms.github import GitHubPlatformClient
+    from models import PRContext
+
+    pr = PRContext(
+        repo="owner/repo", pr_number=1, pr_author="dependabot[bot]",
+        installation_id=None, platform="github", ecosystem="pip",
+        package_name="requests", old_version="1.0.0", new_version="2.0.0",
+    )
+    with patch("importlib.metadata.entry_points", return_value=[]):
+        client = get_platform_client(pr)
+    assert isinstance(client, GitHubPlatformClient)
+
+
+def test_get_platform_client_gitlab_fallback():
+    from unittest.mock import patch
+    from platforms import get_platform_client
+    from platforms.gitlab import GitLabPlatformClient
+    from models import PRContext
+
+    pr = PRContext(
+        repo="owner/repo", pr_number=1, pr_author="renovate[bot]",
+        installation_id=None, platform="gitlab", ecosystem="pip",
+        package_name="requests", old_version="1.0.0", new_version="2.0.0",
+    )
+    with patch("importlib.metadata.entry_points", return_value=[]):
+        client = get_platform_client(pr)
+    assert isinstance(client, GitLabPlatformClient)
+
+
+def test_get_platform_client_entry_point_exception_falls_through():
+    from unittest.mock import patch
+    from platforms import get_platform_client
+    from models import PRContext
+
+    pr = PRContext(
+        repo="owner/repo", pr_number=1, pr_author="dependabot[bot]",
+        installation_id=None, platform="github", ecosystem="pip",
+        package_name="requests", old_version="1.0.0", new_version="2.0.0",
+    )
+    with patch("importlib.metadata.entry_points", side_effect=ImportError("broken")):
+        client = get_platform_client(pr)
+    assert client is not None
