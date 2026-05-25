@@ -69,6 +69,29 @@ async def check(ecosystem: str, package: str, old_version: str, new_version: str
 
 The activity name string is what the workflow references. It must match exactly.
 
+**Caching** — add an `ActivityCache` to avoid redundant network calls when multiple repos bump the same package simultaneously:
+
+```python
+from helpers.cache import ActivityCache, INDEFINITE
+
+# Pick a TTL that matches how often the data can legitimately change:
+_cache = ActivityCache()                     # immutable (archive contents, provenance, upload timestamps)
+_cache = ActivityCache(ttl_seconds=3600)     # can change, but rarely within an hour (CVEs, scores)
+_cache = ActivityCache(ttl_seconds=86400)    # changes slowly (deprecation, repo health)
+
+@activity.defn(name="activities.my_new_signal.check")
+async def check(ecosystem, package, old_version, new_version):
+    key = (ecosystem, package, new_version)  # omit old_version if it doesn't affect the result
+    if (hit := _cache.get(key)) is not None:
+        activity.logger.debug("my_new_signal cache hit: %s %s", package, new_version)
+        return hit
+    result = await _fetch(...)
+    _cache.set(key, result)   # only cache successful results — don't cache degraded defaults
+    return result
+```
+
+Tests are isolated automatically — a `conftest.py` fixture clears all caches before and after each test, so you don't need to worry about cache state leaking between tests.
+
 **Step 3 — Add to `_SIGNAL_REGISTRY` in `workflows/package_triage_workflow.py`**
 
 **Append** a row to `_SIGNAL_REGISTRY` — do not insert mid-list, as this changes Temporal's command sequence and breaks replay of existing histories:
