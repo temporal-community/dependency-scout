@@ -1,6 +1,6 @@
 # Ecosystem Providers
 
-Each ecosystem provider translates a package registry's APIs into the seven signal methods that `PackageTriageWorkflow` uses to produce a triage verdict.
+Each ecosystem provider translates a package registry's APIs into the seven checks that `PackageTriageWorkflow` uses to produce a triage verdict.
 
 ## Coverage
 
@@ -17,7 +17,7 @@ Each ecosystem provider translates a package registry's APIs into the seven sign
 
 All eight providers implement all seven signal methods. "No" in the attestation column means the registry simply doesn't support build-origin verification yet — it's not a red flag for packages on those registries.
 
-## Signal methods
+## Checks
 
 Each provider must implement:
 
