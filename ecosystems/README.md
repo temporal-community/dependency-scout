@@ -4,18 +4,18 @@ Each ecosystem provider translates a package registry's APIs into the seven sign
 
 ## Coverage
 
-| Ecosystem | `ecosystem_name` | Language(s) | Registry | Build-origin verified? | Notes |
+| Ecosystem | `ecosystem_name` | Language(s) | Registry | Build-origin verified? (attestation) | Notes |
 |---|---|---|---|---|---|
-| pip (PyPI) | `pip` | Python | pypi.org | Yes | Registry can prove the package was built by a specific CI pipeline, not uploaded manually |
-| npm | `npm` | JavaScript / TypeScript / Node.js | registry.npmjs.org | Yes | Same build-origin verification as pip |
-| Cargo | `cargo` | Rust | crates.io | No | |
-| RubyGems | `rubygems` | Ruby | rubygems.org | No | Archive is nested `.gem` → `data.tar.gz` |
-| Go modules | `go` | Go | proxy.golang.org | No | GOPROXY URL encoding (`!` escaping for uppercase) |
-| Maven | `maven` | Java / Kotlin / Scala / JVM | repo1.maven.org | No | Coordinate format: `groupId:artifactId` |
-| NuGet | `nuget` | C# / .NET / F# | api.nuget.org | No | Registration pages may be paginated |
-| Composer | `composer` | PHP | packagist.org | No | Archives fetched from GitHub codeload |
+| pip (PyPI) | `pip` | Python | [pypi.org](https://pypi.org) | Yes — via [Sigstore](https://www.sigstore.dev) | Registry can prove the package was built by a specific CI pipeline, not uploaded manually |
+| npm | `npm` | JavaScript / TypeScript / Node.js | [npmjs.com](https://www.npmjs.com) | Yes — via [Sigstore](https://www.sigstore.dev) | Same build-origin verification as pip |
+| Cargo | `cargo` | Rust | [crates.io](https://crates.io) | No | |
+| RubyGems | `rubygems` | Ruby | [rubygems.org](https://rubygems.org) | No | Archive is nested `.gem` → `data.tar.gz` |
+| Go modules | `go` | Go | [pkg.go.dev](https://pkg.go.dev) | No | GOPROXY URL encoding (`!` escaping for uppercase) |
+| Maven | `maven` | Java / Kotlin / Scala / JVM | [search.maven.org](https://search.maven.org) | No | Coordinate format: `groupId:artifactId` |
+| NuGet | `nuget` | C# / .NET / F# | [nuget.org](https://www.nuget.org) | No | Registration pages may be paginated |
+| Composer | `composer` | PHP | [packagist.org](https://packagist.org) | No | Archives fetched from GitHub codeload |
 
-All eight providers implement all seven signal methods. "Build-origin verified: No" means `fetch_attestations` returns `AttestationChecks(has_attestation=False)` — the registry simply doesn't support this yet, it's not a red flag.
+All eight providers implement all seven signal methods. "No" in the attestation column means the registry simply doesn't support build-origin verification yet — it's not a red flag for packages on those registries.
 
 ## Signal methods
 
