@@ -288,7 +288,7 @@ Select it with `CLASSIFIER=gemini` in `.env`.
 Per-repo custom checks can be added without writing a plugin package. Any Temporal activity registered with the worker can be listed in `.github/triage-agent.yml`:
 
 ```yaml
-extra_signal_activities:
+extra_check_activities:
   - my_company.internal_vuln_db.check
 ```
 

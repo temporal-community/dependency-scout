@@ -13,7 +13,7 @@ from activities.attestation import check as attestation_check
 from models import (
     AttestationChecks,
     PackageChecks,
-    DiffChecks,
+    PackageDiffChecks,
     ReleaseAgeChecks,
     ReleaseChecks,
 )
@@ -449,7 +449,7 @@ def test_rule_based_classifier_install_script_added_is_red():
         package_name="mypkg",
         old_version="1.0.0",
         new_version="1.0.1",
-        diff=DiffChecks(diff_summary="+ setup.py", diff_size_bytes=100, install_script_added=True),
+        diff=PackageDiffChecks(diff_summary="+ setup.py", diff_size_bytes=100, install_script_added=True),
     )
     verdict = _rule_based(signals)
     assert verdict.classification == "red"
@@ -465,7 +465,7 @@ def test_rule_based_classifier_install_script_changed_is_yellow():
         old_version="1.0.0",
         new_version="1.0.1",
         age=ReleaseAgeChecks(release_age_hours=300.0),
-        diff=DiffChecks(
+        diff=PackageDiffChecks(
             diff_summary="--- setup.py\n+++ setup.py\n-version='1.0.0'\n+version='1.0.1'",
             diff_size_bytes=100,
             install_script_changed=True,

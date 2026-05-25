@@ -256,7 +256,7 @@ drupal_check = "dependency_scout_drupal.activities:check"
 To invoke it, the target repo adds the activity name to `.github/dependency-scout.yml`:
 
 ```yaml
-extra_signal_activities:
+extra_check_activities:
   - "dependency_scout_drupal.activities:check"
 ```
 

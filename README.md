@@ -170,7 +170,7 @@ A ready-to-copy template is at [`.github/dependency-scout.yml.example`](.github/
 | `reviewers` | `[]` | GitHub usernames to request review on YELLOW verdicts |
 | `block_classifications` | `["red"]` | Close the PR and add a label for these verdicts |
 | `max_new_dependencies` | `5` | Flag as YELLOW when a bump adds more than this many new direct deps |
-| `extra_signal_activities` | `[]` | Additional Temporal activity names to call (for ecosystem plugins) |
+| `extra_check_activities` | `[]` | Additional Temporal activity names to call (for ecosystem plugins) |
 
 **Minimal "just auto-merge safe stuff" config:**
 
@@ -244,7 +244,7 @@ Everything that varies between deployments is pluggable via Python entry points 
 |---|---|---|
 | New package ecosystem | `dependency_scout.ecosystems` | Implement `EcosystemProvider`, or use `RemoteEcosystemProvider` for non-Python stacks |
 | Custom classifier (OpenAI, Gemini, …) | `dependency_scout.classifiers` | Implement `async def classify(checks) -> Verdict`, set `CLASSIFIER=name` |
-| Extra check activities | `dependency_scout.activities` | Decorate with `@activity.defn`, list in `extra_signal_activities` config |
+| Extra check activities | `dependency_scout.activities` | Decorate with `@activity.defn`, list in `extra_check_activities` config |
 | New dependency bot (PyUp, etc.) | call `register_bot_parser()` | Implement `BotParser` with `bot_logins` and `parse()` |
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for full examples of each.

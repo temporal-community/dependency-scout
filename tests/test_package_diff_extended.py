@@ -25,7 +25,7 @@ import ecosystems as ecosystems_module
 import activities.package_diff as pkg_diff_module
 from ecosystems import safe_zip_extractall as _safe_zip_extractall
 from ecosystems import validate_archive_url as _validate_archive_url
-from models import PackageChecks, DiffChecks, ReleaseAgeChecks
+from models import PackageChecks, PackageDiffChecks, ReleaseAgeChecks
 from activities.package_diff import (
     _SUSPICIOUS_PACKAGE_FILES,
     _SUSPICIOUS_PACKAGE_PREFIXES,
@@ -963,7 +963,7 @@ def test_classifier_flags_large_dep_increase():
         old_version="1.0.0",
         new_version="1.1.0",
         age=ReleaseAgeChecks(release_age_hours=500.0),
-        diff=DiffChecks(
+        diff=PackageDiffChecks(
             diff_summary="package.json changed", diff_size_bytes=200, new_dependency_count=5
         ),
     )
@@ -981,7 +981,7 @@ def test_classifier_no_flag_for_small_dep_increase():
         old_version="1.0.0",
         new_version="1.1.0",
         age=ReleaseAgeChecks(release_age_hours=500.0),
-        diff=DiffChecks(
+        diff=PackageDiffChecks(
             diff_summary="[no significant changes]", diff_size_bytes=0, new_dependency_count=2
         ),
     )
@@ -991,10 +991,10 @@ def test_classifier_no_flag_for_small_dep_increase():
 
 
 def test_compute_returns_new_dependency_count_field():
-    """DiffChecks has new_dependency_count defaulting to 0."""
-    from models import DiffChecks
+    """PackageDiffChecks has new_dependency_count defaulting to 0."""
+    from models import PackageDiffChecks
 
-    sig = DiffChecks(diff_summary="ok", diff_size_bytes=10, new_dependency_count=4)
+    sig = PackageDiffChecks(diff_summary="ok", diff_size_bytes=10, new_dependency_count=4)
     assert sig.new_dependency_count == 4
 
 
@@ -1124,7 +1124,7 @@ def test_classifier_flags_network_calls_in_lib():
         old_version="1.0.0",
         new_version="1.1.0",
         age=ReleaseAgeChecks(release_age_hours=500.0),
-        diff=DiffChecks(
+        diff=PackageDiffChecks(
             diff_summary="lib/reporter.rb changed",
             diff_size_bytes=200,
             network_calls_in_lib=True,
@@ -1217,7 +1217,7 @@ def test_classifier_flags_binary_data_added():
         old_version="1.0.0",
         new_version="1.1.0",
         age=ReleaseAgeChecks(release_age_hours=500.0),
-        diff=DiffChecks(
+        diff=PackageDiffChecks(
             diff_summary="lib/result.txt added",
             diff_size_bytes=200,
             binary_data_added=True,
@@ -1338,7 +1338,7 @@ def test_classifier_flags_git_url_dependency():
         old_version="1.0.0",
         new_version="1.1.0",
         age=ReleaseAgeChecks(release_age_hours=500.0),
-        diff=DiffChecks(
+        diff=PackageDiffChecks(
             diff_summary="package.json changed",
             diff_size_bytes=100,
             git_url_dependency_added=True,
@@ -1452,7 +1452,7 @@ def test_classifier_flags_obfuscated_code():
         old_version="1.0.0",
         new_version="1.1.0",
         age=ReleaseAgeChecks(release_age_hours=500.0),
-        diff=DiffChecks(
+        diff=PackageDiffChecks(
             diff_summary="lib/trap.js added",
             diff_size_bytes=200,
             obfuscated_code=True,

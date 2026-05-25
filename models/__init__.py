@@ -50,7 +50,7 @@ class RepoConfig(BaseModel):
         "red"
     ]  # close PRs classified as RED by default; set [] to observe-only
     max_new_dependencies: int = 5  # flag as yellow when more direct deps than this are added
-    extra_signal_activities: list[
+    extra_check_activities: list[
         str
     ] = []  # additional Temporal activity names to call; each receives (ecosystem, package, old_version, new_version) and must return a JSON-serializable dict
 
@@ -74,7 +74,7 @@ class OSVChecks(BaseModel):
     osv_vulnerabilities: list[str] = []
 
 
-class DiffChecks(BaseModel):
+class PackageDiffChecks(BaseModel):
     diff_summary: str = ""
     diff_size_bytes: int = 0
     install_script_added: bool = False
@@ -107,7 +107,7 @@ class PRFilesChecks(BaseModel):
     unexpected_files: list[str] = []  # CI/infra/script paths that shouldn't appear in a dep-bump PR
 
 
-class VersionLineChecks(BaseModel):
+class VersionLineageChecks(BaseModel):
     stale_version_line: bool = (
         False  # bump targets an older major while a newer stable major is active
     )
@@ -185,12 +185,12 @@ class PackageChecks(BaseModel):
     pypi: PyPIChecks = Field(default_factory=PyPIChecks)
     socket: SocketChecks = Field(default_factory=SocketChecks)
     osv: OSVChecks = Field(default_factory=OSVChecks)
-    diff: DiffChecks = Field(default_factory=DiffChecks)
+    diff: PackageDiffChecks = Field(default_factory=PackageDiffChecks)
     maintainer: MaintainerChecks = Field(default_factory=MaintainerChecks)
     age: ReleaseAgeChecks = Field(default_factory=ReleaseAgeChecks)
     attestation: AttestationChecks = Field(default_factory=AttestationChecks)
     release: ReleaseChecks = Field(default_factory=ReleaseChecks)
-    version_line: VersionLineChecks = Field(default_factory=VersionLineChecks)
+    version_lineage: VersionLineageChecks = Field(default_factory=VersionLineageChecks)
     deps_dev: DepsDevChecks = Field(default_factory=DepsDevChecks)
     scorecard: ScorecardChecks = Field(default_factory=ScorecardChecks)
     custom_checks: dict[str, Any] = Field(default_factory=dict)  # plugin-supplied check results

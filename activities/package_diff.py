@@ -1,6 +1,6 @@
 """
 Activity: compute a security-focused diff between two package versions.
-Downloads both archives, extracts them, and returns a DiffChecks model.
+Downloads both archives, extracts them, and returns a PackageDiffChecks model.
 Archive format and CDN host are fully delegated to the ecosystem provider.
 """
 
@@ -28,7 +28,7 @@ from ecosystems import (
     parse_vcs_repo,
     validate_archive_url,
 )
-from models import DiffChecks
+from models import PackageDiffChecks
 from helpers.cache import ActivityCache
 from helpers.http import get_client
 
@@ -486,7 +486,7 @@ _ARTIFACT_MISMATCH_THRESHOLD = 5
 
 
 @activity.defn(name="activities.package_diff.compute")
-async def compute(ecosystem: str, package: str, old_version: str, new_version: str) -> DiffChecks:
+async def compute(ecosystem: str, package: str, old_version: str, new_version: str) -> PackageDiffChecks:
     key = (ecosystem, package, old_version, new_version)
     if (hit := _cache.get(key)) is not None:
         activity.logger.debug("package_diff cache hit: %s %s→%s", package, old_version, new_version)
@@ -502,7 +502,7 @@ async def compute(ecosystem: str, package: str, old_version: str, new_version: s
     )
 
     if old_info is None or new_info is None:
-        return DiffChecks(diff_summary="[sdist not available]", diff_size_bytes=0)
+        return PackageDiffChecks(diff_summary="[sdist not available]", diff_size_bytes=0)
 
     old_url, old_filename, old_integrity = old_info
     new_url, new_filename, new_integrity = new_info
@@ -514,7 +514,7 @@ async def compute(ecosystem: str, package: str, old_version: str, new_version: s
     )
 
     if old_bytes is None or new_bytes is None:
-        return DiffChecks(
+        return PackageDiffChecks(
             diff_summary="[download aborted: archive exceeds 20 MB size limit]",
             diff_size_bytes=0,
         )
@@ -544,7 +544,7 @@ async def compute(ecosystem: str, package: str, old_version: str, new_version: s
         client, ecosystem, package, new_version, artifact_files
     )
 
-    result = DiffChecks(
+    result = PackageDiffChecks(
         diff_summary=diff_summary,
         diff_size_bytes=len(diff_summary.encode()),
         install_script_added=install_script_added,

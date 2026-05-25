@@ -2,7 +2,7 @@ import pytest
 from helpers.cache import clear_all_caches
 from models import (
     AttestationChecks,
-    DiffChecks,
+    PackageDiffChecks,
     OSVChecks,
     PackageChecks,
     PyPIChecks,
@@ -33,7 +33,7 @@ def base_signals():
         pypi=PyPIChecks(weekly_downloads=5_000_000, is_major_bump=False),
         socket=SocketChecks(socket_score=80, socket_alerts=[]),
         osv=OSVChecks(osv_vulnerabilities=[]),
-        diff=DiffChecks(diff_summary="Minor internal refactor.", diff_size_bytes=512),
+        diff=PackageDiffChecks(diff_summary="Minor internal refactor.", diff_size_bytes=512),
         age=ReleaseAgeChecks(release_age_hours=200.0),
         attestation=AttestationChecks(publisher_account_age_days=1800),
     )

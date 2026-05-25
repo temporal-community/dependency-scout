@@ -63,7 +63,7 @@ class PRActionWorkflow:
         # so a stale GREEN from yesterday cannot persist indefinitely. Within a day, all
         # repos seeing the same bump still share one triage run.
         #
-        # Repos with extra_signal_activities get a fingerprint suffix so they dedup only
+        # Repos with extra_check_activities get a fingerprint suffix so they dedup only
         # among repos with the same custom activity set; repos without custom activities
         # share the same workflow as before.
         #
@@ -72,9 +72,9 @@ class PRActionWorkflow:
         # in a routine dep-bump. No reason to block triage while waiting for it.
         date_key = workflow.now().strftime("%Y-%m-%d")
         extra_key = ""
-        if config.extra_signal_activities:
+        if config.extra_check_activities:
             fp = hashlib.sha256(
-                json.dumps(sorted(config.extra_signal_activities)).encode()
+                json.dumps(sorted(config.extra_check_activities)).encode()
             ).hexdigest()[:8]
             extra_key = f"-x{fp}"
         verdict, pr_files = await asyncio.gather(
@@ -85,7 +85,7 @@ class PRActionWorkflow:
                     pr.package_name,
                     pr.old_version,
                     pr.new_version,
-                    config.extra_signal_activities,
+                    config.extra_check_activities,
                 ],
                 id=f"triage-{pr.ecosystem}-{pr.package_name}-{pr.new_version}-{date_key}{extra_key}",
                 parent_close_policy=ParentClosePolicy.ABANDON,

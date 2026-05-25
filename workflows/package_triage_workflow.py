@@ -15,7 +15,7 @@ with workflow.unsafe.imports_passed_through():
         ReleaseAgeChecks,
         AttestationChecks,
         ReleaseChecks,
-        VersionLineChecks,
+        VersionLineageChecks,
         DepsDevChecks,
         ScorecardChecks,
     )
@@ -37,7 +37,7 @@ _CHECK_REGISTRY: list[tuple[str, str, type, bool]] = [
     ("age", "activities.release_age.check", ReleaseAgeChecks, False),
     ("attestation", "activities.attestation.check", AttestationChecks, False),
     ("release", "activities.release_notes.check", ReleaseChecks, False),
-    ("version_line", "activities.version_lineage.check", VersionLineChecks, False),
+    ("version_lineage", "activities.version_lineage.check", VersionLineageChecks, False),
     ("deps_dev", "activities.depsdev.fetch", DepsDevChecks, False),
     ("scorecard", "activities.scorecard.fetch", ScorecardChecks, False),
 ]
@@ -63,7 +63,7 @@ class PackageTriageWorkflow:
         package: str,
         old_version: str,
         new_version: str,
-        extra_signal_activities: list[str] = [],
+        extra_check_activities: list[str] = [],
     ) -> Verdict:
         retry = RetryPolicy(maximum_attempts=5, initial_interval=timedelta(seconds=2))
         default_opts: dict = dict(
@@ -105,7 +105,7 @@ class PackageTriageWorkflow:
                 check_kwargs[field] = result
 
         custom_checks: dict[str, object] = {}
-        if extra_signal_activities:
+        if extra_check_activities:
             custom_raw = await asyncio.gather(
                 *(
                     workflow.execute_activity(
@@ -114,11 +114,11 @@ class PackageTriageWorkflow:
                         result_type=dict,
                         **default_opts,
                     )
-                    for name in extra_signal_activities
+                    for name in extra_check_activities
                 ),
                 return_exceptions=True,
             )
-            for name, result in zip(extra_signal_activities, custom_raw):
+            for name, result in zip(extra_check_activities, custom_raw):
                 if isinstance(result, Exception):
                     workflow.logger.warning(f"Custom check '{name}' failed: {result!r} — skipped")
                 else:

@@ -41,7 +41,7 @@ from models import (
     PyPIChecks,
     ReleaseAgeChecks,
     ReleaseChecks,
-    VersionLineChecks,
+    VersionLineageChecks,
 )
 
 MAX_EXTRACT_BYTES = 100 * 1024 * 1024  # zip bomb guard
@@ -237,8 +237,8 @@ def detect_stale_version_line(
     new_version: str,
     cutoff_days: int = 730,
     release_dates: dict[str, datetime] | None = None,
-) -> VersionLineChecks:
-    """Return VersionLineChecks indicating whether new_version patches a stale major line.
+) -> VersionLineageChecks:
+    """Return VersionLineageChecks indicating whether new_version patches a stale major line.
 
     A version line is considered stale when the bump's major version is lower than the
     highest stable major and that highest major had a release within the last *cutoff_days*.
@@ -256,17 +256,17 @@ def detect_stale_version_line(
 
     stable = [v for v in all_versions if not _is_prerelease(v) and _major(v) is not None]
     if not stable:
-        return VersionLineChecks()
+        return VersionLineageChecks()
 
     bump_major = _major(new_version)
     if bump_major is None:
-        return VersionLineChecks()
+        return VersionLineageChecks()
 
     majors: set[int] = {m for v in stable if (m := _major(v)) is not None}
     latest_major = max(majors)
 
     if bump_major >= latest_major:
-        return VersionLineChecks(bump_major=bump_major, latest_major=latest_major)
+        return VersionLineageChecks(bump_major=bump_major, latest_major=latest_major)
 
     # bump is targeting an older major — check if the latest major is actively maintained
     if release_dates:
@@ -277,9 +277,9 @@ def detect_stale_version_line(
             for v in latest_major_versions
         )
         if not latest_major_active:
-            return VersionLineChecks(bump_major=bump_major, latest_major=latest_major)
+            return VersionLineageChecks(bump_major=bump_major, latest_major=latest_major)
 
-    return VersionLineChecks(
+    return VersionLineageChecks(
         stale_version_line=True,
         bump_major=bump_major,
         latest_major=latest_major,

@@ -7,7 +7,7 @@ from models import (
     PyPIChecks,
     SocketChecks,
     OSVChecks,
-    DiffChecks,
+    PackageDiffChecks,
     ReleaseAgeChecks,
     MaintainerChecks,
 )
@@ -79,7 +79,7 @@ def signals():
         pypi=PyPIChecks(weekly_downloads=5_000_000, is_major_bump=False),
         socket=SocketChecks(socket_score=85, socket_alerts=[]),
         osv=OSVChecks(osv_vulnerabilities=[]),
-        diff=DiffChecks(diff_summary="Minor changes", diff_size_bytes=1024),
+        diff=PackageDiffChecks(diff_summary="Minor changes", diff_size_bytes=1024),
         age=ReleaseAgeChecks(release_age_hours=200.0),
         maintainer=MaintainerChecks(maintainer_changed=False),
     )

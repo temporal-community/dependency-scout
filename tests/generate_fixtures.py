@@ -20,7 +20,7 @@ from temporalio.worker import Worker
 from models import (
     AttestationChecks,
     DepsDevChecks,
-    DiffChecks,
+    PackageDiffChecks,
     MaintainerChecks,
     OSVChecks,
     PRContext,
@@ -32,7 +32,7 @@ from models import (
     ScorecardChecks,
     SocketChecks,
     Verdict,
-    VersionLineChecks,
+    VersionLineageChecks,
 )
 from workflows.package_triage_workflow import PackageTriageWorkflow
 from workflows.pr_action_workflow import PRActionWorkflow
@@ -84,7 +84,7 @@ def _osv(has_cve: bool = False):
 def _diff():
     @activity.defn(name="activities.package_diff.compute")
     async def compute(*_):
-        return DiffChecks(diff_summary="Minor doc changes.", diff_size_bytes=256)
+        return PackageDiffChecks(diff_summary="Minor doc changes.", diff_size_bytes=256)
 
     return compute
 
@@ -198,7 +198,7 @@ def _check_pr_files(unexpected: list[str] | None = None):
 def _version_lineage():
     @activity.defn(name="activities.version_lineage.check")
     async def check(*_):
-        return VersionLineChecks()
+        return VersionLineageChecks()
 
     return check
 

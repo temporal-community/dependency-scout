@@ -12,7 +12,7 @@ from temporalio.testing import ActivityEnvironment
 from ecosystems import detect_stale_version_line
 from activities.version_lineage import check as lineage_check
 from models import (
-    VersionLineChecks,
+    VersionLineageChecks,
     PackageChecks,
     ReleaseAgeChecks,
 )
@@ -257,7 +257,7 @@ def test_rule_based_stale_version_line_is_yellow():
         old_version="0.9.0",
         new_version="0.9.1",
         age=ReleaseAgeChecks(release_age_hours=500.0),
-        version_line=VersionLineChecks(stale_version_line=True, latest_major=1, bump_major=0),
+        version_lineage=VersionLineageChecks(stale_version_line=True, latest_major=1, bump_major=0),
     )
     verdict = _rule_based(signals)
     assert verdict.classification == "yellow"

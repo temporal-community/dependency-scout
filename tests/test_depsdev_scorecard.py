@@ -14,7 +14,7 @@ from models import (
     PyPIChecks,
     SocketChecks,
     OSVChecks,
-    DiffChecks,
+    PackageDiffChecks,
     ReleaseAgeChecks,
     MaintainerChecks,
     DepsDevChecks,
@@ -195,7 +195,7 @@ def _base_signals(**overrides):
             socket_alerts=overrides.pop("socket_alerts", []),
         ),
         osv=OSVChecks(osv_vulnerabilities=overrides.pop("osv_vulnerabilities", [])),
-        diff=DiffChecks(
+        diff=PackageDiffChecks(
             diff_summary=overrides.pop("diff_summary", "Minor changes."),
             diff_size_bytes=overrides.pop("diff_size_bytes", 100),
         ),
