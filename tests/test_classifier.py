@@ -13,8 +13,8 @@ from temporalio.exceptions import ApplicationError
 
 import anthropic
 
+from activities.classifier import classify
 from classifiers import (
-    classify,
     _build_message,
     _rule_based,
 )

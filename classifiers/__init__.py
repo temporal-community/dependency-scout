@@ -26,8 +26,6 @@ import os
 from importlib.metadata import entry_points
 from typing import Protocol
 
-from temporalio import activity
-
 from models import PackageChecks, Verdict
 from classifiers._helpers import _build_message, _rule_based  # noqa: F401 — kept for back-compat
 from classifiers.anthropic import AnthropicClassifier
@@ -84,13 +82,3 @@ def get_classifier() -> Classifier:
     if not os.environ.get("ANTHROPIC_API_KEY"):
         return RuleBasedClassifier()
     return AnthropicClassifier()
-
-
-@activity.defn(name="activities.classifier.classify")
-async def classify(signals: PackageChecks) -> Verdict:
-    clf = get_classifier()
-    if not os.environ.get("ANTHROPIC_API_KEY") and isinstance(clf, RuleBasedClassifier):
-        activity.logger.info("No ANTHROPIC_API_KEY — using rule-based classifier")
-    else:
-        activity.logger.info("Using classifier: %s", type(clf).__name__)
-    return await clf.classify(signals)

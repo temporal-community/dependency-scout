@@ -22,7 +22,7 @@ These eleven activities run in parallel for every package bump. All degrade grac
 | `depsdev.py` | `activities.depsdev.fetch` | `DepsDevChecks` | [deps.dev](https://deps.dev) | None |
 | `scorecard.py` | `activities.scorecard.fetch` | `ScorecardChecks` | [OpenSSF Scorecard](https://securityscorecards.dev) | None |
 
-`package_diff.compute` downloads and extracts the full package archive — it's the slowest activity and runs on a longer timeout than the rest.
+`package_diff.compute` downloads and extracts the full package archive — it's the slowest activity and runs on a longer timeout than the rest. It calls `activity.heartbeat()` at each phase (download → extract → artifact/source comparison) so Temporal can detect worker crashes mid-run rather than waiting for the full timeout to expire.
 
 ## PR action activities
 
@@ -40,7 +40,13 @@ These live in `platform_activities.py` and are called by `PRActionWorkflow` afte
 
 ## Activity naming convention
 
-Activity names are strings, not imports. The string registered with `@activity.defn(name=...)` must match exactly what the workflow passes to `workflow.execute_activity(...)`. This is a Temporal requirement for determinism — see [CLAUDE.md](../CLAUDE.md) for details.
+Activity names are strings, not function references. The string registered with `@activity.defn(name=...)` must match exactly what the workflow passes to `workflow.execute_activity(...)`.
+
+The Temporal Python SDK does support type-safe function references (`workflow.execute_activity(fetch, ...)`), but this codebase uses strings deliberately: the triage checks are driven by `_CHECK_REGISTRY` in `package_triage_workflow.py`, a data structure that maps field names to activity names and result types. This makes it easy to add or reorder checks without touching workflow control flow. The trade-off is that name mismatches are caught at runtime rather than import time — see [CLAUDE.md](../CLAUDE.md) for the full convention.
+
+## Worker auto-discovery
+
+The worker (`worker.py`) automatically discovers and registers every `@activity.defn`-decorated function found in `activities/*.py`. **You do not need to manually register new activities** — just put the file in this directory and restart the worker.
 
 ## Adding a new triage check
 
@@ -71,13 +77,9 @@ Add a row to `_CHECK_REGISTRY` in `workflows/package_triage_workflow.py`:
 
 The fourth element is `True` if the activity is slow (like `package_diff`) and needs a longer timeout.
 
-**Step 4 — register with the worker**
+**Step 4 — write tests and regenerate fixtures**
 
-Import and include `fetch` in the worker's activity list so Temporal knows to route tasks to it.
-
-**Step 5 — write tests and regenerate fixtures**
-
-Add tests under `tests/`. Then regenerate the Temporal replay fixtures since the workflow history changed:
+Add tests under `tests/`. The worker will auto-discover your new activity file — no manual registration needed. Then regenerate the Temporal replay fixtures since the workflow history changed:
 
 ```bash
 uv run python tests/generate_fixtures.py
