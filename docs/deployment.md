@@ -10,7 +10,7 @@ For a description of the three-process architecture (Temporal server, worker, we
 
 ### Option A — Temporal Cloud (recommended)
 
-[Temporal Cloud](https://cloud.temporal.io) has a free tier that covers low-volume use. No servers to manage, built-in visibility UI.
+[Temporal Cloud](https://cloud.temporal.io) pre-loads new accounts with credits, which covers low-volume use for a while. No servers to manage, built-in visibility UI.
 
 1. Create a namespace in the Temporal Cloud UI
 2. Download your client certificate (`.pem`) and key
