@@ -21,7 +21,29 @@ Classifies GREEN / YELLOW / RED, posts a comment explaining its reasoning, and t
 
 ---
 
-## Try it in 5 minutes
+## Try it on one PR right now
+
+No server setup needed. Point it at any GitHub PR and it'll run all 11 checks and print a verdict:
+
+```bash
+git clone https://github.com/temporal-community/dependency-scout
+cd dependency-scout
+uv run python triage.py https://github.com/owner/repo/pull/123
+```
+
+Or pass the details explicitly:
+
+```bash
+uv run python triage.py --ecosystem pip --package requests --old 2.31.0 --new 2.32.3
+```
+
+Set `ANTHROPIC_API_KEY` in `.env` for Claude classification; without it, the rule-based classifier runs entirely locally. Set `GITHUB_TOKEN` for higher API rate limits and private repos.
+
+When you want this to run **automatically on every PR** — with retry, the human-approval loop, and optional auto-merge — read on.
+
+---
+
+## Full automated setup (5 minutes)
 
 You need Python 3.10+, [`uv`](https://docs.astral.sh/uv/), and the [Temporal CLI](https://docs.temporal.io/cli).
 
