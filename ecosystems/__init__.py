@@ -92,7 +92,9 @@ class EcosystemProviderBase:
     dependabot_slug: str
     name_re: re.Pattern
 
-    async def fetch_metadata(self, package: str, old_version: str, new_version: str) -> MetadataChecks:
+    async def fetch_metadata(
+        self, package: str, old_version: str, new_version: str
+    ) -> MetadataChecks:
         raise NotImplementedError
 
     async def fetch_release_age(self, package: str, new_version: str) -> ReleaseAgeChecks:

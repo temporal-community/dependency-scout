@@ -54,7 +54,9 @@ class GoModulesProvider(EcosystemProviderBase):
     # fetch_metadata
     # ------------------------------------------------------------------
 
-    async def fetch_metadata(self, package: str, old_version: str, new_version: str) -> MetadataChecks:
+    async def fetch_metadata(
+        self, package: str, old_version: str, new_version: str
+    ) -> MetadataChecks:
         # Go proxy has no download counts or description API; only version info.
         client = get_client()
         resp = await client.get(f"{_PROXY}/{_escape(package)}/@v/{new_version}.info", timeout=15.0)

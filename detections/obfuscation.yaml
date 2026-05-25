@@ -1,0 +1,120 @@
+# Obfuscation detection patterns.
+# Each entry has:
+#   pattern: regex string
+#   desc:    human-readable explanation
+
+patterns:
+  .js:
+  - pattern: \b_0x[0-9a-fA-F]{4,}\b
+    desc: javascript-obfuscator hex variable names
+  - pattern: \beval\s*\(\s*atob\s*\(
+    desc: eval(atob(...)) decode-then-exec chain
+  - pattern: \beval\s*\(\s*Buffer\.from\s*\(
+    desc: eval(Buffer.from(..., 'base64'))
+  - pattern: \bnew\s+Function\s*\(\s*atob\s*\(
+    desc: new Function(atob(...))
+  - pattern: globalThis\s*\.\s*\w+\s*=\s*new\s+Function\s*\(\s*atob\s*\(
+    desc: globalThis.<name> = new Function(atob(...))() IIFE - module-level obfuscated eval (Coruna art-template May 2026)
+  - pattern: gh[op]_[A-Za-z0-9]{20,}
+    desc: hardcoded GitHub PAT or token regex in source
+  - pattern: npm_[A-Za-z0-9]{20,}
+    desc: hardcoded npm publish token regex in source
+  - pattern: \(\s*\d{7,}\s*\^\s*\d{7,}\s*\)
+    desc: integer XOR-pair obfuscation (Coruna pattern)
+  - pattern: '0xFEEDFACF'
+    desc: Mach-O ARM64 magic - iOS/macOS exploit kit architecture fingerprinting (Coruna art-template)
+  - pattern: \[[^\]]{15,}\]\.map\s*\(\s*(?:function\s*\([a-z]\)\s*\{[^}]{0,40}\}|[a-z]\s*=>)\s*String\.fromCharCode\s*\([a-z]\s*\^\s*\d{1,3}\s*\)\s*\)\.join\s*\(\s*['\"]['\"]
+    desc: per-char XOR array string obfuscation (Coruna art-template May 2026)
+  .ts:
+  - pattern: \b_0x[0-9a-fA-F]{4,}\b
+    desc: javascript-obfuscator hex variable names
+  - pattern: \beval\s*\(\s*atob\s*\(
+    desc: eval(atob(...)) decode-then-exec chain
+  - pattern: \bnew\s+Function\s*\(\s*atob\s*\(
+    desc: new Function(atob(...))
+  .mjs:
+  - pattern: \b_0x[0-9a-fA-F]{4,}\b
+    desc: javascript-obfuscator hex variable names
+  - pattern: \beval\s*\(\s*atob\s*\(
+    desc: eval(atob(...)) decode-then-exec chain
+  .py:
+  - pattern: \bexec\s*\(\s*compile\s*\(
+    desc: exec(compile(...)) obfuscation
+  - pattern: \bexec\s*\(\s*base64\b
+    desc: exec(base64...) obfuscation
+  - pattern: \beval\s*\(\s*base64\b
+    desc: eval(base64...) obfuscation
+  - pattern: __import__\s*\(\s*['\"]base64['\"]\s*\)\s*\.\s*b64decode
+    desc: __import__('base64').b64decode obfuscation
+  - pattern: gh[op]_[A-Za-z0-9]{20,}
+    desc: GitHub PAT regex being searched for in filesystem
+  - pattern: npm_[A-Za-z0-9]{20,}
+    desc: npm token regex being searched for
+  .rb:
+  - pattern: \beval\s*\(\s*Base64\.decode64\s*\(
+    desc: eval(Base64.decode64(...)) Ruby payload
+  - pattern: \beval\s*\(.*\.pack\s*\(
+    desc: eval([hex].pack('H*')) hex-to-binary exec
+  - pattern: \.pack\s*\(\s*['\"]H\*['\"]
+    desc: hex pack - common Ruby payload delivery
+  - pattern: rubygems_api_key:\s*\w{10,}
+    desc: hardcoded RubyGems API key in source (GemStuffer pattern)
+  .php:
+  - pattern: \beval\s*\(\s*base64_decode\s*\(
+    desc: eval(base64_decode(...))
+  - pattern: \beval\s*\(\s*gzinflate\s*\(
+    desc: eval(gzinflate(...)) - Laravel Lang pattern
+  - pattern: \beval\s*\(\s*gzuncompress\s*\(
+    desc: eval(gzuncompress(...))
+  - pattern: \beval\s*\(\s*str_rot13\s*\(
+    desc: eval(str_rot13(...))
+  - pattern: \beval\s*\(\s*gzdecode\s*\(
+    desc: eval(gzdecode(...))
+  - pattern: \bchr\s*\(\s*\d{2,3}\s*\)\s*\.\s*chr\s*\(
+    desc: chr(X).chr(Y) hostname obfuscation (Laravel Lang May 2026)
+  - pattern: array_map\s*\(\s*['\"]chr['\"]\s*,
+    desc: array_map('chr', [...]) char-code domain construction
+  - pattern: fileinode\s*\(\s*__FILE__
+    desc: per-host execution fingerprinting via inode (Laravel Lang stealth, May 2026)
+  - pattern: md5\s*\([^)]*__DIR__[^)]*php_uname
+    desc: 'host deduplication fingerprint: md5(__DIR__ . php_uname(''m'') . ...) execution gate (Laravel Lang RCE May 2026)'
+  .cs:
+  - pattern: \[ModuleInitializer\]
+    desc: auto-executes on DLL load (NuGet Chinese UI attack)
+  - pattern: \bRuntimeHelpers\.RunModuleConstructor\b
+    desc: explicit module initializer trigger
+  - pattern: PAGE_EXECUTE_READWRITE
+    desc: VirtualAlloc RWX memory for JIT hook - .NET Reactor Necrobit patching clrjit.dll!getJit (NuGet IR.* campaign May 2026)
+  - pattern: \bclrjit\b
+    desc: direct reference to CLR JIT library - only present when patching the JIT compiler (NuGet IR.* campaign May 2026)
+  - pattern: '"[A-Z][a-z]+\s+"\.Trim\(\)\s*\+\s*"[A-Z][a-z]+'
+    desc: Win32 API name split across trimmed string literals to evade static scanning (NuGet Chinese UI campaign May 2026)
+  - pattern: ProgramData\\Microsoft OneDrive\\keys\.dat
+    desc: credential staging path used by NuGet IR.* to store harvested secrets before C2 upload (May 2026)
+  .rs:
+  - pattern: '[''"'']cargo-build-helper-\d{4}[''"'']'
+    desc: TrapDoor campaign XOR key - no legitimate Rust crate embeds a year-stamped helper key (TrapDoor Crates.io May 2026)
+  .gemspec:
+  - pattern: s\.(?:summary|description)\s*=\s*['"](?:result|o|x|data)['"]
+    desc: auto-generated placeholder metadata in exfiltration gem (GemStuffer May 2026)
+line_length_threshold: 100000
+gzip_b64:
+  pattern: H4sI[A-Za-z0-9+/]{60,}
+  desc: base64-encoded gzip payload (H4sI magic bytes)
+  extensions:
+  - .py
+  - .js
+  - .php
+  - .rb
+  - .ts
+zero_width:
+  pattern: "[​‌‍⁠\uFEFF￼]"
+  desc: zero-width Unicode steganography (TrapDoor AI prompt injection)
+  extensions:
+  - .js
+  - .ts
+  - .mjs
+  - .cjs
+  - .py
+  - .rb
+  - .php

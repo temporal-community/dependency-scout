@@ -31,6 +31,23 @@ from ecosystems import (
 from models import PackageDiffChecks
 from helpers.cache import ActivityCache
 from helpers.http import get_client
+from detections import (
+    NET_CALL_PATTERNS as _NET_CALL_PATTERNS,
+    OBFUSCATION_PATTERNS as _OBFUSCATION_PATTERNS,
+    OBFUSCATION_LINE_THRESHOLD as _OBFUSCATION_LINE_THRESHOLD,
+    GZIP_B64_RE as _GZIP_B64_RE,
+    GZIP_B64_EXTENSIONS,
+    ZERO_WIDTH_RE as _ZERO_WIDTH_RE,
+    ZERO_WIDTH_SOURCE_EXTENSIONS as _ZERO_WIDTH_SOURCE_EXTENSIONS,
+    PERSISTENCE_PATTERNS as _PERSISTENCE_PATTERNS,
+    NPM_CRED_READ_RE as _NPM_CRED_READ_RE,
+    NPM_PUBLISH_RE as _NPM_PUBLISH_RE,
+    SUSPICIOUS_PACKAGE_FILES as _SUSPICIOUS_PACKAGE_FILES,
+    SUSPICIOUS_PACKAGE_PREFIXES as _SUSPICIOUS_PACKAGE_PREFIXES,
+    DANGEROUS_BINARY_SUFFIXES,
+    INSTALL_HOOK_NAMES,
+    NPM_INSTALL_SCRIPTS,
+)
 
 _cache: ActivityCache = ActivityCache()  # archive contents are immutable after publish
 
@@ -83,59 +100,6 @@ HIGH_RISK_NAMES = {
 }
 HIGH_RISK_SUFFIXES = {".pth", ".gemspec"}
 
-# Files that have no business appearing in a published package archive.
-# A version bump that suddenly includes these is an immediate red flag.
-_SUSPICIOUS_PACKAGE_FILES = frozenset(
-    {
-        ".cursorrules",  # Cursor AI editor rules — executed in developer's coding session
-        "CLAUDE.md",  # Claude Code project instructions — not a package artifact
-        # AI assistant / IDE hook files that execute code when the workspace is opened.
-        # A published package archive has no legitimate reason to include these.
-        "settings.json",  # caught by path prefix check below, but also flag by name
-        ".env",  # secrets/environment — should never be in a published package
-        ".env.local",
-        ".env.production",
-        "package.md",  # anti-forensic fake JSON file staged to replace package.json (Axios pattern)
-    }
-)
-
-# Path-prefix matches for _SUSPICIOUS_PACKAGE_FILES (checked against rel path, not just name).
-_SUSPICIOUS_PACKAGE_PREFIXES = frozenset(
-    {
-        ".claude/",  # Claude Code hook files
-        ".vscode/",  # VSCode task/launch configs that auto-execute
-        ".idea/",  # JetBrains workspace configs
-        ".devcontainer",  # Dev container auto-run config
-        ".github/workflows/",  # CI workflow files — run code on the developer's CI, not a package artifact
-    }
-)
-
-# Subset of HIGH_RISK_NAMES that execute code on install — changes are an explicit red/yellow flag.
-INSTALL_HOOK_NAMES = {
-    "setup.py",  # pip: customises build/install steps
-    "install.js",  # npm: install lifecycle script
-    "postinstall.js",  # npm: postinstall hook
-    "preinstall.js",  # npm: preinstall hook
-    "extconf.rb",  # rubygems: C-extension build script
-    "build.rs",  # cargo: build script, runs at compile time (used in TrapDoor-style attacks)
-    "tools/install.ps1",  # nuget: runs on package install (chocolatey convention)
-    "tools/init.ps1",  # nuget: runs on package init
-}
-# Keys in package.json scripts{} that run during install.
-NPM_INSTALL_SCRIPTS = {"install", "preinstall", "postinstall", "prepare"}
-
-# Files that execute code on load / are impossible to text-diff safely.
-# A new or modified file with any of these extensions is an automatic RED signal.
-DANGEROUS_BINARY_SUFFIXES = {
-    ".so",
-    ".pyd",
-    ".dll",  # native compiled extensions — execute arbitrary code
-    ".node",  # Node.js native add-ons — execute arbitrary native code
-    ".pkl",
-    ".pickle",  # deserializes and executes arbitrary Python objects
-    ".bundle",  # Ruby native C extensions (macOS .dylib-like)
-}
-
 # Extensions that are legitimately binary and don't need content inspection.
 # Files with these extensions are skipped for the binary_data_added check.
 _EXPECTED_BINARY_EXTENSIONS = DANGEROUS_BINARY_SUFFIXES | {
@@ -170,305 +134,6 @@ _EXPECTED_BINARY_EXTENSIONS = DANGEROUS_BINARY_SUFFIXES | {
     ".bin",
     ".dat",
 }
-
-# Per-extension regex patterns for outbound network calls.
-# Matched against newly-added lines only (not pre-existing code) in non-install-hook files.
-_NET_CALL_PATTERNS: dict[str, list[re.Pattern[str]]] = {
-    ext: [re.compile(p) for p in patterns]
-    for ext, patterns in {
-        ".rb": [
-            r"Net::HTTP\b",
-            r"URI\.open\b",
-            r"open-uri",
-            r"Faraday\b",
-            r"HTTParty\b",
-            r"RestClient\b",
-            r"Excon\b",
-            r"Typhoeus\b",
-            r"\bHTTP\.(get|post|head|put|delete|patch)\b",
-            r"rubygems\.org/api/v1/gems",  # registry-as-exfiltration (GemStuffer pattern)
-            r"authorized_keys",  # SSH persistence via authorized_keys append
-            r"ENV\s*\[\s*['\"]HOME['\"]\s*\]\s*=\s*['\"]\/tmp\/",  # redirect HOME → /tmp (GemStuffer)
-            r"File\.binwrite\s*\(\s*['\"]\/tmp\/\.",  # write hidden binary to /tmp (malware staging)
-            r"\bgem\s+push\s+[^\n]{0,60}\.gem",  # worm self-replication via fabricated gem publish (GemStuffer)
-            r"drive\.usercontent\.google\.com/download",  # Google Drive CDN payload delivery (Contagious Interview Apr 2026)
-            r"drive\.google\.com/uc\?[^\"']{0,60}export=download",  # Google Drive legacy direct-download
-            r"\.gem/credentials",  # credential theft — RubyGems API key file (BufferZoneCorp May 2026)
-            r"\.config/gh/hosts\.yml",  # credential theft — GitHub CLI auth token (BufferZoneCorp May 2026)
-            r"File\.chmod\s*\(\s*0600\s*,[^\n]*\.gem[/\\]credentials",  # credential fabrication — chmod on .gem/credentials (GemStuffer May 2026)
-            r"Dir\.home[^\n]{0,60}(?:\.aws|\.ssh|\.npmrc)",  # credential file read via Dir.home in extconf.rb (BufferZoneCorp/GemStuffer Ruby gem install-time harvest)
-        ],
-        ".py": [
-            r"\brequests\.(get|post|put|delete|head|patch|request)\s*\(",
-            r"\burllib\.request\b",
-            r"\burlopen\s*\(",
-            r"\bhttpx\.(get|post|put|delete|head|patch|request|AsyncClient|Client)\b",
-            r"\baiohttp\.(ClientSession|request)\b",
-            r"\bhttp\.client\.(HTTPConnection|HTTPSConnection)\b",
-            r"\bsocket\.getaddrinfo\s*\(",  # DNS lookups (C2-over-DNS pattern)
-            r"\bsocket\.gethostbyname\s*\(",
-            r"\bsubprocess\.(run|Popen|call|check_output|check_call)\s*\(",  # OS exec in library
-            r"169\.254\.169\.254",  # AWS/GCP IMDS probe — credential harvesting
-            r"api\.telegram\.org/bot",  # Telegram bot C2 exfiltration channel
-            r"\.icp0\.io",  # ICP canister C2 (CanisterWorm) — decentralised exfil endpoint
-            r"open\s*\([^,]*(?:\.bashrc|\.zshrc|\.profile|bash_profile)[^,]*,\s*['\"]a['\"]",  # shell RC append
-            r"""subprocess\.[^\n]{0,60}["']node["'][^\n]{0,20}["']-e["']""",  # cross-lang node -e exec (Telnyx/TrapDoor)
-            r"""\bsubprocess\.[^\n]{0,80}['"](?:bun|deno)['"][^\n]{0,40}\.(?:js|mjs|cjs)['"]""",  # cross-runtime JS payload (PyTorch Lightning Apr 2026)
-            r"freemyip\.com|dnslog\.cn",  # free dynamic DNS C2 (Go Decimal typosquat May 2026)
-            r"api\.mainnet-beta\.solana\.com",  # Solana RPC C2 dead-drop (GlassWorm)
-            r"api\.(?:devnet|testnet)\.solana\.com",  # Solana non-mainnet RPC (same C2 pattern)
-            r"discord\.com/api/webhooks/",  # Discord webhook exfil (Shai-Hulud / Yeshen-Asia)
-            r"logs\.betterstack\.com|logtail\.com",  # BetterStack/Logtail exfil
-            r"api\.github\.com/gists",  # GitHub Gist dead-drop
-            r"pastebin\.com/raw/",  # Pastebin raw paste dead-drop (StegaBin C2 infrastructure)
-            r"open\s*\([^)]*['\"]\/proc\/\d+\/mem['\"]",  # /proc/PID/mem read — CI secret extraction bypassing log masking (SAP CAP)
-            r"drive\.usercontent\.google\.com/download",  # Google Drive CDN payload delivery (Contagious Interview Apr 2026)
-            r"drive\.google\.com/uc\?[^\"']{0,60}export=download",  # Google Drive legacy direct-download
-            r"icanhazip\.com",  # public IP oracle used to fingerprint victim before C2 beacon (Coruna art-template May 2026)
-            r"api\.svix\.com/ingest",  # Svix webhook SaaS as C2 dead-drop (TanStack brandsquat Apr 2026)
-        ],
-        ".js": [
-            r"\bfetch\s*\(",
-            r"\baxios\.(get|post|put|delete|request|create)\b",
-            r"\bhttps?\.(request|get)\s*\(",
-            r"\bXMLHttpRequest\b",
-            r"\bgot\s*[\.(]",
-            r"\bsuperagent\b",
-            r"\bnode-fetch\b",
-            r"\bdns\.resolveTxt\s*\(",  # DNS TXT C2 (node-ipc, Go decimal pattern)
-            r"\bdns\.resolve(?:Txt|Host|Mx|Ns)?\s*\(",
-            r"\bdns\.lookup\s*\(",
-            r"169\.254\.169\.254",  # AWS/GCP IMDS probe — credential harvesting
-            r"api\.telegram\.org/bot",  # Telegram bot C2 exfiltration channel
-            r"\.icp0\.io",  # ICP canister C2 (CanisterWorm) — decentralised exfil endpoint
-            r"(?:appendFileSync|writeFile(?:Sync)?)\s*\([^,]*(?:\.bashrc|\.zshrc|\.profile|bash_profile)",  # shell RC injection
-            r"getTransaction\s*\(|getSignaturesForAddress\s*\(|getAccountInfo\s*\(",  # Solana RPC C2 dead-drop (GlassWorm)
-            r"discord\.com/api/webhooks/",  # Discord webhook exfil (Shai-Hulud / Yeshen-Asia)
-            r"logs\.betterstack\.com|logtail\.com",  # BetterStack/Logtail exfil
-            r"api\.github\.com/gists",  # GitHub Gist dead-drop
-            r"api\.github\.com/user/repos",  # GitHub repo creation as encrypted dead-drop (Mini Shai-Hulud)
-            r"window\.ethereum\s*=|window\.solana\s*=|window\.phantom\s*=",  # crypto wallet API monkey-patching (September 2025 npm)
-            r"\bfetch\s*=\s*(?!==)|XMLHttpRequest\.prototype\.\w+\s*=",  # global fetch/XHR hijack (crypto drainer)
-            r"\bchild_process\b.*\.(exec|execSync|spawn|spawnSync)\s*\(",  # OS shell execution in library (download-and-exec)
-            r"require\s*\(\s*['\"]child_process['\"]\s*\)",  # child_process require (shell execution capability)
-            r"pastebin\.com/raw/",  # Pastebin raw paste dead-drop (StegaBin C2 infrastructure)
-            r"(?:musl|glibc)[^\n]{0,120}(?:oven-sh/bun|bun/releases/download)",  # libc detection + Bun download (SAP CAP May 2026)
-            r"filev2\.getsession\.org",  # Session P2P messenger C2 dead-drop (TanStack/Mini Shai-Hulud May 2026)
-            r"api\.github\.com/graphql[^\n]{0,200}createCommitOnBranch",  # GraphQL commit spoofing (Mini Shai-Hulud)
-            r"drive\.usercontent\.google\.com/download",  # Google Drive CDN payload delivery (Contagious Interview Apr 2026)
-            r"drive\.google\.com/uc\?[^\"']{0,60}export=download",  # Google Drive legacy direct-download (same campaign)
-            r"azurestaticprovider\.net",  # lookalike Azure domain used for DNS TXT C2 (node-ipc stealer May 2026)
-            r"\bchild_process\b[^\n]{0,80}\bfork\s*\(",  # child_process.fork in library code (node-ipc detached stealer process)
-            r"icanhazip\.com",  # public IP oracle used to fingerprint victim before C2 beacon (Coruna art-template May 2026)
-            r"\bdns\.setServers\s*\(",  # custom DNS resolver bootstrap — overrides system resolver to avoid detection (node-ipc stealer May 2026)
-            r"api\.svix\.com/ingest",  # Svix webhook SaaS used as C2 dead-drop for stolen .env data (TanStack brandsquat Apr 2026)
-        ],
-        ".ts": [
-            r"\bfetch\s*\(",
-            r"\baxios\.(get|post|put|delete|request|create)\b",
-            r"\bhttps?\.(request|get)\s*\(",
-            r"\bXMLHttpRequest\b",
-            r"getTransaction\s*\(|getSignaturesForAddress\s*\(|getAccountInfo\s*\(",  # Solana RPC C2
-            r"discord\.com/api/webhooks/",
-            r"logs\.betterstack\.com|logtail\.com",
-            r"window\.ethereum\s*=|window\.solana\s*=",  # wallet monkey-patching
-        ],
-        ".cjs": [
-            r"\bfetch\s*\(",
-            r"\baxios\.(get|post|put|delete|request|create)\b",
-            r"\bhttps?\.(request|get)\s*\(",
-            r"\bXMLHttpRequest\b",
-            r"\bgot\s*[\.(]",
-            r"\bdns\.resolveTxt\s*\(",  # DNS TXT C2 (node-ipc used .cjs specifically to evade .js checks)
-            r"\bdns\.resolve(?:Txt|Host|Mx|Ns)?\s*\(",
-            r"\bdns\.lookup\s*\(",
-            r"169\.254\.169\.254",
-            r"api\.telegram\.org/bot",
-            r"\.icp0\.io",
-            r"(?:appendFileSync|writeFile(?:Sync)?)\s*\([^,]*(?:\.bashrc|\.zshrc|\.profile|bash_profile)",
-            r"getTransaction\s*\(|getSignaturesForAddress\s*\(",  # Solana RPC C2
-            r"discord\.com/api/webhooks/",
-            r"api\.github\.com/gists",
-            r"\bchild_process\b.*\.(exec|execSync|spawn|spawnSync)\s*\(",  # OS shell execution
-            r"require\s*\(\s*['\"]child_process['\"]\s*\)",  # child_process require
-            r"pastebin\.com/raw/",  # Pastebin raw paste dead-drop
-            r"azurestaticprovider\.net",  # lookalike Azure domain used for DNS TXT C2 (node-ipc stealer May 2026)
-            r"\bchild_process\b[^\n]{0,80}\bfork\s*\(",  # child_process.fork in library (node-ipc detached stealer process)
-            r"icanhazip\.com",  # public IP oracle used to fingerprint victim before C2 beacon (Coruna art-template May 2026)
-            r"\bdns\.setServers\s*\(",  # custom DNS resolver bootstrap (node-ipc stealer May 2026)
-            r"api\.svix\.com/ingest",  # Svix webhook SaaS as C2 dead-drop (TanStack brandsquat Apr 2026)
-        ],
-        ".mjs": [
-            r"\bfetch\s*\(",
-            r"\baxios\b",
-            r"\bhttps?\.(request|get)\s*\(",
-            r"discord\.com/api/webhooks/",
-            r"window\.ethereum\s*=|window\.solana\s*=",
-        ],
-        ".php": [
-            r"\bcurl_exec\s*\(",
-            r"\bcurl_init\s*\(",
-            r"\bfile_get_contents\s*\(\s*['\"]https?://",
-            r"\bGuzzleHttp\\",
-            r"\\Http\\Client\b",
-            r"(?:shell_exec|passthru|popen)\s*\(\s*['\"](?:curl|wget)\b",  # shell binary download (Intercom PHP)
-            r"github\.com/[^/]+/[^/]+/releases/download/bun-",  # Bun runtime drop (Intercom PHP, SAP CAP)
-            r"\bexec\s*\(\s*['\"]php\s",  # PHP subprocess staging: exec("php /tmp/...") — drops payload to sys_get_temp_dir() then self-executes (Laravel Lang May 2026)
-            r"sys_get_temp_dir\s*\(\s*\)\s*\.\s*['\"]\/\.",  # write to hidden path inside sys_get_temp_dir() — payload staging (Laravel Lang May 2026)
-        ],
-        ".java": [
-            r"\bHttpClient\b",
-            r"\bHttpURLConnection\b",
-            r"\bOkHttpClient\b",
-            r"\bRestTemplate\b",
-            r"\bWebClient\b",
-        ],
-        ".go": [
-            r"\bhttp\.(Get|Post|Head)\s*\(",  # net/http outbound calls
-            r"\bhttp\.NewRequest\s*\(",
-            r"\bnet\.LookupTXT\s*\(",  # DNS TXT C2 (Go decimal typosquat pattern)
-            r"\bnet\.LookupHost\s*\(",
-            r"\bnet\.LookupIP\s*\(",
-            r"\bnet\.Dial\s*\(",
-            r"\bnet\.DialTCP\s*\(",
-            r'\bos\.Setenv\s*\(\s*"GOPROXY"',  # redirect module downloads to attacker proxy
-            r'\bos\.Setenv\s*\(\s*"GOSUMDB"',  # disable checksum verification
-            r'os\.Getenv\s*\(\s*"GITHUB_ENV"\s*\)',  # CI env-file poisoning (inject into Actions env)
-            r'os\.Getenv\s*\(\s*"GITHUB_PATH"\s*\)',  # CI PATH poisoning (inject fake binaries)
-            r"authorized_keys",  # SSH persistence via authorized_keys append
-            r"\bexec\.Command\s*\(",  # subprocess execution in Go library code (BufferZoneCorp)
-            r"freemyip\.com|dnslog\.cn",  # free dynamic DNS C2 (Go Decimal typosquat May 2026)
-            r'\bos\.Setenv\s*\(\s*"GOFLAGS"',  # force unsafe module resolution (-mod=mod) (BufferZoneCorp May 2026)
-            r'\bos\.Setenv\s*\(\s*"GONOSUMDB"',  # disable checksum verification for all modules
-            r'\bos\.Setenv\s*\(\s*"GOMODCACHE"',  # redirect module cache to attacker-controlled path
-        ],
-        ".rs": [
-            r"\breqwest::(get|post|Client|blocking)\b",  # reqwest — most common Rust HTTP client
-            r"\bTcpStream::connect\s*\(",  # raw TCP (data exfiltration)
-            r"\bstd::net::TcpStream\b",
-            r"\bUdpSocket::bind\b",
-        ],
-        ".cs": [
-            r"\bHttpClient\b",
-            r"\bWebClient\b",
-            r"\bHttpWebRequest\b",
-            r"\bWebRequest\.Create\s*\(",
-            r"\bTcpClient\b",
-            r"\bUdpClient\b",
-            r"\bDns\.GetHostEntry\s*\(",  # DNS lookup (C2-over-DNS)
-            r"\bDns\.Resolve\s*\(",
-        ],
-    }.items()
-}
-
-# Obfuscation patterns by extension — matched against full file text of new files.
-# These are high-confidence fingerprints of machine-generated obfuscation, not normal code.
-_OBFUSCATION_PATTERNS: dict[str, list[re.Pattern[str]]] = {
-    ext: [re.compile(p) for p in patterns]
-    for ext, patterns in {
-        ".js": [
-            r"\b_0x[0-9a-fA-F]{4,}\b",  # javascript-obfuscator hex variable names
-            r"\beval\s*\(\s*atob\s*\(",  # eval(atob(...)) decode-then-exec chain
-            r"\beval\s*\(\s*Buffer\.from\s*\(",  # eval(Buffer.from(..., 'base64'))
-            r"\bnew\s+Function\s*\(\s*atob\s*\(",  # new Function(atob(...))
-            r"globalThis\s*\.\s*\w+\s*=\s*new\s+Function\s*\(\s*atob\s*\(",  # globalThis.<name> = new Function(atob(...))() IIFE — module-level obfuscated eval (Coruna art-template May 2026)
-            r"gh[op]_[A-Za-z0-9]{20,}",  # hardcoded GitHub PAT or token regex in source
-            r"npm_[A-Za-z0-9]{20,}",  # hardcoded npm publish token regex in source
-            r"\(\s*\d{7,}\s*\^\s*\d{7,}\s*\)",  # integer XOR-pair obfuscation (Coruna pattern)
-            r"0xFEEDFACF",  # Mach-O ARM64 magic — iOS/macOS exploit kit architecture fingerprinting (Coruna art-template)
-            r"\[[^\]]{15,}\]\.map\s*\(\s*(?:function\s*\([a-z]\)\s*\{[^}]{0,40}\}|[a-z]\s*=>)\s*String\.fromCharCode\s*\([a-z]\s*\^\s*\d{1,3}\s*\)\s*\)\.join\s*\(\s*['\"]['\"]",  # per-char XOR array string obfuscation (Coruna art-template May 2026)
-        ],
-        ".ts": [
-            r"\b_0x[0-9a-fA-F]{4,}\b",
-            r"\beval\s*\(\s*atob\s*\(",
-            r"\bnew\s+Function\s*\(\s*atob\s*\(",
-        ],
-        ".mjs": [
-            r"\b_0x[0-9a-fA-F]{4,}\b",
-            r"\beval\s*\(\s*atob\s*\(",
-        ],
-        ".py": [
-            r"\bexec\s*\(\s*compile\s*\(",  # exec(compile(...)) obfuscation
-            r"\bexec\s*\(\s*base64\b",
-            r"\beval\s*\(\s*base64\b",
-            r"__import__\s*\(\s*['\"]base64['\"]\s*\)\s*\.\s*b64decode",
-            r"gh[op]_[A-Za-z0-9]{20,}",  # GitHub PAT regex being searched for in filesystem
-            r"npm_[A-Za-z0-9]{20,}",  # npm token regex being searched for
-        ],
-        ".rb": [
-            r"\beval\s*\(\s*Base64\.decode64\s*\(",  # eval(Base64.decode64(...)) Ruby payload
-            r"\beval\s*\(.*\.pack\s*\(",  # eval([hex].pack('H*')) hex-to-binary exec
-            r"\.pack\s*\(\s*['\"]H\*['\"]",  # hex pack — common Ruby payload delivery
-            r"rubygems_api_key:\s*\w{10,}",  # hardcoded RubyGems API key in source (GemStuffer pattern)
-        ],
-        ".php": [
-            r"\beval\s*\(\s*base64_decode\s*\(",  # eval(base64_decode(...))
-            r"\beval\s*\(\s*gzinflate\s*\(",  # eval(gzinflate(...)) — Laravel Lang pattern
-            r"\beval\s*\(\s*gzuncompress\s*\(",
-            r"\beval\s*\(\s*str_rot13\s*\(",
-            r"\beval\s*\(\s*gzdecode\s*\(",
-            r"\bchr\s*\(\s*\d{2,3}\s*\)\s*\.\s*chr\s*\(",  # chr(X).chr(Y) hostname obfuscation (Laravel Lang May 2026)
-            r"array_map\s*\(\s*['\"]chr['\"]\s*,",  # array_map('chr', [...]) char-code domain construction
-            r"fileinode\s*\(\s*__FILE__",  # per-host execution fingerprinting via inode (Laravel Lang stealth, May 2026)
-            r"md5\s*\([^)]*__DIR__[^)]*php_uname",  # host deduplication fingerprint: md5(__DIR__ . php_uname('m') . ...) execution gate (Laravel Lang RCE May 2026)
-        ],
-        ".cs": [
-            r"\[ModuleInitializer\]",  # auto-executes on DLL load (NuGet Chinese UI attack)
-            r"\bRuntimeHelpers\.RunModuleConstructor\b",  # explicit module initializer trigger
-            r"PAGE_EXECUTE_READWRITE",  # VirtualAlloc RWX memory for JIT hook — .NET Reactor Necrobit patching clrjit.dll!getJit (NuGet IR.* campaign May 2026)
-            r"\bclrjit\b",  # direct reference to CLR JIT library — only present when patching the JIT compiler (NuGet IR.* campaign May 2026)
-            r'"[A-Z][a-z]+\s+"\.Trim\(\)\s*\+\s*"[A-Z][a-z]+',  # Win32 API name split across trimmed string literals to evade static scanning (NuGet Chinese UI campaign May 2026)
-            r"ProgramData\\Microsoft OneDrive\\keys\.dat",  # credential staging path used by NuGet IR.* to store harvested secrets before C2 upload (May 2026)
-        ],
-        ".rs": [
-            r"""['"']cargo-build-helper-\d{4}['"']""",  # TrapDoor campaign XOR key — no legitimate Rust crate embeds a year-stamped helper key (TrapDoor Crates.io May 2026)
-        ],
-        ".gemspec": [
-            r"""s\.(?:summary|description)\s*=\s*['"](?:result|o|x|data)['"]""",  # auto-generated placeholder metadata in exfiltration gem (GemStuffer May 2026)
-        ],
-    }.items()
-}
-# Any single line this long was machine-generated (normal minification tops out ~10KB)
-_OBFUSCATION_LINE_THRESHOLD = 100_000
-
-# Zero-width Unicode characters used for steganographic AI prompt injection (TrapDoor May 2026).
-# U+200B/200C/200D zero-width spaces, U+2060 word joiner, U+FEFF BOM mid-text, U+FFFC replacement.
-_ZERO_WIDTH_RE = re.compile("[​‌‍⁠﻿￼]")
-
-# Extensions where zero-width Unicode steganography is checked (invisible chars have no legit use).
-_ZERO_WIDTH_SOURCE_EXTENSIONS = frozenset({".js", ".ts", ".mjs", ".cjs", ".py", ".rb", ".php"})
-
-# Patterns that indicate OS-level persistence being installed from a lifecycle hook.
-_PERSISTENCE_PATTERNS: list[re.Pattern[str]] = [
-    re.compile(p)
-    for p in [
-        r"LaunchAgents",  # macOS LaunchAgent plist drop (Mini Shai-Hulud TanStack)
-        r"\blaunchctl\s+load\b",  # register macOS daemon
-        r"\bsystemctl\s+--user\b",  # systemd user service registration
-        r"~[/\\]\.config[/\\]systemd[/\\]user[/\\]",  # systemd user service path
-        r"\bpm2\s+(?:start|save|startup)\b",  # pm2 process manager daemon (Sonatype Q2 2025)
-        r"crontab\s+-[il]\b|crontab\s+[^-\s]",  # crontab modification
-        r"\bnpx\s+pm2\b|\brequire\s*\(['\"]pm2['\"]\)",  # pm2 via npx or require
-        r"github\.com/[^/\s]+/[^/\s]+/releases/download/bun-v",  # Bun runtime bootstrap (Shai-Hulud)
-        r"\btrufflehog\b|\bgitleaks\b|\bdetect-secrets\b",  # weaponised secrets scanner
-        r"rm\s+-rf\s+(?:~/|~[/\\]|\$HOME[/\\])",  # home dir wipe (Mini Shai-Hulud scorched-earth)
-        r"(?:writeFile|writeFileSync|open|write)\s*[(\s,]*['\"](?:\.cursorrules|CLAUDE\.md|\.cursor/rules|\.aider\.conf)",  # AI coding assistant context hijacking (TrapDoor May 2026)
-        r"site-packages[/\\][^\n]{0,80}\.pth",  # .pth file injection into site-packages for Python startup persistence (CanisterWorm/TeamPCP/LiteLLM Apr 2026)
-        r"Dir\.home[^\n]{0,60}(?:\.aws|\.ssh|\.npmrc)",  # credential file read via Dir.home in install hook (extconf.rb harvest gap — BufferZoneCorp May 2026)
-        r"\.gem/credentials",  # RubyGems API key file access in install hook (extconf.rb credential theft)
-    ]
-]
-
-# Patterns for npm worm self-propagation: reads credentials AND calls publish endpoint.
-_NPM_CRED_READ_RE = re.compile(
-    r"\.npmrc|NPM_TOKEN|NODE_AUTH_TOKEN|npm_[A-Za-z0-9]{20,}|~[/\\]\.npm[/\\]_authtoken", re.IGNORECASE
-)
-_NPM_PUBLISH_RE = re.compile(
-    r"registry\.npmjs\.org[^\n]{0,60}(?:publish|packages|whoami)"
-    r"|npm\s+publish\b|@npmcli/[^\n]{0,40}publish|npm\s+pack\b"
-    r"|/-/npm/v1/tokens",  # npm token enumeration — worm validating stolen token before self-propagation (Mini Shai-Hulud/TanStack)
-    re.IGNORECASE,
-)
 
 # npm dependency version prefixes that bypass the registry (git/URL sourced)
 _GIT_DEP_PREFIXES = ("github:", "git+", "git://", "bitbucket:", "gitlab:", "file:")
@@ -835,7 +500,7 @@ def _build_diff(
                 if _has_obfuscation(new_map[rel], suffix):
                     obfuscated_code = True
             # Dual gzip+base64 encoding — layered evasion of text-based scanners
-            if not obfuscated_code and suffix in {".py", ".js", ".php", ".rb", ".ts"}:
+            if not obfuscated_code and suffix in GZIP_B64_EXTENSIONS:
                 if _has_gzip_b64_payload(new_map[rel]):
                     obfuscated_code = True
             # Check install hooks for persistence mechanisms (LaunchAgent, pm2, systemd, etc.)
@@ -1351,7 +1016,6 @@ def _has_gzip_b64_payload(path: Path) -> bool:
     text-based scanners (seen in npm/pip campaigns, Socket blog May 2026).
     Requires ≥60 additional base64 chars after the magic to avoid false positives.
     """
-    _GZIP_B64_RE = re.compile(r"H4sI[A-Za-z0-9+/]{60,}={0,2}")
     try:
         text = path.read_text(encoding="utf-8", errors="replace")
         return bool(_GZIP_B64_RE.search(text))

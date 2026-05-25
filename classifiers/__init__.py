@@ -583,7 +583,9 @@ def _rule_based(signals: PackageChecks) -> Verdict:
         if signals.age.release_age_hours is not None
         else "age unknown"
     )
-    downloads = f"{signals.metadata.weekly_downloads:,}" if signals.metadata.weekly_downloads else "unknown"
+    downloads = (
+        f"{signals.metadata.weekly_downloads:,}" if signals.metadata.weekly_downloads else "unknown"
+    )
     return Verdict(
         classification="green",
         confidence=0.80,

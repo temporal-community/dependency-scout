@@ -40,7 +40,9 @@ class RubyGemsProvider(EcosystemProviderBase):
     # fetch_metadata
     # ------------------------------------------------------------------
 
-    async def fetch_metadata(self, package: str, old_version: str, new_version: str) -> MetadataChecks:
+    async def fetch_metadata(
+        self, package: str, old_version: str, new_version: str
+    ) -> MetadataChecks:
         client = get_client()
         gem_resp, dl_resp = await asyncio.gather(
             client.get(f"https://rubygems.org/api/v1/gems/{package}.json", timeout=15.0),

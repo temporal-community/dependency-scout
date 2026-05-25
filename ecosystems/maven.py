@@ -71,7 +71,9 @@ class MavenProvider(EcosystemProviderBase):
     # fetch_metadata
     # ------------------------------------------------------------------
 
-    async def fetch_metadata(self, package: str, old_version: str, new_version: str) -> MetadataChecks:
+    async def fetch_metadata(
+        self, package: str, old_version: str, new_version: str
+    ) -> MetadataChecks:
         group_id, artifact_id = self._parse(package)
         pom_url = f"{self._artifact_base(group_id, artifact_id, new_version)}.pom"
 

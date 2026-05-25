@@ -45,7 +45,9 @@ class PipProvider(EcosystemProviderBase):
     # fetch_metadata
     # ------------------------------------------------------------------
 
-    async def fetch_metadata(self, package: str, old_version: str, new_version: str) -> MetadataChecks:
+    async def fetch_metadata(
+        self, package: str, old_version: str, new_version: str
+    ) -> MetadataChecks:
         client = get_client()
         resp = await client.get(f"https://pypi.org/pypi/{package}/{new_version}/json", timeout=15.0)
         if resp.status_code == 404:

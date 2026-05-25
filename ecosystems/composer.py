@@ -68,7 +68,9 @@ class ComposerProvider(EcosystemProviderBase):
     # fetch_metadata
     # ------------------------------------------------------------------
 
-    async def fetch_metadata(self, package: str, old_version: str, new_version: str) -> MetadataChecks:
+    async def fetch_metadata(
+        self, package: str, old_version: str, new_version: str
+    ) -> MetadataChecks:
         vendor, name = self._parse(package)
         client = get_client()
         resp = await client.get(f"{_PACKAGIST}/packages/{vendor}/{name}.json", timeout=15.0)

@@ -1,0 +1,42 @@
+# OS-level persistence and worm propagation detection patterns.
+# Each entry has:
+#   pattern: regex string
+#   desc:    human-readable explanation
+
+patterns:
+- pattern: LaunchAgents
+  desc: macOS LaunchAgent plist drop (Mini Shai-Hulud TanStack)
+- pattern: \blaunchctl\s+load\b
+  desc: register macOS daemon
+- pattern: \bsystemctl\s+--user\b
+  desc: systemd user service registration
+- pattern: ~[/\\]\.config[/\\]systemd[/\\]user[/\\]
+  desc: systemd user service path
+- pattern: \bpm2\s+(?:start|save|startup)\b
+  desc: pm2 process manager daemon (Sonatype Q2 2025)
+- pattern: crontab\s+-[il]\b|crontab\s+[^-\s]
+  desc: crontab modification
+- pattern: \bnpx\s+pm2\b|\brequire\s*\(['\"]pm2['\"]\)
+  desc: pm2 via npx or require
+- pattern: github\.com/[^/\s]+/[^/\s]+/releases/download/bun-v
+  desc: Bun runtime bootstrap (Shai-Hulud)
+- pattern: \btrufflehog\b|\bgitleaks\b|\bdetect-secrets\b
+  desc: weaponised secrets scanner
+- pattern: rm\s+-rf\s+(?:~/|~[/\\]|\$HOME[/\\])
+  desc: home dir wipe (Mini Shai-Hulud scorched-earth)
+- pattern: (?:writeFile|writeFileSync|open|write)\s*[(\s,]*['\"](?:\.cursorrules|CLAUDE\.md|\.cursor/rules|\.aider\.conf)
+  desc: AI coding assistant context hijacking (TrapDoor May 2026)
+- pattern: site-packages[/\\][^\n]{0,80}\.pth
+  desc: .pth file injection into site-packages for Python startup persistence (CanisterWorm/TeamPCP/LiteLLM Apr 2026)
+- pattern: Dir\.home[^\n]{0,60}(?:\.aws|\.ssh|\.npmrc)
+  desc: credential file read via Dir.home in install hook (extconf.rb harvest gap - BufferZoneCorp May 2026)
+- pattern: \.gem/credentials
+  desc: RubyGems API key file access in install hook (extconf.rb credential theft)
+worm_propagation:
+  desc: 'npm worm: reads credentials AND calls publish endpoint in same file'
+  credential_read:
+    pattern: \.npmrc|NPM_TOKEN|NODE_AUTH_TOKEN|npm_[A-Za-z0-9]{20,}|~[/\\]\.npm[/\\]_authtoken
+    desc: reads npm credentials from filesystem
+  publish_endpoint:
+    pattern: registry\.npmjs\.org[^\n]{0,60}(?:publish|packages|whoami)|npm\s+publish\b|@npmcli/[^\n]{0,40}publish|npm\s+pack\b|/-/npm/v1/tokens
+    desc: calls npm registry publish endpoint or enumerates tokens

@@ -26,9 +26,11 @@ import activities.package_diff as pkg_diff_module
 from ecosystems import safe_zip_extractall as _safe_zip_extractall
 from ecosystems import validate_archive_url as _validate_archive_url
 from models import PackageChecks, PackageDiffChecks, ReleaseAgeChecks
+from detections import (
+    SUSPICIOUS_PACKAGE_FILES as _SUSPICIOUS_PACKAGE_FILES,
+    SUSPICIOUS_PACKAGE_PREFIXES as _SUSPICIOUS_PACKAGE_PREFIXES,
+)
 from activities.package_diff import (
-    _SUSPICIOUS_PACKAGE_FILES,
-    _SUSPICIOUS_PACKAGE_PREFIXES,
     _added_lines_have_net_calls,
     _build_diff,
     _cargo_git_deps_added,
@@ -3893,8 +3895,7 @@ def test_net_calls_rb_dir_home_aws(tmp_path):
         tmp_path / "new",
         {
             "lib/harvest.rb": (
-                "# nothing\n"
-                "creds = File.read(File.join(Dir.home, '.aws/credentials'))\n"
+                "# nothing\ncreds = File.read(File.join(Dir.home, '.aws/credentials'))\n"
             )
         },
     )
@@ -3907,12 +3908,7 @@ def test_net_calls_rb_dir_home_ssh(tmp_path):
     old = _write_files(tmp_path / "old", {"lib/utils.rb": "# nothing\n"})
     new = _write_files(
         tmp_path / "new",
-        {
-            "lib/utils.rb": (
-                "# nothing\n"
-                "key = File.read(File.join(Dir.home, '.ssh/id_rsa'))\n"
-            )
-        },
+        {"lib/utils.rb": ("# nothing\nkey = File.read(File.join(Dir.home, '.ssh/id_rsa'))\n")},
     )
     _, _, _, _, net_calls, *_ = _build_diff(old, new)
     assert net_calls is True
@@ -3923,10 +3919,13 @@ def test_net_calls_rb_dir_home_ssh(tmp_path):
 
 def test_persistence_pth_site_packages_detected():
     """site-packages/*.pth reference in install code triggers persistence_mechanism_added."""
-    assert _has_persistence_mechanism(
-        "path = site.getsitepackages()[0] + '/site-packages/evil.pth'\n"
-        "open(path, 'w').write('import evil_startup')"
-    ) is True
+    assert (
+        _has_persistence_mechanism(
+            "path = site.getsitepackages()[0] + '/site-packages/evil.pth'\n"
+            "open(path, 'w').write('import evil_startup')"
+        )
+        is True
+    )
 
 
 def test_persistence_pth_in_postinstall(tmp_path):
@@ -3973,8 +3972,7 @@ def test_persistence_extconf_dir_home_aws(tmp_path):
         tmp_path / "new",
         {
             "ext/extconf.rb": (
-                "# nothing\n"
-                "aws_key = File.read(File.join(Dir.home, '.aws/credentials'))\n"
+                "# nothing\naws_key = File.read(File.join(Dir.home, '.aws/credentials'))\n"
             )
         },
     )

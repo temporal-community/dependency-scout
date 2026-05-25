@@ -1,0 +1,39 @@
+# File-type-based detection lists.
+# These are checked against filenames and path prefixes in package archives.
+
+suspicious_filenames:
+- .cursorrules
+- CLAUDE.md
+- settings.json
+- .env
+- .env.local
+- .env.production
+- package.md
+suspicious_path_prefixes:
+- .claude/
+- .vscode/
+- .idea/
+- .devcontainer
+- .github/workflows/
+dangerous_binary_suffixes:
+- .so
+- .pyd
+- .dll
+- .node
+- .pkl
+- .pickle
+- .bundle
+install_hook_names:
+- setup.py
+- install.js
+- postinstall.js
+- preinstall.js
+- extconf.rb
+- build.rs
+- tools/install.ps1
+- tools/init.ps1
+npm_install_scripts:
+- install
+- preinstall
+- postinstall
+- prepare

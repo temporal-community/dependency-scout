@@ -91,7 +91,9 @@ class RemoteEcosystemProvider(EcosystemProviderBase):
     # EcosystemProvider methods
     # ------------------------------------------------------------------
 
-    async def fetch_metadata(self, package: str, old_version: str, new_version: str) -> MetadataChecks:
+    async def fetch_metadata(
+        self, package: str, old_version: str, new_version: str
+    ) -> MetadataChecks:
         """POST fetch_metadata — request: {package, old_version, new_version}
         Response: MetadataChecks fields (weekly_downloads, is_major_bump, package_description).
         """
