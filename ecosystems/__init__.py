@@ -185,6 +185,12 @@ def get_name_re(ecosystem: str) -> re.Pattern | None:
     return meta.name_re if meta is not None else None
 
 
+def get_osv_name(ecosystem: str) -> str:
+    """Return the OSV ecosystem string for this ecosystem (empty string if none)."""
+    meta = _get_metadata_registry().get(ecosystem)
+    return meta.osv_name if meta is not None else ""
+
+
 # ---------------------------------------------------------------------------
 # Shared utilities used by multiple providers
 # ---------------------------------------------------------------------------
