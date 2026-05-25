@@ -1,6 +1,6 @@
 from temporalio import activity
 
-from ecosystems import get_osv_name
+from ecosystems import get_meta
 from models import OSVChecks
 from helpers.cache import ActivityCache
 from helpers.http import get_client
@@ -18,7 +18,8 @@ async def check(ecosystem: str, package: str, old_version: str, new_version: str
         activity.logger.debug("osv cache hit: %s %s", package, new_version)
         return hit
 
-    osv_ecosystem = get_osv_name(ecosystem)
+    meta = get_meta(ecosystem)
+    osv_ecosystem = meta.osv_name if meta else ""
     client = get_client()
     resp = await client.post(
         "https://api.osv.dev/v1/query",
