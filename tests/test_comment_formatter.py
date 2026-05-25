@@ -148,7 +148,7 @@ def test_yellow_many_flags_folds_tail(pr):
     assert "- flag two" in out
     assert "- flag three" in out
     assert "<details>" in out
-    assert "and 2 more signals" in out
+    assert "and 2 more checks" in out
     assert "- flag four" in out
     assert "- flag five" in out
 
@@ -177,8 +177,8 @@ def test_fold_uses_singular_signal_noun(pr):
     flags = ["flag one", "flag two", "flag three", "flag four"]
     verdict = Verdict(classification="yellow", confidence=0.6, reasoning="Issues.", flags=flags)
     out = format_comment(pr, verdict)
-    assert "and 1 more signal" in out
-    assert "and 1 more signals" not in out
+    assert "and 1 more check" in out
+    assert "and 1 more checks" not in out
 
 
 def test_flags_are_sanitized(pr):
@@ -198,12 +198,12 @@ def test_flags_are_sanitized(pr):
 
 def test_no_signals_table_without_signals(pr, green_verdict):
     out = format_comment(pr, green_verdict)
-    assert "| Signal |" not in out
+    assert "| Check |" not in out
 
 
 def test_signals_table_present_with_signals(pr, green_verdict, signals):
     out = format_comment(pr, green_verdict, signals)
-    assert "| Signal | Value |" in out
+    assert "| Check | Value |" in out
 
 
 def test_signals_release_age_rendered(pr, green_verdict, signals):
@@ -289,7 +289,7 @@ def test_workflow_url_defaults(pr, green_verdict, monkeypatch):
 
 def test_config_url_points_to_repo(pr, green_verdict):
     out = format_comment(pr, green_verdict)
-    assert "https://github.com/owner/repo/blob/HEAD/.github/triage-agent.yml" in out
+    assert "https://github.com/owner/repo/blob/HEAD/.github/dependency-scout.yml" in out
 
 
 # --- reasoning is sanitized in output ---

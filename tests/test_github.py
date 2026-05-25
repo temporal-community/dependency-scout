@@ -349,7 +349,7 @@ async def test_close_pr_422_raises_non_retryable(client, pr, with_pat):
         ".github/actions/setup/action.yml",
         ".github/CODEOWNERS",
         ".github/dependabot.yml",
-        ".github/triage-agent.yml",
+        ".github/dependency-scout.yml",
         ".gitlab-ci.yml",
         ".gitlab-ci.yaml",
         "Jenkinsfile",

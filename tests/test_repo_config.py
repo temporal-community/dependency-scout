@@ -1,4 +1,5 @@
 import base64
+from urllib.parse import quote as _quote
 
 import httpx
 import pytest
@@ -194,8 +195,6 @@ async def test_env_provider_invalid_int_falls_back_to_default(monkeypatch):
 # ---------------------------------------------------------------------------
 # GitLabConfigProvider
 # ---------------------------------------------------------------------------
-
-from urllib.parse import quote as _quote
 
 _PR_GITLAB = PRContext(
     repo="owner/repo",

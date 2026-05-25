@@ -343,11 +343,11 @@ def print_repo_config() -> None:
   Add this file to any repo where you want the Scout to do more than comment.
   (Without it, the Scout posts comments but never auto-merges or blocks.)
 
-  Create .github/triage-agent.yml:
+  Create .github/dependency-scout.yml:
     """)
     )
     snippet = textwrap.dedent("""\
-    # .github/triage-agent.yml
+    # .github/dependency-scout.yml
     # Remove or comment out any section you don't want.
 
     # Auto-merge green verdicts (safe, well-established packages, no flags)

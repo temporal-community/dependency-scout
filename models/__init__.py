@@ -35,7 +35,7 @@ class PRContext(BaseModel):
 
 
 class RepoConfig(BaseModel):
-    """Loaded from .github/triage-agent.yml in target repo. All fields optional.
+    """Loaded from .github/dependency-scout.yml in target repo. All fields optional.
 
     Default behavior (no config file): posts a comment on every PR, closes RED PRs,
     no auto-merge, no review requests. Set block_classifications: [] for fully observe-only.

@@ -169,7 +169,7 @@ class GitHubPlatformClient:
         activity.logger.info(f"Merged {pr.repo}#{pr.pr_number} (squash)")
 
     async def close_pr(self, pr: PRContext, reason: str, ignore_bot: bool = False) -> None:
-        body = f"**Dependabot Triage Agent — closing this PR.**\n\n{reason}"
+        body = f"**Dependency Scout — closing this PR.**\n\n{reason}"
         if ignore_bot:
             body += "\n\n@dependabot ignore this dependency"
         if self._dry_run():

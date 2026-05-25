@@ -47,7 +47,7 @@ Every PR gets a comment like this:
 
 ---
 
-> **Dependabot Triage Agent — 🟡 YELLOW**
+> **Dependency Scout — 🟡 YELLOW**
 >
 > **Confidence:** 75%
 >

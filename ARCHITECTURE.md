@@ -291,7 +291,7 @@ Select it with `CLASSIFIER=gemini` in `.env`.
 
 ### Extra check activities
 
-Per-repo custom checks can be added without writing a plugin package. Any Temporal activity registered with the worker can be listed in `.github/triage-agent.yml`:
+Per-repo custom checks can be added without writing a plugin package. Any Temporal activity registered with the worker can be listed in `.github/dependency-scout.yml`:
 
 ```yaml
 extra_check_activities:

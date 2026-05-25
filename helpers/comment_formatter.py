@@ -6,8 +6,8 @@ from models import PRContext, PackageChecks, Verdict
 def _config_url(pr: PRContext) -> str:
     if pr.platform == "gitlab":
         base = os.environ.get("GITLAB_BASE_URL", "https://gitlab.com").rstrip("/")
-        return f"{base}/{pr.repo}/-/blob/HEAD/.gitlab/triage-agent.yml"
-    return f"https://github.com/{pr.repo}/blob/HEAD/.github/triage-agent.yml"
+        return f"{base}/{pr.repo}/-/blob/HEAD/.gitlab/dependency-scout.yml"
+    return f"https://github.com/{pr.repo}/blob/HEAD/.github/dependency-scout.yml"
 
 
 _MAX_REASONING_LEN = 500
@@ -45,7 +45,7 @@ def format_comment(pr: PRContext, verdict: Verdict, signals: PackageChecks | Non
     config_url = _config_url(pr)
 
     lines = [
-        f"## Dependabot Triage Agent — {badge}",
+        f"## Dependency Scout — {badge}",
         "",
         f"**Confidence:** {verdict.confidence:.0%}",
         "",
@@ -62,7 +62,7 @@ def format_comment(pr: PRContext, verdict: Verdict, signals: PackageChecks | Non
         else:
             visible = sanitized[:_FLAG_FOLD_THRESHOLD]
             hidden = sanitized[_FLAG_FOLD_THRESHOLD:]
-            noun = "signal" if len(hidden) == 1 else "signals"
+            noun = "check" if len(hidden) == 1 else "checks"
             lines += ["**Flags:**", *[f"- {f}" for f in visible]]
             lines += [
                 f"<details><summary>and {len(hidden)} more {noun}</summary>",
@@ -75,8 +75,8 @@ def format_comment(pr: PRContext, verdict: Verdict, signals: PackageChecks | Non
 
     if signals:
         lines += [
-            "| Signal | Value |",
-            "|--------|-------|",
+            "| Check | Value |",
+            "|-------|-------|",
             f"| Release age | {signals.age.release_age_hours:.0f}h |"
             if signals.age.release_age_hours is not None
             else "| Release age | unknown |",
