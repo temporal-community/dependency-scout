@@ -1,8 +1,10 @@
 # Dependency Scout
 
-You have 47 unreviewed Dependabot PRs. You're going to merge most of them anyway. The maintainers of [XZ Utils](https://en.wikipedia.org/wiki/XZ_Utils_backdoor), [event-stream](https://blog.npmjs.org/post/180565383195/details-about-the-event-stream-incident), and dozens of other projects were just as capable and well-intentioned — the attacks were sophisticated enough that no amount of careful eyeballing would have caught them.
+You have 47 unreviewed Dependabot PRs. It’s midnight, CI is green, and you’ve merged dozens of these before. And yet...
 
-**This bot gives every dependency PR a real second opinion before it merges.**
+Maintainers aren’t careless — they’re exhausted. And modern supply-chain attacks are specifically designed to slip past smart, well-intentioned humans doing their best under impossible workloads.
+
+**This tool gives every dependency PR a data-backed second opinion before it merges.**
 
 **What it checks:**
 - **Known vulnerabilities** — [OSV](https://osv.dev) database (includes [OpenSSF malicious-packages](https://github.com/ossf/malicious-packages))
