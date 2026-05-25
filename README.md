@@ -188,6 +188,8 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for full examples of each.
 - [x] Replay test fixtures (workflow determinism guarantee)
 - [x] Ecosystem plugin architecture — entry points + `RemoteEcosystemProvider` HTTP bridge for non-Python stacks
 - [x] Pluggable classifier — Claude, OpenAI, Ollama, or any `triage_agent.classifiers` plugin
+- [x] Signal activity plugin architecture — third-party signals via `triage_agent.activities` entry points, surfaced to LLM automatically
+- [x] Temporal Cloud support — TLS credentials in `.env`, no code changes needed vs local dev
 - [x] Renovate full support — title variants with/without `dependency` keyword, arrow and from/to body extraction, pre-release versions, false-positive prevention
 
 ---
