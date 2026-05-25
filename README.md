@@ -113,6 +113,44 @@ Open **http://localhost:8233** to watch the workflow run in the Temporal UI. No 
 
 Copy `.env.example` to `.env` and fill in what you have, or run `uv run python setup.py` to be walked through it interactively.
 
+### From local test to live PRs
+
+The test above fires a one-off triage against a public package. To get the Scout commenting on your actual Dependabot/Renovate PRs, you need two more things:
+
+**1. A running worker** — the `uv run python -m worker` process from above, but somewhere that stays up. The cheapest options:
+
+- A small VPS (the worker idles at ~50 MB RAM between triages)
+- A free-tier fly.io or Railway app using the included `Dockerfile`
+- Temporal Cloud (free tier) + any serverless function for the worker — see [DEPLOYMENT.md](DEPLOYMENT.md)
+
+**2. A webhook pointing at the worker** — GitHub/GitLab needs to call your FastAPI server when a PR opens:
+
+```bash
+# Start the webhook receiver (port 8000 by default)
+uv run uvicorn api.webhook:app --host 0.0.0.0 --port 8000
+
+# Expose it if developing locally (ngrok, cloudflare tunnel, etc.)
+ngrok http 8000
+```
+
+Then in your GitHub repo: Settings → Webhooks → Add webhook:
+- Payload URL: `https://your-host/webhook/github`
+- Content type: `application/json`
+- Secret: same value as `GITHUB_WEBHOOK_SECRET` in your `.env`
+- Events: **Pull requests** only
+
+Full production setup (TLS, process manager, Temporal Cloud option) is in [DEPLOYMENT.md](DEPLOYMENT.md).
+
+### Why does this need Temporal at all?
+
+Fair question. You could imagine this as a GitHub Action — trigger on PR open, run checks, post a comment. The problem is reliability and deduplication:
+
+- **Reliability**: If your server restarts mid-triage, a GitHub Action just fails silently. Temporal automatically retries failed steps and resumes exactly where it left off — even if the process crashes and restarts.
+- **Deduplication**: If 30 repos all open Dependabot PRs for `requests==2.32.0` on the same day, a naive implementation downloads the same 2 MB archive and runs the same API calls 30 times. Temporal lets the second through thirtieth repo attach to the already-running triage and get the same result for free.
+- **Long waits**: Waiting for a human to approve a YELLOW verdict might take days. A Temporal workflow can pause and resume when the approval arrives — no polling, no timeouts.
+
+In practice, for a single-repo installation with light PR volume, Temporal is invisible infrastructure. The `temporal server start-dev` command in the quickstart above is all you ever need to interact with it. For production, [Temporal Cloud](https://temporal.io/cloud) has a free tier and removes the need to run the Temporal server yourself at all.
+
 ---
 
 ## Configuring your repo
@@ -158,6 +196,43 @@ block_classifications: [red]
 # Empty file, or omit the file entirely — this is the default.
 block_classifications: []   # override the default red-blocking if you want truly zero action
 ```
+
+---
+
+## Ecosystem coverage
+
+The Scout ships with eight ecosystems. Signal availability varies by what the registry exposes:
+
+| Ecosystem | Registry | Download stats | Maintainer change | SLSA attestation | Archive diff |
+|---|---|---|---|---|---|
+| pip (Python) | PyPI | ✅ weekly (pypistats) | ✅ | ✅ Sigstore | ✅ |
+| npm (Node.js) | npmjs.com | ✅ weekly | ✅ | ✅ Sigstore | ✅ |
+| RubyGems | rubygems.org | ✅ daily avg | ✅ | — | ✅ |
+| Cargo (Rust) | crates.io | ✅ 90-day | ✅ per-version publisher | — | ✅ |
+| Composer (PHP) | Packagist | ✅ monthly avg | — | — | ✅ |
+| Maven (Java/JVM) | Maven Central | — | ✅ | — | ✅ |
+| NuGet (.NET) | nuget.org | — | — | — | ✅ |
+| Go modules | proxy.golang.org | — | — | — | ✅ |
+
+All ecosystems get: OSV vulnerability check, Socket.dev score (npm-focused but available), release age, GitHub release checks (tag signing, timing, CI changes), OpenSSF Scorecard, deps.dev deprecation, and version staleness detection. These signals don't depend on the registry — they work off the package's linked GitHub repo and public databases.
+
+**My ecosystem isn't in this list.** Adding it is about 150 lines in one Python file — see [CONTRIBUTING.md](CONTRIBUTING.md). If your ecosystem logic lives in a non-Python stack (PHP, Go, Ruby, Java…), the `RemoteEcosystemProvider` bridge lets you write a small HTTP service in your language and register it as a plugin — no Python expertise required. The bridge handles all the Temporal integration; your service just responds to POST requests with JSON.
+
+---
+
+## What data leaves your machine
+
+| Data | Where it goes | Notes |
+|---|---|---|
+| Package name, version numbers | OSV, Socket.dev, deps.dev, pypistats | Public registry APIs — this data is already public |
+| Package archive (the actual .whl/.tgz/.gem) | Downloaded to local temp dir, deleted after diff | Never forwarded to any external service |
+| Diff summary (changed file names + added/removed lines) | Your configured LLM (Claude/OpenAI/Ollama) | Up to 100 KB of actual code changes; see below |
+| Package description, release notes, Socket alert strings | Your configured LLM | Labeled as untrusted in the prompt |
+| Source repo URL (from registry metadata) | GitHub API | Used to look up release tags and CI workflow changes |
+
+**The diff summary does include real code lines** from the package archive — the lines that changed between the old and new version. For published packages (PyPI, npm, etc.) this is already public. For private packages on a self-hosted registry, use Ollama to keep analysis fully local: `OLLAMA_HOST=http://localhost:11434` and `OLLAMA_MODEL=llama3.2` in your `.env` and nothing leaves your network.
+
+The rule-based classifier (the default when no LLM key is configured) runs entirely locally — no data is sent to any external service beyond the check APIs listed above.
 
 ---
 

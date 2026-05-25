@@ -4,13 +4,13 @@
 
 The plugin architecture makes this straightforward. Adding Composer, NuGet, or any other ecosystem is approximately 150 lines in one file.
 
-**Step 1 — Create `activities/ecosystems/{name}.py`**
+**Step 1 — Create `ecosystems/{name}.py`**
 
 Implement the `EcosystemProvider` Protocol. Copy an existing provider (e.g. `rubygems.py`) as a starting point. Set `ecosystem_name` to the canonical key used everywhere else — `get_provider()` discovers it automatically:
 
 ```python
-from activities.ecosystems import is_major, parse_upload_time, validate_archive_url
-from activities.models import AttestationChecks, MaintainerChecks, PyPIChecks, ReleaseAgeChecks
+from ecosystems import is_major, parse_upload_time, validate_archive_url
+from models import AttestationChecks, MaintainerChecks, PyPIChecks, ReleaseAgeChecks
 
 class ComposerProvider:
     ecosystem_name = "composer"  # auto-discovered by get_provider()
@@ -22,9 +22,10 @@ class ComposerProvider:
     async def get_archive_url(self, client, package, version) -> tuple[str, str, str] | None: ...
     def extract_archive(self, archive_bytes, filename, dest) -> None: ...
     async def fetch_attestations(self, package, old_version, new_version) -> AttestationChecks: ...
+    async def fetch_release(self, package, old_version, version) -> ReleaseChecks: ...
 ```
 
-`get_archive_url` returns `(url, filename, integrity_string)`. Call `validate_archive_url(url)` before returning — this enforces the CDN allowlist. Add your registry's CDN host to `ALLOWED_CDN_HOSTS` in `activities/ecosystems/__init__.py`.
+`get_archive_url` returns `(url, filename, integrity_string)`. Call `validate_archive_url(url)` before returning — this enforces the CDN allowlist. Add your registry's CDN host to `ALLOWED_CDN_HOSTS` in `ecosystems/__init__.py`.
 
 **Step 2 — Tests**
 
@@ -36,7 +37,7 @@ Add a test section for your ecosystem following the existing npm/rubygems patter
 
 Each check is a parallel activity that gathers one category of supply chain data and returns a typed sub-model. All checks run at the same time; a failing check gets degraded defaults rather than crashing the workflow.
 
-**Step 1 — Define the sub-model in `activities/models.py`**
+**Step 1 — Define the sub-model in `models/`**
 
 ```python
 class MyNewChecks(BaseModel):
@@ -56,7 +57,7 @@ class PackageChecks(BaseModel):
 
 ```python
 from temporalio import activity
-from activities.models import MyNewChecks
+from models import MyNewChecks
 
 @activity.defn(name="activities.my_new_check.check")
 async def check(ecosystem: str, package: str, old_version: str, new_version: str) -> MyNewChecks:
@@ -106,7 +107,7 @@ _CHECK_REGISTRY: list[tuple[str, str, type, bool]] = [
 
 The first element (`"my_new"`) must match the field name you added to `PackageChecks`.
 
-**Step 4 — Use the check in `activities/classifier.py`**
+**Step 4 — Use the check in `classifiers/`**
 
 Add logic to `_rule_based` using `signals.my_new.some_flag`, and/or let the LLM see it — it already appears in the trusted JSON block via `PackageChecks.model_dump()`. Forgetting this step will cause a test failure in `tests/test_check_wiring.py`.
 
@@ -174,7 +175,7 @@ CLASSIFIER=rule_based   # or: claude
 
 ```python
 # my_package/__init__.py
-from activities.models import PackageChecks, Verdict
+from models import PackageChecks, Verdict
 
 class OpenAIClassifier:
     async def classify(self, signals: PackageChecks) -> Verdict:
@@ -203,7 +204,7 @@ The classifier receives the full `PackageChecks` object including `custom_checks
 - **Checks are nested, not flat** — `PackageChecks` holds typed sub-models (`signals.age.release_age_hours`, not `signals.release_age_hours`). Field name collisions between checks are structurally impossible.
 - **The registry is the source of truth** — `_CHECK_REGISTRY` in `package_triage_workflow.py` drives the gather order, the `CHECK_ACTIVITY_NAMES` constant, and the worker registration test. When adding a check, the registry row is the one required workflow-layer edit.
 - **Worker registration is automatic** — `worker.py` scans `activities/*.py` at startup for `@activity.defn`-decorated functions. Creating a new activity file is sufficient; no manual entry in `ACTIVITIES` is needed.
-- **Ecosystem provider registration is automatic** — `get_provider()` scans `activities/ecosystems/*.py` for classes with an `ecosystem_name` attribute, then checks the `dependency_scout.ecosystems` entry points group for installed plugins. Creating a new provider file (or installing a plugin package) is sufficient; no manual registration is needed.
+- **Ecosystem provider registration is automatic** — `get_provider()` scans `ecosystems/*.py` for classes with an `ecosystem_name` attribute, then checks the `dependency_scout.ecosystems` entry points group for installed plugins. Creating a new provider file (or installing a plugin package) is sufficient; no manual registration is needed.
 
 ---
 
@@ -220,16 +221,16 @@ Declare an entry point in your `pyproject.toml`:
 django_packages = "dependency_scout_django:DjangoPackagesProvider"
 ```
 
-`DjangoPackagesProvider` must implement the `EcosystemProvider` Protocol: the four class attributes (`ecosystem_name`, `osv_name`, `dependabot_slug`, `name_re`) and the seven async methods. See any built-in provider in `activities/ecosystems/` for a template.
+`DjangoPackagesProvider` must implement the `EcosystemProvider` Protocol: the four class attributes (`ecosystem_name`, `osv_name`, `dependabot_slug`, `name_re`) and the seven async methods. See any built-in provider in `ecosystems/` for a template.
 
 ### Non-Python bridge packages (PHP, Go, Rust, …)
 
-If your logic lives in a non-Python stack, subclass `RemoteEcosystemProvider` from `activities/ecosystems/remote.py`. It implements all seven protocol methods by POSTing to your service — your bridge package is ~10 lines of Python that configure the URL and ecosystem metadata:
+If your logic lives in a non-Python stack, subclass `RemoteEcosystemProvider` from `ecosystems/remote.py`. It implements all seven protocol methods by POSTing to your service — your bridge package is ~10 lines of Python that configure the URL and ecosystem metadata:
 
 ```python
 # dependency_scout_drupal/__init__.py
 import re
-from activities.ecosystems.remote import RemoteEcosystemProvider
+from ecosystems.remote import RemoteEcosystemProvider
 
 class DrupalProvider(RemoteEcosystemProvider):
     ecosystem_name  = "drupal"
@@ -239,7 +240,7 @@ class DrupalProvider(RemoteEcosystemProvider):
     remote_base_url = "https://drupal-bridge.example.com/triage/v1"
 ```
 
-Your service must expose `POST {base_url}/{method_name}` endpoints. Each endpoint receives the method parameters as a JSON body and responds with the corresponding signal model fields as JSON. The full request/response spec is in the docstrings in `activities/ecosystems/remote.py`.
+Your service must expose `POST {base_url}/{method_name}` endpoints. Each endpoint receives the method parameters as a JSON body and responds with the corresponding signal model fields as JSON. The full request/response spec is in the docstrings in `ecosystems/remote.py`.
 
 ### Adding custom check activities
 
