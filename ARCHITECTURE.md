@@ -106,7 +106,12 @@ Attestation coverage is intentionally narrow: only PyPI (PEP 740) and npm have p
 The diff activity downloads both the old and new package archives and produces a security-focused summary:
 
 - **DANGEROUS BINARY** — new or modified `.so`, `.pyd`, `.dll`, `.node`, `.bundle`, `.pkl` files. These execute arbitrary code when imported. Automatic RED signal.
-- **Install hook changes** — `setup.py`, `postinstall.js`, `preinstall.js`, `extconf.rb` run code during `pip install` / `npm install`. New or modified hooks are flagged prominently.
+- **Install hook changes** — `setup.py`, `postinstall.js`, `preinstall.js`, `extconf.rb`, `build.rs` run code during install. New or modified hooks are flagged prominently. Also catches: new npm `install`/`postinstall` script keys in `package.json`, new `autoload.files` entries in `composer.json` (execute on every `require 'vendor/autoload.php'`), `.pth` files with `import` statements (execute at Python startup), `go.sum` entry removals (disables module verification).
+- **Obfuscated code** — `eval(atob(...))`, `exec(compile(...))`, `_0x`-prefixed hex variable names, single lines >100 KB, `eval(base64_decode(...))` in PHP. Also detects zero-width Unicode characters embedded in AI editor config files (`.cursorrules`, `CLAUDE.md`) — the TrapDoor attack vector for hidden LLM instructions.
+- **Outbound network calls in library code** — `requests.get(...)`, `fetch(...)`, `Net::HTTP`, `HttpClient`, etc. in non-install-hook files. Flags new code that phones home from inside the package.
+- **Suspicious files that shouldn't be in a package archive** — `.env`, `.env.production`, `CLAUDE.md`, `.cursorrules`. Their presence in a published archive is an immediate red flag.
+- **Binary data in non-binary-extension files** — a `.js` or `.py` file containing binary content is a classic payload embedding technique.
+- **Git/URL-sourced dependencies** — new `github:`, `git+`, or `https://` dependency specs in `package.json`, `requirements.txt`, `pyproject.toml`, or `Cargo.toml` bypass the registry and its malware scanning.
 - **New direct dependencies** — net new entries in `package.json` or `requirements.txt`. Adding 5+ new dependencies in a minor bump is unusual and flagged YELLOW.
 - **High-signal file diffs** — `__init__.py`, `package.json`, `index.js`, `Rakefile`, `*.gemspec` shown as full unified diffs because these are primary attack targets.
 - **Other changed files** — listed by name so you know what moved without drowning in noise.
@@ -185,11 +190,13 @@ The Scout processes untrusted data by design — it downloads packages uploaded 
 
 **Tampered downloads** — PyPI archives are verified against SHA-256 digests from the registry JSON. npm tarballs are verified against `dist.integrity` (SHA-512 SRI format). `hmac.compare_digest` prevents timing side-channels. A mismatch raises a non-retryable error rather than analyzing a potentially tampered archive.
 
-**Zip symlink attacks** — a zip can contain a symlink entry with a benign filename pointing to `/etc/passwd`. `_safe_zip_extractall()` rejects any member where the external attributes mark it as a symlink, before extraction begins.
+**Zip symlink attacks** — a zip can contain a symlink entry with a benign filename pointing to `/etc/passwd`. `safe_zip_extractall()` rejects any member where the external attributes mark it as a symlink, before extraction begins.
 
-**Zip bombs** — accumulated `file_size` across all members is tracked against a 100 MB cap.
+**Zip bombs** — `safe_zip_extractall()` tracks accumulated `file_size` across all members against a 100 MB cap.
 
-**Tar path traversal** — `tarfile.extractall(filter="data")` blocks absolute paths, `..` components, and dangerous symlinks.
+**Tar path traversal** — `safe_tar_extractall()` passes `filter="data"` to block absolute paths, `..` components, and dangerous symlinks.
+
+**Tar bombs** — `safe_tar_extractall()` accumulates uncompressed member sizes against the same 100 MB cap. The 20 MB download cap applies to compressed bytes; a `.tar.gz` near that limit could decompress much larger without this guard.
 
 **Package name injection** — before any value from a PR title reaches a URL or workflow ID, `_validate_parsed_package()` enforces allowlist regexes at the webhook boundary. `../`, null bytes, semicolons, and other injection characters cause the webhook to return `ignored` immediately.
 
@@ -220,7 +227,7 @@ The activity files (`pypi_metadata.py`, `release_age.py`, `maintainer.py`, `pack
 4. **Add** the Dependabot branch slug to `_DEPENDABOT_ECOSYSTEM_MAP` in `helpers/pr_parser.py`
 5. **Add** a name-validation regex entry in `api/webhook.py`'s `_NAME_RE_BY_ECOSYSTEM`
 
-Shared utilities (`validate_archive_url`, `safe_zip_extractall`, `is_major`, `parse_upload_time`, `detect_stale_version_line`) are in `activities/ecosystems/__init__.py`. The CDN allowlist (`ALLOWED_CDN_HOSTS`) lives there too and must be extended for each new registry.
+Shared utilities (`validate_archive_url`, `safe_zip_extractall`, `safe_tar_extractall`, `is_major`, `parse_upload_time`, `detect_stale_version_line`) are in `activities/ecosystems/__init__.py`. The CDN allowlist (`ALLOWED_CDN_HOSTS`) lives there too and must be extended for each new registry.
 
 ---
 
@@ -298,7 +305,7 @@ ENABLE_PR_ACTIONS=false          # set true to enable real PR actions locally
 uv run ruff format .          # format
 uv run ruff check .           # lint
 uv run mypy .                 # type check
-uv run pytest                 # tests (411 total)
+uv run pytest                 # tests (733 total)
 uv run pytest --cov=activities,workflows,helpers,api --cov-report=term-missing
 uv run pytest tests/test_workflow_replay.py -v   # replay/determinism tests only
 ```
