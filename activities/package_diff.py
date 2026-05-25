@@ -66,8 +66,23 @@ HIGH_SIGNAL_NAMES = {
     "Cargo.toml",
     "pom.xml",
     "composer.json",
+    # AI editor config files — no legitimate reason to ship these in a package archive
+    ".cursorrules",
+    "CLAUDE.md",
 }
 HIGH_SIGNAL_SUFFIXES = {".pth", ".gemspec"}
+
+# Files that have no business appearing in a published package archive.
+# A version bump that suddenly includes these is an immediate red flag.
+_SUSPICIOUS_PACKAGE_FILES = frozenset(
+    {
+        ".cursorrules",  # Cursor AI editor rules — executed in developer's coding session
+        "CLAUDE.md",  # Claude Code project instructions — not a package artifact
+        ".env",  # secrets/environment — should never be in a published package
+        ".env.local",
+        ".env.production",
+    }
+)
 
 # Subset of HIGH_SIGNAL_NAMES that execute code on install — changes are an explicit red/yellow flag.
 INSTALL_HOOK_NAMES = {
@@ -158,6 +173,8 @@ _NET_CALL_PATTERNS: dict[str, list[re.Pattern[str]]] = {
             r"\bsubprocess\.(run|Popen|call|check_output|check_call)\s*\(",  # OS exec in library
             r"169\.254\.169\.254",  # AWS/GCP IMDS probe — credential harvesting
             r"api\.telegram\.org/bot",  # Telegram bot C2 exfiltration channel
+            r"\.icp0\.io",  # ICP canister C2 (CanisterWorm) — decentralised exfil endpoint
+            r"open\s*\([^,]*(?:\.bashrc|\.zshrc|\.profile|bash_profile)[^,]*,\s*['\"]a['\"]",  # shell RC append
         ],
         ".js": [
             r"\bfetch\s*\(",
@@ -172,6 +189,8 @@ _NET_CALL_PATTERNS: dict[str, list[re.Pattern[str]]] = {
             r"\bdns\.lookup\s*\(",
             r"169\.254\.169\.254",  # AWS/GCP IMDS probe — credential harvesting
             r"api\.telegram\.org/bot",  # Telegram bot C2 exfiltration channel
+            r"\.icp0\.io",  # ICP canister C2 (CanisterWorm) — decentralised exfil endpoint
+            r"(?:appendFileSync|writeFile(?:Sync)?)\s*\([^,]*(?:\.bashrc|\.zshrc|\.profile|bash_profile)",  # shell RC injection
         ],
         ".ts": [
             r"\bfetch\s*\(",
@@ -238,6 +257,8 @@ _OBFUSCATION_PATTERNS: dict[str, list[re.Pattern[str]]] = {
             r"\beval\s*\(\s*atob\s*\(",  # eval(atob(...)) decode-then-exec chain
             r"\beval\s*\(\s*Buffer\.from\s*\(",  # eval(Buffer.from(..., 'base64'))
             r"\bnew\s+Function\s*\(\s*atob\s*\(",  # new Function(atob(...))
+            r"gh[op]_[A-Za-z0-9]{20,}",  # hardcoded GitHub PAT or token regex in source
+            r"npm_[A-Za-z0-9]{20,}",  # hardcoded npm publish token regex in source
         ],
         ".ts": [
             r"\b_0x[0-9a-fA-F]{4,}\b",
@@ -253,6 +274,8 @@ _OBFUSCATION_PATTERNS: dict[str, list[re.Pattern[str]]] = {
             r"\bexec\s*\(\s*base64\b",
             r"\beval\s*\(\s*base64\b",
             r"__import__\s*\(\s*['\"]base64['\"]\s*\)\s*\.\s*b64decode",
+            r"gh[op]_[A-Za-z0-9]{20,}",  # GitHub PAT regex being searched for in filesystem
+            r"npm_[A-Za-z0-9]{20,}",  # npm token regex being searched for
         ],
         ".rb": [
             r"\beval\s*\(\s*Base64\.decode64\s*\(",  # eval(Base64.decode64(...)) Ruby payload
@@ -528,6 +551,11 @@ def _build_diff(
         # .pth files with import statements execute code at Python startup (persistence)
         if suffix == ".pth" and _pth_has_executable_code(new_map[rel]):
             install_script_added = True
+        # AI editor config / secrets files in a package archive are red flags
+        if name in _SUSPICIOUS_PACKAGE_FILES:
+            regular_new_files.append(
+                f"+ {rel} [SUSPICIOUS: should not appear in a package archive]"
+            )
         if suffix in DANGEROUS_BINARY_SUFFIXES:
             dangerous_new.append(rel)
         else:
