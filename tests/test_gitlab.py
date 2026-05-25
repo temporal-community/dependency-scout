@@ -494,7 +494,7 @@ async def test_platform_activity_comment_delegates(pr, verdict, with_token):
     respx.post(f"{BASE_URL}/merge_requests/{PR_NUM}/notes").mock(
         return_value=httpx.Response(201, json={})
     )
-    from pr_actions.actions import comment
+    from pr_actions.platform import comment
 
     env = ActivityEnvironment()
     await env.run(comment, pr, verdict)
@@ -508,7 +508,7 @@ async def test_platform_activity_merge_pr_delegates(pr, with_token):
     respx.put(f"{BASE_URL}/merge_requests/{PR_NUM}/merge").mock(
         return_value=httpx.Response(200, json={})
     )
-    from pr_actions.actions import merge_pr
+    from pr_actions.platform import merge_pr
 
     env = ActivityEnvironment()
     await env.run(merge_pr, pr)
@@ -520,7 +520,7 @@ async def test_platform_activity_close_pr_delegates(pr, with_token):
         return_value=httpx.Response(201, json={})
     )
     respx.put(f"{BASE_URL}/merge_requests/{PR_NUM}").mock(return_value=httpx.Response(200, json={}))
-    from pr_actions.actions import close_pr
+    from pr_actions.platform import close_pr
 
     env = ActivityEnvironment()
     await env.run(close_pr, pr, "test reason")
@@ -529,7 +529,7 @@ async def test_platform_activity_close_pr_delegates(pr, with_token):
 @respx.mock
 async def test_platform_activity_label_delegates(pr, with_token):
     respx.put(f"{BASE_URL}/merge_requests/{PR_NUM}").mock(return_value=httpx.Response(200, json={}))
-    from pr_actions.actions import label
+    from pr_actions.platform import label
 
     env = ActivityEnvironment()
     await env.run(label, pr, "triage-red")
@@ -539,7 +539,7 @@ async def test_platform_activity_label_delegates(pr, with_token):
 async def test_platform_activity_request_review_delegates(pr, with_token):
     respx.get(USERS_URL).mock(return_value=httpx.Response(200, json=[{"id": 1}]))
     respx.put(f"{BASE_URL}/merge_requests/{PR_NUM}").mock(return_value=httpx.Response(200, json={}))
-    from pr_actions.actions import request_review
+    from pr_actions.platform import request_review
 
     env = ActivityEnvironment()
     await env.run(request_review, pr, ["alice"])
@@ -550,7 +550,7 @@ async def test_platform_activity_check_pr_files_delegates(pr, with_token):
     respx.get(f"{BASE_URL}/merge_requests/{PR_NUM}/changes").mock(
         return_value=httpx.Response(200, json={"changes": []})
     )
-    from pr_actions.actions import check_pr_files
+    from pr_actions.platform import check_pr_files
 
     env = ActivityEnvironment()
     result = await env.run(check_pr_files, pr)

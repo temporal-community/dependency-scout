@@ -4,7 +4,7 @@
 
 These functions are called by `PRActionWorkflow` after a triage verdict is reached. They talk to the GitHub or GitLab API (or any external service) to act on the PR. For the triage check functions that produce the verdict, see [`checks/`](../checks/README.md).
 
-All functions live in `actions.py`.
+All functions live in `platform.py`.
 
 ## Actions
 
