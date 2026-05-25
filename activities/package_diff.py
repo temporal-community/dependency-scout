@@ -410,6 +410,8 @@ _OBFUSCATION_PATTERNS: dict[str, list[re.Pattern[str]]] = {
             r"\bRuntimeHelpers\.RunModuleConstructor\b",  # explicit module initializer trigger
             r"PAGE_EXECUTE_READWRITE",  # VirtualAlloc RWX memory for JIT hook — .NET Reactor Necrobit patching clrjit.dll!getJit (NuGet IR.* campaign May 2026)
             r"\bclrjit\b",  # direct reference to CLR JIT library — only present when patching the JIT compiler (NuGet IR.* campaign May 2026)
+            r'"[A-Z][a-z]+\s+"\.Trim\(\)\s*\+\s*"[A-Z][a-z]+',  # Win32 API name split across trimmed string literals to evade static scanning (NuGet Chinese UI campaign May 2026)
+            r'ProgramData\\Microsoft OneDrive\\keys\.dat',  # credential staging path used by NuGet IR.* to store harvested secrets before C2 upload (May 2026)
         ],
     }.items()
 }

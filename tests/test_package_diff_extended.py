@@ -3655,3 +3655,38 @@ def test_obfuscation_cs_clrjit(tmp_path):
     )
     _, _, _, _, _, _, _, obfuscated, *_ = _build_diff(old, new)
     assert obfuscated is True
+
+
+# ── NuGet Chinese UI campaign: API name reconstruction + OneDrive staging ─────
+
+
+def test_obfuscation_cs_api_name_trim_concat(tmp_path):
+    """'Open '.Trim() + 'Process' API name split in C# triggers obfuscated_code (NuGet evasion)."""
+    old = _write_files(tmp_path / "old", {})
+    new = _write_files(
+        tmp_path / "new",
+        {
+            "IR.UILib/Loader.cs": (
+                'string apiName = "Open ".Trim() + "Process";\n'
+                "IntPtr proc = GetProcAddress(hmod, apiName);\n"
+            )
+        },
+    )
+    _, _, _, _, _, _, _, obfuscated, *_ = _build_diff(old, new)
+    assert obfuscated is True
+
+
+def test_obfuscation_cs_onedrive_keys_dat(tmp_path):
+    """ProgramData\\Microsoft OneDrive\\keys.dat staging path in C# triggers obfuscated_code."""
+    old = _write_files(tmp_path / "old", {})
+    new = _write_files(
+        tmp_path / "new",
+        {
+            "IR.UILib/Exfil.cs": (
+                'string stagingPath = @"C:\\ProgramData\\Microsoft OneDrive\\keys.dat";\n'
+                "File.WriteAllBytes(stagingPath, encryptedCreds);\n"
+            )
+        },
+    )
+    _, _, _, _, _, _, _, obfuscated, *_ = _build_diff(old, new)
+    assert obfuscated is True
