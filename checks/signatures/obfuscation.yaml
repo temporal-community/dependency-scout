@@ -31,6 +31,8 @@ patterns:
     desc: Node.js Module._compile() in-memory execution - no file written to disk (SANDWORM_MODE)
   - pattern: '_(?:cfg|loc)_\d{3}'
     desc: payload split across numbered properties (_cfg_000.._cfg_044) to evade size-based scanners (SANDWORM_MODE)
+  - pattern: 'require\s*\(\s*[''"][a-z_]+[''"]\s*\+\s*[''"][a-z_]+[''"]'
+    desc: require() with string-concatenated module name evades static keyword scanner (Scavenger loader - eslint-config-prettier Jul 2025)
   .ts:
   - pattern: \b_0x[0-9a-fA-F]{4,}\b
     desc: javascript-obfuscator hex variable names

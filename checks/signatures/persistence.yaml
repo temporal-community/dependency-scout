@@ -20,6 +20,12 @@ patterns:
   desc: pm2 via npx or require
 - pattern: github\.com/[^/\s]+/[^/\s]+/releases/download/bun-v
   desc: Bun runtime bootstrap (Shai-Hulud)
+- pattern: github\.com/[^/\s]+/[^/\s]+/releases/(?:latest/)?download/
+  desc: generic binary dropper via GitHub Releases CDN in install hook (Postinstall Hook campaign May 2026 - 700+ repos)
+- pattern: '\w[\w-]*\.github\.io/\S{10,}'
+  desc: GitHub Pages used to stage dropper payload in install hook (TrapDoor May 2026 - ddjidd564.github.io)
+- pattern: \brundll32\b
+  desc: Windows rundll32 DLL invocation in install hook (Scavenger loader - eslint-config-prettier Jul 2025)
 - pattern: \btrufflehog\b|\bgitleaks\b|\bdetect-secrets\b
   desc: weaponised secrets scanner
 - pattern: rm\s+-rf\s+(?:~/|~[/\\]|\$HOME[/\\])
