@@ -82,7 +82,7 @@ class PackageChecks(BaseModel):
     my_new: MyNewChecks = Field(default_factory=MyNewChecks)
 ```
 
-**Step 2 — Create `activities/my_new_check.py`**
+**Step 2 — Create `checks/my_new_check.py`**
 
 ```python
 from temporalio import activity
@@ -232,7 +232,7 @@ The classifier receives the full `PackageChecks` object including `custom_checks
 - **Archive URLs are validated** before any HTTP request — add new CDN hosts to `ALLOWED_CDN_HOSTS`, never skip the `validate_archive_url()` call.
 - **Checks are nested, not flat** — `PackageChecks` holds typed sub-models (`signals.age.release_age_hours`, not `signals.release_age_hours`). Field name collisions between checks are structurally impossible.
 - **The registry is the source of truth** — `_CHECK_REGISTRY` in `package_triage_workflow.py` drives the gather order, the `CHECK_ACTIVITY_NAMES` constant, and the worker registration test. When adding a check, the registry row is the one required workflow-layer edit.
-- **Worker registration is automatic** — `worker.py` scans `activities/*.py` at startup for `@activity.defn`-decorated functions. Creating a new activity file is sufficient; no manual entry in `ACTIVITIES` is needed.
+- **Worker registration is automatic** — `worker.py` scans `checks/*.py` and `platform/*.py` at startup for `@activity.defn`-decorated functions. Creating a new activity file is sufficient; no manual entry in `ACTIVITIES` is needed.
 - **Ecosystem provider registration is automatic** — `get_provider()` scans `ecosystems/*.py` for classes with an `ecosystem_name` attribute, then checks the `dependency_scout.ecosystems` entry points group for installed plugins. Creating a new provider file (or installing a plugin package) is sufficient; no manual registration is needed.
 
 ---
@@ -269,7 +269,7 @@ class DrupalProvider(RemoteEcosystemProvider):
     remote_base_url = "https://drupal-bridge.example.com/triage/v1"
 ```
 
-Your service must expose `POST {base_url}/{method_name}` endpoints. Each endpoint receives the method parameters as a JSON body and responds with the corresponding signal model fields as JSON. The full request/response spec is in the docstrings in `ecosystems/remote.py`.
+Your service must expose `POST {base_url}/{method_name}` endpoints. Each endpoint receives the method parameters as a JSON body and responds with the corresponding check model fields as JSON. The full request/response spec is in the docstrings in `ecosystems/remote.py`.
 
 ### Adding custom checks
 
@@ -310,7 +310,7 @@ Once installed, `get_provider("drupal")` returns your provider and custom checks
 
 ### Advanced checks via `dependency_scout.activity_checks`
 
-For checks that need full Temporal control — heartbeating, custom retry policies, or activity-level cancellation — use the advanced plugin path. The built-in `activities/package_diff.py` is the reference example: it downloads and diffs package archives, requiring a 2-minute start-to-close timeout and a 45-second heartbeat timeout to detect stuck downloads.
+For checks that need full Temporal control — heartbeating, custom retry policies, or activity-level cancellation — use the advanced plugin path. The built-in `checks/package_diff.py` is the reference example: it downloads and diffs package archives, requiring a 2-minute start-to-close timeout and a 45-second heartbeat timeout to detect stuck downloads.
 
 ```python
 # my_plugin/activities.py
@@ -342,4 +342,4 @@ The worker auto-discovers and registers `@activity.defn` functions from all `dep
 **When to use each plugin path:**
 
 - **`dependency_scout.checks`** — fast API calls, <30 seconds, no Temporal knowledge needed. Plain `async def run(ctx) -> dict`.
-- **`dependency_scout.activity_checks`** — long-running work (archive downloads, corpus scanning), needs heartbeating or custom retry. Requires `@activity.defn` and Temporal knowledge. Modelled on `activities/package_diff.py`.
+- **`dependency_scout.activity_checks`** — long-running work (archive downloads, corpus scanning), needs heartbeating or custom retry. Requires `@activity.defn` and Temporal knowledge. Modelled on `checks/package_diff.py`.

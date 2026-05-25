@@ -271,10 +271,13 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for full examples of each.
 ## Project layout
 
 ```
-activities/     Temporal activity definitions — one file per check source.
-                Each activity fetches one kind of data (PyPI metadata, Socket score,
+checks/         Triage check activity definitions — one file per check source.
+                Each check fetches one kind of data (PyPI metadata, Socket score,
                 OSV vulnerabilities, package diff, maintainer info, etc.) and returns
-                a typed Pydantic model. Activities run in parallel inside the workflow.
+                a typed Pydantic model. Checks run in parallel inside the workflow.
+
+platform/       PR side-effect activity definitions — comment, merge, close, label,
+                request review, check PR files, fetch repo config.
 
 ecosystems/     Per-ecosystem providers (pip, npm, RubyGems, Cargo, Go, Composer,
                 Maven, NuGet). Each implements EcosystemProvider: how to fetch release
@@ -292,7 +295,7 @@ classifiers/    Classifier implementations — Claude (default), OpenAI, Ollama,
                 dependency_scout.classifiers entry points for custom plugins.
 
 models/         Shared Pydantic data models: PRContext, RepoConfig, PackageChecks
-                (and all its signal sub-models), and Verdict. Imported by activities,
+                (and all its check sub-models), and Verdict. Imported by checks,
                 workflows, classifiers, and tests.
 
 platforms/      GitHub and GitLab platform clients: post comments, merge/close PRs,

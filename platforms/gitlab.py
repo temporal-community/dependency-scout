@@ -159,7 +159,7 @@ class GitLabPlatformClient:
         activity.logger.info(f"Merged {pr.repo}!{pr.pr_number} (squash)")
 
     async def close_pr(self, pr: PRContext, reason: str, ignore_bot: bool = False) -> None:
-        body = f"**Triage Agent — closing this MR.**\n\n{reason}"
+        body = f"**Dependency Scout — closing this MR.**\n\n{reason}"
         if self._dry_run():
             activity.logger.info(f"[dry-run] Would close {pr.repo}!{pr.pr_number}: {reason}")
             return
