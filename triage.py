@@ -193,24 +193,26 @@ async def run(ecosystem: str, package: str, old_version: str, new_version: str) 
 
     has_github_token = bool(os.environ.get("GITHUB_TOKEN"))
 
-    setup_rows = [
+    check_rows = [
         (
             "ok",
             "Core checks",
             "OSV, diff analysis, release age, maintainer history, version lineage, and more",
         ),
         (
-            "ok" if has_github_token else "info",
-            "GitHub",
-            "Authenticated API access"
-            if has_github_token
-            else "Add GITHUB_TOKEN to .env for higher rate limits and private repos",
-        ),
-        (
             "ok" if has_socket_key else "info",
             "Socket.dev",
             "Supply-chain threat intelligence"
             + ("" if has_socket_key else " — add SOCKET_API_KEY to .env  (socket.dev)"),
+        ),
+    ]
+    config_rows = [
+        (
+            "ok" if has_github_token else "info",
+            "GitHub",
+            "Authenticated API access"
+            if has_github_token
+            else "Add GITHUB_TOKEN to .env — release, maintainer, and attestation checks use the GitHub API and are rate-limited without it",
         ),
         (
             "ok" if clf_name else "info",
@@ -221,9 +223,15 @@ async def run(ecosystem: str, package: str, old_version: str, new_version: str) 
         ),
     ]
 
-    print(_dim("Running the following checks:\n"))
-    w = max(len(label) for _, label, _ in setup_rows)
-    for status, label, desc in setup_rows:
+    w = max(len(label) for _, label, _ in check_rows + config_rows)
+
+    print(_dim("  checks"))
+    for status, label, desc in check_rows:
+        icon_ansi, _, text_fn = _STATUS[status]
+        print(f"  {icon_ansi}  {label:<{w}}  {text_fn(desc)}")  # type: ignore[operator]
+    print()
+    print(_dim("  configuration"))
+    for status, label, desc in config_rows:
         icon_ansi, _, text_fn = _STATUS[status]
         print(f"  {icon_ansi}  {label:<{w}}  {text_fn(desc)}")  # type: ignore[operator]
     print(_dim("\n  See docs/configuration.md for setup details."))
