@@ -30,35 +30,31 @@ async def check(
 
     Returns a ``VersionLineageChecks`` flagging whether this looks like a neglected branch being unexpectedly revived."""
     key = (ecosystem, package, new_version)
-    if (hit := _cache.get(key)) is not None:
-        activity.logger.debug("version_lineage cache hit: %s %s", package, new_version)
-        return hit
+    return await _cache.get_or_compute(key, lambda: _do_check(ecosystem, package, new_version))
 
-    result: VersionLineageChecks
+
+async def _do_check(ecosystem: str, package: str, new_version: str) -> VersionLineageChecks:
     try:
         if ecosystem == "pip":
-            result = await _check_pypi(package, new_version)
+            return await _check_pypi(package, new_version)
         elif ecosystem == "npm":
-            result = await _check_npm(package, new_version)
+            return await _check_npm(package, new_version)
         elif ecosystem == "rubygems":
-            result = await _check_rubygems(package, new_version)
+            return await _check_rubygems(package, new_version)
         elif ecosystem == "maven":
-            result = await _check_maven(package, new_version)
+            return await _check_maven(package, new_version)
         elif ecosystem == "composer":
-            result = await _check_composer(package, new_version)
+            return await _check_composer(package, new_version)
         elif ecosystem == "nuget":
-            result = await _check_nuget(package, new_version)
+            return await _check_nuget(package, new_version)
         elif ecosystem == "cargo":
-            result = await _check_cargo(package, new_version)
+            return await _check_cargo(package, new_version)
         else:
             return VersionLineageChecks()
     except ApplicationError:
         raise
     except Exception:  # noqa: BLE001
         return VersionLineageChecks()
-
-    _cache.set(key, result)
-    return result
 
 
 async def _check_pypi(package: str, new_version: str) -> VersionLineageChecks:

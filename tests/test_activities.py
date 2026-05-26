@@ -12,10 +12,13 @@ import respx
 from temporalio.exceptions import ApplicationError
 from temporalio.testing import ActivityEnvironment
 
+import asyncio
+
 from checks.metadata import fetch as metadata_fetch
 from checks.osv import check as osv_check
 from checks.release_age import check as release_age_check
 from checks.maintainer import history as maintainer_history
+from helpers.cache import ActivityCache
 
 
 # ---------------------------------------------------------------------------
@@ -758,3 +761,64 @@ async def test_maintainer_cache_hit():
     result1 = await env.run(maintainer_history, "pip", "requests", "2.31.0", "2.32.0")
     result2 = await env.run(maintainer_history, "pip", "requests", "2.31.0", "2.32.0")
     assert result1 == result2
+
+
+@respx.mock
+async def test_metadata_cache_hit():
+    """Second call returns cached result without a second HTTP request."""
+    respx.get(f"{PYPI_BASE}/requests/2.32.0/json").mock(
+        return_value=httpx.Response(200, json=_pypi_response("requests", "2.32.0"))
+    )
+    respx.get(f"{PYPISTATS_BASE}/requests/recent").mock(
+        return_value=httpx.Response(200, json={"data": {"last_week": 50_000_000}})
+    )
+    env = ActivityEnvironment()
+    result1 = await env.run(metadata_fetch, "pip", "requests", "2.31.0", "2.32.0")
+    # Mocks are exhausted; a second HTTP call would raise — cache must serve the hit
+    respx.get(f"{PYPI_BASE}/requests/2.32.0/json").mock(
+        side_effect=Exception("should not be called")
+    )
+    result2 = await env.run(metadata_fetch, "pip", "requests", "2.31.0", "2.32.0")
+    assert result1 == result2
+
+
+# ---------------------------------------------------------------------------
+# ActivityCache.get_or_compute — in-flight deduplication
+# ---------------------------------------------------------------------------
+
+
+async def test_get_or_compute_deduplicates_concurrent_calls():
+    """Two simultaneous get_or_compute calls for the same key make only one fn() call."""
+    call_count = 0
+
+    async def expensive():
+        nonlocal call_count
+        call_count += 1
+        await asyncio.sleep(0)  # yield to let the second coroutine reach get_or_compute
+        return "result"
+
+    cache: ActivityCache = ActivityCache()
+    key = ("k",)
+    r1, r2 = await asyncio.gather(
+        cache.get_or_compute(key, expensive),
+        cache.get_or_compute(key, expensive),
+    )
+    assert r1 == r2 == "result"
+    assert call_count == 1  # fn was called exactly once despite two concurrent requests
+
+
+async def test_get_or_compute_propagates_error_to_all_waiters():
+    """If fn() raises, all concurrent callers receive the same exception."""
+
+    async def failing():
+        await asyncio.sleep(0)
+        raise ValueError("boom")
+
+    cache: ActivityCache = ActivityCache()
+    key = ("k",)
+    with pytest.raises(ValueError, match="boom"):
+        await asyncio.gather(
+            cache.get_or_compute(key, failing),
+            cache.get_or_compute(key, failing),
+            return_exceptions=False,
+        )

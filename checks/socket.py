@@ -1,3 +1,4 @@
+import asyncio
 import os
 
 from temporalio import activity
@@ -8,6 +9,10 @@ from helpers.cache import ActivityCache
 from helpers.http import get_client
 
 _cache: ActivityCache = ActivityCache(ttl_seconds=3600)  # scores can be updated; refresh hourly
+
+# Cap concurrent Socket API calls to stay within rate limits.
+# 25 parallel workflows would otherwise fire 25 simultaneous requests.
+_semaphore = asyncio.Semaphore(5)
 
 _ECOSYSTEM_MAP = {
     "pip": "pypi",
@@ -39,11 +44,6 @@ async def score(ecosystem: str, package: str, old_version: str, new_version: str
     """Query the Socket.dev API for the new version's supply chain risk score and any specific alerts such as install scripts, obfuscated code, or network access.
 
     Returns a ``SocketChecks`` with a 0–100 score and a filtered list of high/critical alert messages; requires a ``SOCKET_API_KEY`` environment variable."""
-    key = (ecosystem, package, new_version)
-    if (hit := _cache.get(key)) is not None:
-        activity.logger.debug("socket cache hit: %s %s", package, new_version)
-        return hit
-
     api_key = os.environ.get("SOCKET_API_KEY")
     if not api_key:
         activity.logger.info(
@@ -51,17 +51,26 @@ async def score(ecosystem: str, package: str, old_version: str, new_version: str
         )
         return SocketChecks(socket_score=None, socket_alerts=[])
 
-    ecosystem_slug = _ECOSYSTEM_MAP.get(ecosystem, "pypi")
-    purl = f"pkg:{ecosystem_slug}/{package}@{new_version}"
-
-    client = get_client()
-    resp = await client.post(
-        "https://api.socket.dev/v0/purl",
-        headers={"Authorization": f"Bearer {api_key}"},
-        json={"components": [{"purl": purl}]},
-        params={"alerts": "true"},
-        timeout=15.0,
+    key = (ecosystem, package, new_version)
+    return await _cache.get_or_compute(
+        key,
+        lambda: _fetch_socket(api_key, ecosystem, package, new_version),
     )
+
+
+async def _fetch_socket(api_key: str, ecosystem: str, package: str, version: str) -> SocketChecks:
+    ecosystem_slug = _ECOSYSTEM_MAP.get(ecosystem, "pypi")
+    purl = f"pkg:{ecosystem_slug}/{package}@{version}"
+    client = get_client()
+
+    async with _semaphore:
+        resp = await client.post(
+            "https://api.socket.dev/v0/purl",
+            headers={"Authorization": f"Bearer {api_key}"},
+            json={"components": [{"purl": purl}]},
+            params={"alerts": "true"},
+            timeout=15.0,
+        )
 
     if resp.status_code == 401:
         raise ApplicationError(
@@ -69,7 +78,7 @@ async def score(ecosystem: str, package: str, old_version: str, new_version: str
             non_retryable=True,
         )
     if resp.status_code == 404:
-        activity.logger.info(f"{package}@{new_version} not found in Socket database")
+        activity.logger.info(f"{package}@{version} not found in Socket database")
         return SocketChecks(socket_score=None, socket_alerts=[])
     if resp.status_code == 429:
         raise ApplicationError("Socket API rate limited", non_retryable=False)
@@ -96,13 +105,9 @@ async def score(ecosystem: str, package: str, old_version: str, new_version: str
     ]
     alert_types = list({a.get("type", "unknown") for a in included})
 
-    activity.logger.info(
-        f"Socket: {package}@{new_version} score={socket_score} alerts={len(alerts)}"
-    )
-    result = SocketChecks(
+    activity.logger.info(f"Socket: {package}@{version} score={socket_score} alerts={len(alerts)}")
+    return SocketChecks(
         socket_score=socket_score,
         socket_alerts=alerts,
         socket_alert_types=alert_types,
     )
-    _cache.set(key, result)
-    return result

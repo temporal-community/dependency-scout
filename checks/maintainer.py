@@ -14,9 +14,7 @@ async def history(
 
     Returns a ``MaintainerChecks`` indicating whether any new uploaders appeared, which can signal an account takeover."""
     key = (ecosystem, package, old_version, new_version)
-    if (hit := _cache.get(key)) is not None:
-        activity.logger.debug("maintainer cache hit: %s %s", package, new_version)
-        return hit
-    result = await get_provider(ecosystem).fetch_maintainer(package, old_version, new_version)
-    _cache.set(key, result)
-    return result
+    return await _cache.get_or_compute(
+        key,
+        lambda: get_provider(ecosystem).fetch_maintainer(package, old_version, new_version),
+    )

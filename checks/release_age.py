@@ -14,9 +14,7 @@ async def check(
 
     Returns a ``ReleaseAgeChecks`` with the age in hours; very recent releases (under ~24 hours) are a yellow signal."""
     key = (ecosystem, package, new_version)
-    if (hit := _cache.get(key)) is not None:
-        activity.logger.debug("release_age cache hit: %s %s", package, new_version)
-        return hit
-    result = await get_provider(ecosystem).fetch_release_age(package, new_version)
-    _cache.set(key, result)
-    return result
+    return await _cache.get_or_compute(
+        key,
+        lambda: get_provider(ecosystem).fetch_release_age(package, new_version),
+    )

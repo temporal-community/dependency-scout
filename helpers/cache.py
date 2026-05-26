@@ -9,17 +9,25 @@ Usage:
     _cache = ActivityCache()                    # immutable results — cache forever
     _cache = ActivityCache(ttl_seconds=3600)    # stale-ish results — 1 hour TTL
 
+    # Simple get/set:
     key = (ecosystem, package, old_version, new_version)
     if (hit := _cache.get(key)) is not None:
-        activity.logger.debug("cache hit for %s %s", package, new_version)
         return hit
     result = await _fetch(...)
     _cache.set(key, result)
     return result
+
+    # Or with in-flight deduplication (prevents thundering herd when many
+    # concurrent activities request the same key simultaneously):
+    return await _cache.get_or_compute(key, lambda: _fetch(...))
 """
 
+import asyncio
 import time
-from typing import Any
+from collections.abc import Awaitable, Callable
+from typing import Any, TypeVar
+
+T = TypeVar("T")
 
 INDEFINITE = float("inf")
 
@@ -33,11 +41,12 @@ def clear_all_caches() -> None:
 
 
 class ActivityCache:
-    __slots__ = ("_ttl", "_store")
+    __slots__ = ("_ttl", "_store", "_pending")
 
     def __init__(self, ttl_seconds: float = INDEFINITE) -> None:
         self._ttl = ttl_seconds
         self._store: dict[tuple, tuple[float, Any]] = {}
+        self._pending: dict[tuple, asyncio.Future[Any]] = {}
         _all_caches.append(self)
 
     def get(self, key: tuple) -> Any | None:
@@ -53,8 +62,37 @@ class ActivityCache:
     def set(self, key: tuple, value: Any) -> None:
         self._store[key] = (time.monotonic(), value)
 
+    async def get_or_compute(self, key: tuple, fn: Callable[[], Awaitable[T]]) -> T:
+        """Return cached value or compute it, deduplicating concurrent identical requests.
+
+        If two coroutines call get_or_compute with the same key simultaneously,
+        only one runs fn(); the other awaits the same Future. Errors also propagate
+        to all waiters so Temporal can retry each activity independently.
+        """
+        hit = self.get(key)
+        if hit is not None:
+            return hit  # type: ignore[return-value]
+
+        if key in self._pending:
+            return await self._pending[key]
+
+        fut: asyncio.Future[T] = asyncio.get_running_loop().create_future()
+        self._pending[key] = fut
+        try:
+            result = await fn()
+            self.set(key, result)
+            fut.set_result(result)
+            return result
+        except Exception as exc:
+            if not fut.done():
+                fut.set_exception(exc)
+            raise
+        finally:
+            self._pending.pop(key, None)
+
     def clear(self) -> None:
         self._store.clear()
+        self._pending.clear()
 
     def __len__(self) -> int:
         return len(self._store)

@@ -14,10 +14,10 @@ async def check(ecosystem: str, package: str, old_version: str, new_version: str
 
     Returns an ``OSVChecks`` containing a list of CVE or OSV IDs for any matching advisories."""
     key = (ecosystem, package, new_version)
-    if (hit := _cache.get(key)) is not None:
-        activity.logger.debug("osv cache hit: %s %s", package, new_version)
-        return hit
+    return await _cache.get_or_compute(key, lambda: _do_check(ecosystem, package, new_version))
 
+
+async def _do_check(ecosystem: str, package: str, new_version: str) -> OSVChecks:
     meta = get_meta(ecosystem)
     osv_ecosystem = meta.osv_name if meta else ""
     client = get_client()
@@ -37,6 +37,4 @@ async def check(ecosystem: str, package: str, old_version: str, new_version: str
         cves = [a for a in vuln.get("aliases", []) if a.startswith("CVE-")]
         vuln_ids.extend(cves if cves else [vuln["id"]])
 
-    result = OSVChecks(osv_vulnerabilities=vuln_ids)
-    _cache.set(key, result)
-    return result
+    return OSVChecks(osv_vulnerabilities=vuln_ids)

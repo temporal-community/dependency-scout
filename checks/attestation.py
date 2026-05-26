@@ -14,9 +14,7 @@ async def check(
 
     Returns an ``AttestationChecks`` with flags indicating whether provenance exists and whether it was issued by a recognized build system."""
     key = (ecosystem, package, old_version, new_version)
-    if (hit := _cache.get(key)) is not None:
-        activity.logger.debug("attestation cache hit: %s %s", package, new_version)
-        return hit
-    result = await get_provider(ecosystem).fetch_attestations(package, old_version, new_version)
-    _cache.set(key, result)
-    return result
+    return await _cache.get_or_compute(
+        key,
+        lambda: get_provider(ecosystem).fetch_attestations(package, old_version, new_version),
+    )

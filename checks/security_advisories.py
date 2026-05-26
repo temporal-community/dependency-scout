@@ -25,10 +25,14 @@ async def fetch(
     A non-empty result means this bump patches known vulnerabilities — important context
     for the classifier when weighing other risk signals like obfuscated code."""
     key = (ecosystem, package, old_version, new_version, "advisory")
-    if (hit := _cache.get(key)) is not None:
-        activity.logger.debug("advisory cache hit: %s %s→%s", package, old_version, new_version)
-        return hit
+    return await _cache.get_or_compute(
+        key, lambda: _do_fetch(ecosystem, package, old_version, new_version)
+    )
 
+
+async def _do_fetch(
+    ecosystem: str, package: str, old_version: str, new_version: str
+) -> SecurityAdvisoryChecks:
     meta = get_meta(ecosystem)
     osv_ecosystem = meta.osv_name if meta else ""
     client = get_client()
@@ -61,9 +65,7 @@ async def fetch(
     fixed_ids = sorted(old_ids - new_ids)
 
     if not fixed_ids:
-        result = SecurityAdvisoryChecks()
-        _cache.set(key, result)
-        return result
+        return SecurityAdvisoryChecks()
 
     # Fetch brief summaries for fixed vulns
     summaries: list[str] = []
@@ -75,14 +77,11 @@ async def fetch(
                 detail = detail_resp.json()
                 summary = detail.get("summary") or detail.get("details", "")[:200]
                 summaries.append(summary[:200] if summary else "")
-                # Severity: look for CVSS severity string
                 sev = ""
                 for s in detail.get("severity", []):
                     score_str = s.get("score", "")
                     if score_str.startswith("CVSS"):
-                        # Extract severity from CVSS vector or use score field
                         pass
-                # Try database_specific or affected[].ecosystem_specific
                 for aff in detail.get("affected", []):
                     es = aff.get("ecosystem_specific", {})
                     sev = es.get("severity", "") or sev
@@ -101,7 +100,6 @@ async def fetch(
         fixed_summaries=summaries,
         fixed_severity=severities,
     )
-    _cache.set(key, result)
     activity.logger.info(
         "advisory: %s %s→%s fixes %d CVE(s): %s",
         package,

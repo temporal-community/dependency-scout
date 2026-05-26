@@ -23,10 +23,10 @@ _ECOSYSTEM_MAP = {
 async def fetch(ecosystem: str, package: str, old_version: str, new_version: str) -> DepsDevChecks:
     """Query the deps.dev API for the new version and return whether it has been marked deprecated, along with the deprecation reason if one is provided."""
     key = (ecosystem, package, new_version)
-    if (hit := _cache.get(key)) is not None:
-        activity.logger.debug("depsdev cache hit: %s %s", package, new_version)
-        return hit
+    return await _cache.get_or_compute(key, lambda: _do_fetch(ecosystem, package, new_version))
 
+
+async def _do_fetch(ecosystem: str, package: str, new_version: str) -> DepsDevChecks:
     system = _ECOSYSTEM_MAP.get(ecosystem)
     if system is None:
         return DepsDevChecks()
@@ -46,9 +46,7 @@ async def fetch(ecosystem: str, package: str, old_version: str, new_version: str
         is_deprecated = data.get("isDeprecated", False)
         deprecated_reason = data.get("deprecatedReason") or None
 
-        result = DepsDevChecks(is_deprecated=is_deprecated, deprecated_reason=deprecated_reason)
-        _cache.set(key, result)
-        return result
+        return DepsDevChecks(is_deprecated=is_deprecated, deprecated_reason=deprecated_reason)
     except Exception as exc:
         activity.logger.warning(f"deps.dev fetch failed for {package}@{new_version}: {exc!r}")
         return DepsDevChecks()

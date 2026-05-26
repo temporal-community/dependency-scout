@@ -56,10 +56,10 @@ async def fetch(
 
     Returns a ``ScorecardChecks`` with the overall score and individual check scores for CI hygiene, branch protection, token permissions, and signed releases."""
     key = (ecosystem, package)  # scorecard is per-repo, not per-version
-    if (hit := _cache.get(key)) is not None:
-        activity.logger.debug("scorecard cache hit: %s", package)
-        return hit
+    return await _cache.get_or_compute(key, lambda: _do_fetch(ecosystem, package, new_version))
 
+
+async def _do_fetch(ecosystem: str, package: str, new_version: str) -> ScorecardChecks:
     system = _ECOSYSTEM_MAP.get(ecosystem)
     if system is None:
         return ScorecardChecks()
@@ -102,7 +102,7 @@ async def fetch(
                 # Score of -1 means "not applicable"
                 check_scores[field] = None if raw == -1 else raw
 
-        result = ScorecardChecks(
+        return ScorecardChecks(
             scorecard_score=scorecard_score,
             scorecard_repo=repo,
             scorecard_maintained=check_scores["scorecard_maintained"],
@@ -111,8 +111,6 @@ async def fetch(
             scorecard_branch_protection=check_scores["scorecard_branch_protection"],
             scorecard_signed_releases=check_scores["scorecard_signed_releases"],
         )
-        _cache.set(key, result)
-        return result
     except Exception as exc:
         activity.logger.warning(f"Scorecard fetch failed for {package}@{new_version}: {exc!r}")
         return ScorecardChecks()
