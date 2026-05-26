@@ -55,18 +55,20 @@ A file at `~/.config/dependency-scout/.env` is outside any project directory and
 
 The most common mistake is reaching for a classic PAT with `repo` scope. That grants write access to every repository you own. If the token leaks — or if the Scout is somehow tricked into exfiltrating it — the blast radius is enormous.
 
-**Use a fine-grained PAT scoped to specific repos instead.**
+A token with no scopes still authenticates your requests and raises the rate limit from 60 to 5,000 req/hour — which is the main reason you need one at all for `triage.py`. GitHub returns 403 (not 429) when the unauthenticated limit is exceeded, which can look like a permissions error.
 
-In GitHub → Settings → Developer settings → Personal access tokens → Fine-grained tokens, create a token with:
+**Fine-grained PAT (preferred)** — create one at GitHub → Settings → Developer settings → Personal access tokens → Fine-grained tokens:
 
-| Permission | Why |
+| Use case | Permissions needed |
 |---|---|
-| **Pull requests: Read and write** | Post comments and request reviewers |
-| **Contents: Read-only** | Read `.github/dependency-scout.yml` from target repos |
-| **Contents: Read and write** | Only if `auto_merge_enabled: true` — needed to merge |
-| **Metadata: Read-only** | Automatically included, can't be removed |
+| `triage.py` / `triage_all.py` (read-only) | Metadata: Read-only · Contents: Read-only · Pull requests: Read-only |
+| Worker — post comments | + Pull requests: Read and write |
+| Worker — read per-repo config from private repos | + Contents: Read-only (already included above) |
+| Worker — auto-merge | + Contents: Read and write |
 
-Leave everything else unchecked. Scope the token to only the repos you want the Scout to act on.
+Scope the token to only the repos you want the Scout to act on. Leave everything else unchecked.
+
+**Classic PAT:** `public_repo` is sufficient for public repos. Never use `repo` (full write) — it's far broader than anything the Scout needs.
 
 **GitHub App is better than a PAT for production.** Apps are scoped by installation, rotate their own credentials (short-lived JWTs), and are easier to audit. Run `uv run python setup.py` to be walked through GitHub App setup.
 
