@@ -19,15 +19,16 @@ from helpers.notification import get_notification_channels
 
 
 @activity.defn(name="activities.platform.comment")
-async def comment(pr: PRContext, verdict: Verdict, signals: PackageChecks | None = None) -> None:
-    """Post the triage verdict as a comment on the PR using all configured notification channels (e.g. GitHub/GitLab comment, Slack)."""
+async def comment(pr: PRContext, verdict: Verdict, signals: PackageChecks | None = None) -> str:
+    """Post the triage verdict as a comment on the PR using all configured notification channels (e.g. GitHub/GitLab comment, Slack). Returns the comment URL, or empty string if dry-run/unavailable."""
     if pr.dry_run:
         activity.logger.info(
             f"[dry-run] would post {verdict.classification.upper()} comment on "
             f"{pr.repo}#{pr.pr_number} — skipping (pass --no-dry-run or unset --dry-run to post)"
         )
-        return
-    await get_notification_channels().send_verdict(pr, verdict, signals)
+        return ""
+    url = await get_notification_channels().send_verdict(pr, verdict, signals)
+    return url or ""
 
 
 @activity.defn(name="activities.platform.merge_pr")

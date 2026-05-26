@@ -77,10 +77,6 @@ def _info(s: str) -> str:
     return f"{_C}{s}{_RST}"
 
 
-def _link_dim(url: str) -> str:
-    return _dim(url)
-
-
 # ---------------------------------------------------------------------------
 # Shared helpers
 # ---------------------------------------------------------------------------
@@ -273,14 +269,18 @@ async def _triage_single(args: argparse.Namespace) -> None:
     ns = os.environ.get("TEMPORAL_NAMESPACE", "default")
     print(f"  Workflow: {handle.id}")
     wf_url = f"{ui_base}/namespaces/{ns}/workflows/{handle.id}"
-    print(f"  Temporal: {_link_dim(wf_url)}")
+    print(f"  Temporal: {wf_url}")
     print()
 
     result = await handle.result()
-    verdict = _verdict_from_result(result)
-    print(f"  {_color_verdict(verdict)}  {_dim(result)}")
-    if not args.dry_run and has_github and pr_number:
-        print(f"  PR: https://github.com/{repo}/pull/{pr_number}")
+    result_str, *url_parts = result.split("||", 1)
+    comment_url = url_parts[0] if url_parts else None
+    verdict = _verdict_from_result(result_str)
+    print(f"  {_color_verdict(verdict)}  {_dim(result_str)}")
+    if comment_url:
+        print(f"  Comment:  {comment_url}")
+    elif not args.dry_run and has_github and pr_number:
+        print(f"  PR:       https://github.com/{repo}/pull/{pr_number}")
     print()
 
 
@@ -389,19 +389,23 @@ async def _triage_batch(args: argparse.Namespace) -> None:
             print(f"\n  {_r(_B + '✗  WORKFLOW FAILED' + _RST)}  {_r(str(exc))}\n")
             continue
 
-        verdict = _verdict_from_result(result)
+        result_str, *url_parts = result.split("||", 1)
+        comment_url = url_parts[0] if url_parts else None
+        verdict = _verdict_from_result(result_str)
         counts[verdict] += 1
         pr_url = f"https://github.com/{args.repo}/pull/{pr_data['number']}"
         wf_id = f"pr-action-{args.repo.replace('/', '-')}-{pr_data['number']}"
-        comment_note = "" if args.dry_run or not has_github else "  ← comment posted"
         print(
             f"  {_color_verdict(verdict)}  "
             f"#{pr_data['number']:<5} {parsed.package:<{pkg_w}}  "
             f"{parsed.old_version} → {parsed.new_version}"
         )
         wf_url = f"{ui_base}/namespaces/{ns}/workflows/{wf_id}"
-        print(f"        PR:       {pr_url}{comment_note}")
-        print(f"        Workflow: {_link_dim(wf_url)}")
+        if comment_url:
+            print(f"        Comment:  {comment_url}")
+        else:
+            print(f"        PR:       {pr_url}")
+        print(f"        Workflow: {wf_url}")
 
     total = sum(counts.values())
     g, y, r = counts["green"], counts["yellow"], counts["red"]

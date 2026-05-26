@@ -140,9 +140,10 @@ class PRActionWorkflow:
                 }
             )
 
-        await workflow.execute_activity(
-            "activities.platform.comment", args=[pr, verdict, signals], **opts
+        comment_url: str = await workflow.execute_activity(
+            "activities.platform.comment", args=[pr, verdict, signals], result_type=str, **opts
         )
+        url_suffix = f"||{comment_url}" if comment_url else ""
 
         if verdict.classification in config.block_classifications:
             await workflow.execute_activity(
@@ -155,7 +156,7 @@ class PRActionWorkflow:
             await workflow.execute_activity(
                 "activities.platform.close_pr", args=[pr, reason, True], **opts
             )
-            return f"blocked-{verdict.classification}"
+            return f"blocked-{verdict.classification}{url_suffix}"
 
         if (
             config.auto_merge_enabled
@@ -163,7 +164,7 @@ class PRActionWorkflow:
             and verdict.confidence >= config.auto_merge_min_confidence
         ):
             await workflow.execute_activity("activities.platform.merge_pr", args=[pr], **opts)
-            return "auto-merged"
+            return f"auto-merged{url_suffix}"
 
         if config.reviewers:
             await workflow.execute_activity(
@@ -181,7 +182,7 @@ class PRActionWorkflow:
                     )
                 except asyncio.TimeoutError:
                     workflow.logger.warning("Human review wait timed out after 7 days")
-                    return "timed-out-awaiting-review"
+                    return f"timed-out-awaiting-review{url_suffix}"
                 if not config.reviewers or self._approver in config.reviewers:
                     break
                 # Unauthorized signal — log and keep waiting
@@ -194,8 +195,8 @@ class PRActionWorkflow:
 
             if self._human_decision == "approve":
                 await workflow.execute_activity("activities.platform.merge_pr", args=[pr], **opts)
-                return "human-approved-merged"
-            return "human-rejected"
+                return f"human-approved-merged{url_suffix}"
+            return f"human-rejected{url_suffix}"
 
         # Default observe-only: comment posted, no further action.
-        return f"observe-only-{verdict.classification}"
+        return f"observe-only-{verdict.classification}{url_suffix}"

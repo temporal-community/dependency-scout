@@ -69,8 +69,8 @@ _STATUS_ICON = {"ok": "✅", "warn": "⚠️", "bad": "🚨", "na": "—"}
 
 _CHECK_LABEL = {
     "metadata": "Downloads",
-    "socket": "Socket score",
-    "osv": "Vulnerabilities",
+    "socket": "[Socket score](https://socket.dev)",
+    "osv": "[Vulnerabilities](https://osv.dev)",
     "install_script": "Install script",
     "network_calls": "Network calls",
     "new_deps": "New dependencies",
@@ -80,11 +80,11 @@ _CHECK_LABEL = {
     "ci_workflow": "CI workflow",
     "tag_signing": "Tag signing",
     "publisher": "Publisher",
-    "attestation": "Attestation",
+    "attestation": "[Attestation](https://slsa.dev)",
     "release_notes": "Release notes",
     "version_lineage": "Version lineage",
-    "deps_dev": "Deprecation",
-    "scorecard": "OpenSSF Scorecard",
+    "deps_dev": "[Deprecation](https://deps.dev)",
+    "scorecard": "[OpenSSF Scorecard](https://scorecard.dev)",
 }
 
 

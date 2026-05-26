@@ -111,7 +111,9 @@ async def test_comment_dry_run_makes_no_http_call(client, pr, verdict, dry_run):
 @respx.mock
 async def test_comment_posts_to_correct_url(client, pr, verdict, with_pat):
     route = respx.post(f"{BASE_URL}/issues/{PR_NUM}/comments").mock(
-        return_value=httpx.Response(201, json={})
+        return_value=httpx.Response(
+            201, json={"html_url": f"https://github.com/owner/repo/pull/{PR_NUM}#issuecomment-1"}
+        )
     )
     env = ActivityEnvironment()
     await env.run(client.comment, pr, verdict)
@@ -119,9 +121,29 @@ async def test_comment_posts_to_correct_url(client, pr, verdict, with_pat):
 
 
 @respx.mock
+async def test_comment_returns_html_url(client, pr, verdict, with_pat):
+    expected_url = f"https://github.com/owner/repo/pull/{PR_NUM}#issuecomment-42"
+    respx.post(f"{BASE_URL}/issues/{PR_NUM}/comments").mock(
+        return_value=httpx.Response(201, json={"html_url": expected_url})
+    )
+    env = ActivityEnvironment()
+    url = await env.run(client.comment, pr, verdict)
+    assert url == expected_url
+
+
+@respx.mock
+async def test_comment_returns_none_on_dry_run(client, pr, verdict, dry_run):
+    env = ActivityEnvironment()
+    url = await env.run(client.comment, pr, verdict)
+    assert url is None
+
+
+@respx.mock
 async def test_comment_body_contains_verdict_badge(client, pr, verdict, with_pat):
     route = respx.post(f"{BASE_URL}/issues/{PR_NUM}/comments").mock(
-        return_value=httpx.Response(201, json={})
+        return_value=httpx.Response(
+            201, json={"html_url": f"https://github.com/owner/repo/pull/{PR_NUM}#issuecomment-1"}
+        )
     )
     env = ActivityEnvironment()
     await env.run(client.comment, pr, verdict)
@@ -530,11 +552,14 @@ async def test_platform_comment_channel_posts_to_github_pr(pr, verdict, with_pat
     from temporalio.testing import ActivityEnvironment
 
     route = respx.post(f"{BASE_URL}/issues/{PR_NUM}/comments").mock(
-        return_value=httpx.Response(201, json={})
+        return_value=httpx.Response(
+            201, json={"html_url": f"https://github.com/owner/repo/pull/{PR_NUM}#issuecomment-1"}
+        )
     )
     env = ActivityEnvironment()
-    await env.run(lambda: PlatformCommentChannel().send_verdict(pr, verdict))
+    url = await env.run(lambda: PlatformCommentChannel().send_verdict(pr, verdict))
     assert route.called
+    assert url is not None and "issuecomment" in url
 
 
 @respx.mock

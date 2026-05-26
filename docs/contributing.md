@@ -192,7 +192,7 @@ The script prints one line per fixture as it runs. If it hangs, Temporal isn't r
 ## Running locally
 
 ```bash
-uv sync
+make bootstrap        # uv sync + installs pre-commit hooks
 uv run ruff format .          # format
 uv run ruff check .           # lint
 uv run mypy .                 # type check

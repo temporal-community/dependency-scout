@@ -32,7 +32,7 @@ class NotificationChannel(Protocol):
         pr: PRContext,
         verdict: Verdict,
         signals: PackageChecks | None = None,
-    ) -> None: ...
+    ) -> str | None: ...
 
 
 class PlatformCommentChannel:
@@ -43,10 +43,10 @@ class PlatformCommentChannel:
         pr: PRContext,
         verdict: Verdict,
         signals: PackageChecks | None = None,
-    ) -> None:
+    ) -> str | None:
         from platforms import get_platform_client
 
-        await get_platform_client(pr).comment(pr, verdict, signals)
+        return await get_platform_client(pr).comment(pr, verdict, signals)
 
 
 class SlackWebhookChannel:
@@ -63,7 +63,7 @@ class SlackWebhookChannel:
         pr: PRContext,
         verdict: Verdict,
         signals: PackageChecks | None = None,
-    ) -> None:
+    ) -> str | None:
         from temporalio import activity
 
         emoji = {
@@ -92,6 +92,7 @@ class SlackWebhookChannel:
                 resp.raise_for_status()
         except Exception as exc:  # noqa: BLE001
             activity.logger.warning(f"Slack notification failed (non-fatal): {exc!r}")
+        return None
 
 
 class WebhookChannel:
@@ -109,7 +110,7 @@ class WebhookChannel:
         pr: PRContext,
         verdict: Verdict,
         signals: PackageChecks | None = None,
-    ) -> None:
+    ) -> str | None:
         from temporalio import activity
 
         payload = {
@@ -127,6 +128,7 @@ class WebhookChannel:
                 resp.raise_for_status()
         except Exception as exc:  # noqa: BLE001
             activity.logger.warning(f"Webhook notification failed (non-fatal): {exc!r}")
+        return None
 
 
 class MultiChannel:
@@ -140,9 +142,13 @@ class MultiChannel:
         pr: PRContext,
         verdict: Verdict,
         signals: PackageChecks | None = None,
-    ) -> None:
+    ) -> str | None:
+        url: str | None = None
         for ch in self._channels:
-            await ch.send_verdict(pr, verdict, signals)
+            result = await ch.send_verdict(pr, verdict, signals)
+            if url is None:
+                url = result
+        return url
 
 
 def get_notification_channels() -> NotificationChannel:

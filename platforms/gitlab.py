@@ -99,11 +99,11 @@ class GitLabPlatformClient:
 
     async def comment(
         self, pr: PRContext, verdict: Verdict, signals: PackageChecks | None = None
-    ) -> None:
+    ) -> str | None:
         body = format_comment(pr, verdict, signals)
         if self._dry_run():
             activity.logger.info(f"[dry-run] Would post on {pr.repo}!{pr.pr_number}:\n{body}")
-            return
+            return None
         client = get_client()
         resp = await client.post(
             f"{self._project_url(pr)}/merge_requests/{pr.pr_number}/notes",
@@ -114,7 +114,14 @@ class GitLabPlatformClient:
         if resp.status_code == 401:
             raise ApplicationError("GitLab auth failed", non_retryable=True)
         resp.raise_for_status()
-        activity.logger.info(f"Posted comment on {pr.repo}!{pr.pr_number}")
+        note_id = resp.json().get("id")
+        comment_url = (
+            f"{self._base_url}/{pr.repo}/-/merge_requests/{pr.pr_number}#note_{note_id}"
+            if note_id
+            else None
+        )
+        activity.logger.info(f"Posted comment on {pr.repo}!{pr.pr_number}: {comment_url}")
+        return comment_url
 
     async def merge_pr(self, pr: PRContext) -> None:
         if self._dry_run():

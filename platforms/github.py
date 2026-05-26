@@ -110,11 +110,11 @@ class GitHubPlatformClient:
 
     async def comment(
         self, pr: PRContext, verdict: Verdict, signals: PackageChecks | None = None
-    ) -> None:
+    ) -> str | None:
         body = format_comment(pr, verdict, signals)
         if self._dry_run():
             activity.logger.info(f"[dry-run] Would post on {pr.repo}#{pr.pr_number}:\n{body}")
-            return
+            return None
         client = get_client()
         resp = await client.post(
             f"{self._repo_url(pr)}/issues/{pr.pr_number}/comments",
@@ -125,7 +125,9 @@ class GitHubPlatformClient:
         if resp.status_code == 401:
             raise ApplicationError("GitHub auth failed", non_retryable=True)
         resp.raise_for_status()
-        activity.logger.info(f"Posted comment on {pr.repo}#{pr.pr_number}")
+        comment_url: str | None = resp.json().get("html_url")
+        activity.logger.info(f"Posted comment on {pr.repo}#{pr.pr_number}: {comment_url}")
+        return comment_url
 
     async def merge_pr(self, pr: PRContext) -> None:
         if self._dry_run():

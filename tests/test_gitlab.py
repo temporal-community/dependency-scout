@@ -96,7 +96,7 @@ async def test_comment_dry_run_makes_no_http_call(client, pr, verdict, dry_run):
 @respx.mock
 async def test_comment_posts_to_correct_url(client, pr, verdict, with_token):
     route = respx.post(f"{BASE_URL}/merge_requests/{PR_NUM}/notes").mock(
-        return_value=httpx.Response(201, json={})
+        return_value=httpx.Response(201, json={"id": 999})
     )
     env = ActivityEnvironment()
     await env.run(client.comment, pr, verdict)
@@ -104,9 +104,19 @@ async def test_comment_posts_to_correct_url(client, pr, verdict, with_token):
 
 
 @respx.mock
+async def test_comment_returns_note_url(client, pr, verdict, with_token):
+    respx.post(f"{BASE_URL}/merge_requests/{PR_NUM}/notes").mock(
+        return_value=httpx.Response(201, json={"id": 42})
+    )
+    env = ActivityEnvironment()
+    url = await env.run(client.comment, pr, verdict)
+    assert url is not None and "#note_42" in url
+
+
+@respx.mock
 async def test_comment_body_contains_verdict_badge(client, pr, verdict, with_token):
     route = respx.post(f"{BASE_URL}/merge_requests/{PR_NUM}/notes").mock(
-        return_value=httpx.Response(201, json={})
+        return_value=httpx.Response(201, json={"id": 1})
     )
     env = ActivityEnvironment()
     await env.run(client.comment, pr, verdict)
@@ -492,12 +502,13 @@ def test_get_platform_client_unknown_platform_raises():
 @respx.mock
 async def test_platform_activity_comment_delegates(pr, verdict, with_token):
     respx.post(f"{BASE_URL}/merge_requests/{PR_NUM}/notes").mock(
-        return_value=httpx.Response(201, json={})
+        return_value=httpx.Response(201, json={"id": 1})
     )
     from pr_actions.platform import comment
 
     env = ActivityEnvironment()
-    await env.run(comment, pr, verdict)
+    result = await env.run(comment, pr, verdict)
+    assert isinstance(result, str)
 
 
 @respx.mock
