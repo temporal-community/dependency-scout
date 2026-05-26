@@ -4,6 +4,53 @@ The Scout processes untrusted package archives and feeds their contents to an LL
 
 ---
 
+## Keep secrets off disk
+
+`.env` files are plaintext. Any process with read access to your project directory can see them — including AI coding assistants, your editor, language servers, and any tool that recursively scans the working tree. `.gitignore` stops accidental commits; it doesn't stop reads.
+
+**Option 1 — 1Password CLI (recommended for individuals)**
+
+Replace secret values with `op://` references in `.env`:
+
+```env
+GITHUB_TOKEN=op://Personal/dependency-scout/github-token
+ANTHROPIC_API_KEY=op://Personal/dependency-scout/anthropic-key
+SOCKET_API_KEY=op://Personal/dependency-scout/socket-key
+```
+
+Then run with secrets injected at process start — they're never written to disk:
+
+```bash
+op run --env-file=.env -- uv run python triage.py --ecosystem pip --package requests --old 2.31.0 --new 2.32.3
+op run --env-file=.env -- uv run python triage_all.py --repo myorg/myrepo
+op run --env-file=.env -- uv run python -m worker
+```
+
+**Option 2 — direnv with a secrets backend (good for teams)**
+
+`.envrc` pulls from HashiCorp Vault, AWS Parameter Store, or similar. `direnv allow` loads them into the shell environment on `cd`. Nothing in the project directory.
+
+**Option 3 — shell environment, no `.env` file**
+
+Set secrets in your shell profile or retrieve them from the system keychain at shell startup. If no `.env` exists, there's nothing for any tool to read:
+
+```bash
+# macOS Keychain example in ~/.zshrc:
+export GITHUB_TOKEN=$(security find-generic-password -s dep-scout-gh -w 2>/dev/null)
+```
+
+**Option 4 — move `.env` outside the repo**
+
+`python-dotenv` and `uv` both support `--env-file` with arbitrary paths:
+
+```bash
+uv run --env-file ~/.config/dependency-scout/.env python triage.py ...
+```
+
+A file at `~/.config/dependency-scout/.env` is outside any project directory and invisible to tools that scan the working tree.
+
+---
+
 ## GitHub token — use the narrowest scope possible
 
 The most common mistake is reaching for a classic PAT with `repo` scope. That grants write access to every repository you own. If the token leaks — or if the Scout is somehow tricked into exfiltrating it — the blast radius is enormous.
