@@ -29,7 +29,7 @@ from models import (
     ReleaseAgeChecks,
     ReleaseChecks,
 )
-from helpers.http import get_client
+from helpers.http import get_client, get_with_retry
 
 
 class NpmProvider(EcosystemProviderBase):
@@ -253,12 +253,9 @@ class NpmProvider(EcosystemProviderBase):
 
 
 async def _fetch_weekly_downloads(client: httpx.AsyncClient, package: str) -> int | None:
-    try:
-        resp = await client.get(f"https://api.npmjs.org/downloads/point/last-week/{package}")
-        if resp.status_code == 200:
-            return resp.json().get("downloads")
-    except Exception:
-        pass
+    resp = await get_with_retry(f"https://api.npmjs.org/downloads/point/last-week/{package}")
+    if resp is not None and resp.status_code == 200:
+        return resp.json().get("downloads")
     return None
 
 

@@ -27,7 +27,7 @@ from models import (
     ReleaseAgeChecks,
     ReleaseChecks,
 )
-from helpers.http import get_client
+from helpers.http import get_client, get_with_retry
 
 
 class RubyGemsProvider(EcosystemProviderBase):
@@ -247,23 +247,19 @@ async def _fetch_weekly_downloads(client: httpx.AsyncClient, package: str) -> in
 
     RubyGems exposes per-day download counts at /api/v1/downloads/search.json.
     Summing the last 7 completed days gives a figure comparable to PyPI/npm weekly stats.
-    Falls back to None on any error so the rest of metadata fetch is unaffected.
     """
-    try:
-        to_date = date.today() - timedelta(days=1)  # yesterday (most recent complete day)
-        from_date = to_date - timedelta(days=6)  # 7 days total
-        resp = await client.get(
-            "https://rubygems.org/api/v1/downloads/search.json",
-            params={
-                "from": from_date.isoformat(),
-                "to": to_date.isoformat(),
-                "gem_name": package,
-            },
-        )
-        if resp.status_code == 200:
-            daily = resp.json().get("rubygems") or {}
-            total = sum(daily.values())
-            return total if total > 0 else None
-    except Exception:  # noqa: BLE001
-        pass
+    to_date = date.today() - timedelta(days=1)  # yesterday (most recent complete day)
+    from_date = to_date - timedelta(days=6)  # 7 days total
+    resp = await get_with_retry(
+        "https://rubygems.org/api/v1/downloads/search.json",
+        params={
+            "from": from_date.isoformat(),
+            "to": to_date.isoformat(),
+            "gem_name": package,
+        },
+    )
+    if resp is not None and resp.status_code == 200:
+        daily = resp.json().get("rubygems") or {}
+        total = sum(daily.values())
+        return total if total > 0 else None
     return None
