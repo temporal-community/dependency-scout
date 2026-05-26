@@ -147,7 +147,8 @@ async def test_fetch_maintainer_returns_default():
 
 
 @respx.mock
-async def test_fetch_attestations_unsigned_tag():
+async def test_fetch_attestations_unsigned_tag(monkeypatch):
+    monkeypatch.setenv("GITHUB_TOKEN", "fake-token")
     # Lightweight tag (no annotated tag object)
     for tag in ("v6", "6", "v4", "4"):
         respx.get(f"https://api.github.com/repos/actions/checkout/git/refs/tags/{tag}").mock(
@@ -201,7 +202,8 @@ async def test_fetch_attestations_signed_new_tag():
 
 
 @respx.mock
-async def test_fetch_release_with_release_notes():
+async def test_fetch_release_with_release_notes(monkeypatch):
+    monkeypatch.setenv("GITHUB_TOKEN", "fake-token")
     respx.get("https://api.github.com/repos/actions/checkout/releases/tags/v6").mock(
         return_value=httpx.Response(200, json=_gh_release_resp("v6"))
     )
