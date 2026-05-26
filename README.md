@@ -30,7 +30,48 @@ No server setup needed. Point it at any GitHub PR and it'll run all 11 checks an
 ```bash
 git clone https://github.com/temporal-community/dependency-scout
 cd dependency-scout
-uv run python triage.py https://github.com/owner/repo/pull/123
+uv run python triage.py https://github.com/temporalio/ai-cookbook/pull/127
+```
+
+```
+Running the following checks:
+
+  ✓  Core checks  OSV, diff analysis, release age, maintainer history, version lineage, and more
+  ℹ  Socket.dev   Supply-chain threat intelligence — add SOCKET_API_KEY to .env  (socket.dev)
+  ✓  Classifier   Anthropic — LLM-powered GREEN/YELLOW/RED verdict
+
+  See docs/configuration.md for setup details.
+
+────────────────────────────────────────────────────────────
+
+Triaging actions/checkout  4 → 6  (github_actions)
+
+  metadata         ─  N/A — no download data for this ecosystem
+  osv              ✓  no known vulnerabilities
+  diff             ✓  no suspicious patterns
+  maintainer       ✓  no changes detected
+  age              ✓  released 3273h ago
+  attestation      ─  N/A — no build provenance
+  release_notes    ─  N/A — no GitHub release
+  version_lineage  ✓  on latest version line
+  deps_dev         ✓  not deprecated
+  scorecard        ─  N/A — not in Scorecard database
+
+Verdict: 🟡 YELLOW  (confidence 82%)
+
+  This is a major version bump (v4 → v6) for `actions/checkout`, one of the most
+  widely used GitHub Actions. Several signals warrant human review:
+
+  ⚠ major_version_bump
+  ⚠ large_diff_for_version_delta
+  ⚠ network_calls_in_lib
+  ⚠ security_sensitive_credential_handling_refactored
+  ⚠ new_outbound_data_in_http_user_agent
+  ⚠ version_tag_vs_package_json_discrepancy
+
+────────────────────────────────────────────────────────────
+dependency-scout  ·  docs/deployment.md  ·  temporal.io
+────────────────────────────────────────────────────────────
 ```
 
 Or pass the details explicitly:
