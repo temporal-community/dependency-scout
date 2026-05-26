@@ -212,7 +212,9 @@ def collect_github_credentials() -> dict[str, str]:
     return credentials
 
 
-def _ask_menu(prompt: str, options: list[tuple[str, str]], allow_zero: bool = True) -> int:
+def _ask_menu(
+    prompt: str, options: list[tuple[str, str]], allow_zero: bool = True, default: int = 0
+) -> int:
     """Display a numbered menu and return the 1-based choice, or 0 for 'skip'."""
     print(f"\n  {BOLD}{prompt}{RESET}\n")
     for i, (label, description) in enumerate(options, start=1):
@@ -221,7 +223,7 @@ def _ask_menu(prompt: str, options: list[tuple[str, str]], allow_zero: bool = Tr
         print(f"    {BOLD}0){RESET} Skip")
     print()
     while True:
-        raw = _ask(f"Enter choice (0–{len(options)})", default="0")
+        raw = _ask(f"Enter choice (0–{len(options)})", default=str(default))
         try:
             choice = int(raw)
             if (allow_zero and 0 <= choice <= len(options)) or (
@@ -255,6 +257,7 @@ def collect_optional_keys() -> dict[str, str]:
                 "any dependency_scout.classifiers plugin — set CLASSIFIER manually",
             ),
         ],
+        default=1,
     )
 
     if llm_choice == 1:
@@ -457,8 +460,8 @@ def collect_temporal_config() -> tuple[dict[str, str], str]:
   Temporal Cloud — pick this if:
     • You want the Scout running 24/7 without a server to babysit
     • You're deploying to production
-  Free tier available at https://cloud.temporal.io (no credit card).
-  State is durable; restarts and failures are handled for you.
+  Paid service at https://cloud.temporal.io — free credits to start, credit
+  card required. State is durable; restarts and failures are handled for you.
     """)
     )
 
@@ -466,8 +469,9 @@ def collect_temporal_config() -> tuple[dict[str, str], str]:
         "Which Temporal setup are you using?",
         [
             ("Local dev server", "temporal server start-dev — easiest to get started"),
-            ("Temporal Cloud", "fully managed, no infrastructure to maintain"),
+            ("Temporal Cloud", "fully managed, paid service — credit card required"),
         ],
+        default=1,
     )
 
     if choice == 0:
