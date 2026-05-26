@@ -8,7 +8,7 @@ from urllib.parse import quote
 from temporalio import activity
 from temporalio.exceptions import ApplicationError
 
-from models import PRContext, PRFilesChecks, Verdict
+from models import PRContext, PackageChecks, PRFilesChecks, Verdict
 from helpers.comment_formatter import format_comment
 from helpers.http import get_client
 
@@ -97,8 +97,8 @@ class GitLabPlatformClient:
         encoded = quote(pr.repo, safe="")
         return f"{self._base_url}/api/v4/projects/{encoded}"
 
-    async def comment(self, pr: PRContext, verdict: Verdict) -> None:
-        body = format_comment(pr, verdict)
+    async def comment(self, pr: PRContext, verdict: Verdict, signals: PackageChecks | None = None) -> None:
+        body = format_comment(pr, verdict, signals)
         if self._dry_run():
             activity.logger.info(f"[dry-run] Would post on {pr.repo}!{pr.pr_number}:\n{body}")
             return

@@ -38,10 +38,6 @@ _FLAG_FOLD_THRESHOLD = 3
 
 def format_comment(pr: PRContext, verdict: Verdict, signals: PackageChecks | None = None) -> str:
     badge = _BADGE.get(verdict.classification, verdict.classification.upper())
-    ui_base = os.environ.get("TEMPORAL_UI_BASE_URL", "http://localhost:8233")
-    ns = os.environ.get("TEMPORAL_NAMESPACE", "default")
-    wf_id = f"triage-{pr.ecosystem}-{pr.package_name}-{pr.new_version}"
-    wf_url = f"{ui_base}/namespaces/{ns}/workflows/{wf_id}"
     config_url = _config_url(pr)
 
     lines = [
@@ -94,7 +90,7 @@ def format_comment(pr: PRContext, verdict: Verdict, signals: PackageChecks | Non
         ]
 
     lines += [
-        f"[View workflow run]({wf_url}) · [Configure triage behavior]({config_url})",
+        f"[Configure triage behavior]({config_url})",
     ]
 
     return "\n".join(lines)

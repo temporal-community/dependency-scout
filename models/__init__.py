@@ -15,6 +15,7 @@ from models.checks import (
 )
 from models.verdict import Verdict
 from models.package import PackageChecks
+from models.triage import TriageResult
 
 __all__ = [
     "_validate_ecosystem_name",
@@ -35,4 +36,5 @@ __all__ = [
     "VersionLineageChecks",
     "Verdict",
     "PackageChecks",
+    "TriageResult",
 ]

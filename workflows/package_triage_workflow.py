@@ -7,6 +7,7 @@ with workflow.unsafe.imports_passed_through():
     from models import (
         CheckContext,
         PackageChecks,
+        TriageResult,
         Verdict,
         MetadataChecks,
         SocketChecks,
@@ -68,7 +69,7 @@ class PackageTriageWorkflow:
         old_version: str,
         new_version: str,
         extra_check_activities: list[str] = [],
-    ) -> Verdict:
+    ) -> TriageResult:
         retry = RetryPolicy(maximum_attempts=5, initial_interval=timedelta(seconds=2))
         default_opts: dict = dict(
             start_to_close_timeout=timedelta(seconds=30),
@@ -153,10 +154,11 @@ class PackageTriageWorkflow:
             **check_kwargs,  # type: ignore[arg-type]
         )
 
-        return await workflow.execute_activity(
+        verdict: Verdict = await workflow.execute_activity(
             "activities.classifier.classify",
             package_checks,
             result_type=Verdict,
             start_to_close_timeout=timedelta(seconds=60),
             retry_policy=retry,
         )
+        return TriageResult(verdict=verdict, signals=package_checks)

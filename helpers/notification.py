@@ -46,7 +46,7 @@ class PlatformCommentChannel:
     ) -> None:
         from platforms import get_platform_client
 
-        await get_platform_client(pr).comment(pr, verdict)
+        await get_platform_client(pr).comment(pr, verdict, signals)
 
 
 class SlackWebhookChannel:

@@ -5,7 +5,7 @@ from temporalio.common import RetryPolicy
 from temporalio.workflow import ParentClosePolicy
 
 with workflow.unsafe.imports_passed_through():
-    from models import PRContext, PRFilesChecks, RepoConfig, Verdict
+    from models import PRContext, PRFilesChecks, RepoConfig, TriageResult, Verdict
     from workflows.package_triage_workflow import PackageTriageWorkflow
 
 
@@ -65,7 +65,7 @@ class PRActionWorkflow:
         # workflows, Dockerfiles, or scripts in the PR — files that should never appear
         # in a routine dep-bump. No reason to block triage while waiting for it.
         date_key = workflow.now().strftime("%Y-%m-%d")
-        verdict, pr_files = await asyncio.gather(
+        triage_result, pr_files = await asyncio.gather(
             workflow.execute_child_workflow(  # type: ignore[call-overload]
                 PackageTriageWorkflow.run,
                 args=[
@@ -78,7 +78,7 @@ class PRActionWorkflow:
                 id=f"triage-{pr.ecosystem}-{pr.package_name}-{pr.new_version}-{date_key}",
                 parent_close_policy=ParentClosePolicy.ABANDON,
                 execution_timeout=timedelta(minutes=15),
-                result_type=Verdict,
+                result_type=TriageResult,
             ),
             workflow.execute_activity(
                 "activities.platform.check_pr_files",
@@ -87,6 +87,8 @@ class PRActionWorkflow:
                 **opts,
             ),
         )
+        verdict = triage_result.verdict
+        signals = triage_result.signals
 
         # Hard escalation: unexpected CI/infra/script files in a dep-bump PR override
         # the triage verdict. Package-level analysis can't see the consuming-repo PR diff;
@@ -138,7 +140,9 @@ class PRActionWorkflow:
                 }
             )
 
-        await workflow.execute_activity("activities.platform.comment", args=[pr, verdict], **opts)
+        await workflow.execute_activity(
+            "activities.platform.comment", args=[pr, verdict, signals], **opts
+        )
 
         if verdict.classification in config.block_classifications:
             await workflow.execute_activity(

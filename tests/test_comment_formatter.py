@@ -271,22 +271,6 @@ def test_signals_diff_size_formatted(pr, green_verdict, signals):
 # --- URL generation ---
 
 
-def test_workflow_url_uses_env_vars(pr, green_verdict, monkeypatch):
-    monkeypatch.setenv("TEMPORAL_UI_BASE_URL", "https://cloud.temporal.io")
-    monkeypatch.setenv("TEMPORAL_NAMESPACE", "acme-prod")
-    out = format_comment(pr, green_verdict)
-    assert (
-        "https://cloud.temporal.io/namespaces/acme-prod/workflows/triage-pip-requests-2.32.0" in out
-    )
-
-
-def test_workflow_url_defaults(pr, green_verdict, monkeypatch):
-    monkeypatch.delenv("TEMPORAL_UI_BASE_URL", raising=False)
-    monkeypatch.delenv("TEMPORAL_NAMESPACE", raising=False)
-    out = format_comment(pr, green_verdict)
-    assert "http://localhost:8233/namespaces/default/workflows/triage-pip-requests-2.32.0" in out
-
-
 def test_config_url_points_to_repo(pr, green_verdict):
     out = format_comment(pr, green_verdict)
     assert "https://github.com/owner/repo/blob/HEAD/.github/dependency-scout.yml" in out

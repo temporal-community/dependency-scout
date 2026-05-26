@@ -13,15 +13,15 @@ import os
 from temporalio import activity
 
 from platforms import get_platform_client
-from models import PRContext, PRFilesChecks, RepoConfig, Verdict
+from models import PRContext, PackageChecks, PRFilesChecks, RepoConfig, Verdict
 from helpers.config_provider import get_config_provider
 from helpers.notification import get_notification_channels
 
 
 @activity.defn(name="activities.platform.comment")
-async def comment(pr: PRContext, verdict: Verdict) -> None:
+async def comment(pr: PRContext, verdict: Verdict, signals: PackageChecks | None = None) -> None:
     """Post the triage verdict as a comment on the PR using all configured notification channels (e.g. GitHub/GitLab comment, Slack)."""
-    await get_notification_channels().send_verdict(pr, verdict)
+    await get_notification_channels().send_verdict(pr, verdict, signals)
 
 
 @activity.defn(name="activities.platform.merge_pr")
