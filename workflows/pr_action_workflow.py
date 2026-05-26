@@ -166,6 +166,7 @@ class PRActionWorkflow:
             "activities.platform.comment", args=[pr, verdict, signals], result_type=str, **opts
         )
         url_suffix = f"||{comment_url}" if comment_url else ""
+        mr_suffix = f"||{verdict.merge_recommendation}" if verdict.merge_recommendation else ""
 
         if verdict.classification in config.block_classifications:
             if verdict.merge_recommendation == "merge":
@@ -184,7 +185,7 @@ class PRActionWorkflow:
             await workflow.execute_activity(
                 "activities.platform.close_pr", args=[pr, reason, True], **opts
             )
-            return f"blocked-{verdict.classification}{url_suffix}"
+            return f"blocked-{verdict.classification}{url_suffix}{mr_suffix}"
 
         # Auto-merge logic with merge_recommendation support:
         # - merge_recommendation="hold" suppresses auto-merge even for green classifications
@@ -199,8 +200,8 @@ class PRActionWorkflow:
         if config.auto_merge_enabled and (normal_auto_merge or recommendation_auto_merge):
             await workflow.execute_activity("activities.platform.merge_pr", args=[pr], **opts)
             if recommendation_auto_merge and not normal_auto_merge:
-                return f"auto-merged-security-context{url_suffix}"
-            return f"auto-merged{url_suffix}"
+                return f"auto-merged-security-context{url_suffix}{mr_suffix}"
+            return f"auto-merged{url_suffix}{mr_suffix}"
 
         if config.reviewers:
             await workflow.execute_activity(
@@ -218,7 +219,7 @@ class PRActionWorkflow:
                     )
                 except asyncio.TimeoutError:
                     workflow.logger.warning("Human review wait timed out after 7 days")
-                    return f"timed-out-awaiting-review{url_suffix}"
+                    return f"timed-out-awaiting-review{url_suffix}{mr_suffix}"
                 if not config.reviewers or self._approver in config.reviewers:
                     break
                 # Unauthorized signal — log and keep waiting
@@ -231,8 +232,8 @@ class PRActionWorkflow:
 
             if self._human_decision == "approve":
                 await workflow.execute_activity("activities.platform.merge_pr", args=[pr], **opts)
-                return f"human-approved-merged{url_suffix}"
-            return f"human-rejected{url_suffix}"
+                return f"human-approved-merged{url_suffix}{mr_suffix}"
+            return f"human-rejected{url_suffix}{mr_suffix}"
 
         # Default observe-only: comment posted, no further action.
-        return f"observe-only-{verdict.classification}{url_suffix}"
+        return f"observe-only-{verdict.classification}{url_suffix}{mr_suffix}"

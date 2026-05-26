@@ -148,10 +148,20 @@ async def _list_dependabot_prs(repo: str, token: str | None) -> list[dict]:
     return prs
 
 
+def _parse_result(result: str) -> tuple[str, str | None, str | None]:
+    """Return (status, comment_url, merge_recommendation) from workflow result string."""
+    parts = result.split("||")
+    status = parts[0]
+    comment_url = parts[1] if len(parts) > 1 and parts[1] else None
+    merge_rec = parts[2] if len(parts) > 2 and parts[2] in ("merge", "hold") else None
+    return status, comment_url, merge_rec
+
+
 def _verdict_from_result(result: str) -> str:
-    if "green" in result or result in ("auto-merged", "human-approved-merged"):
+    status = result.split("||")[0]
+    if "green" in status or status in ("auto-merged", "human-approved-merged"):
         return "green"
-    if "red" in result:
+    if "red" in status:
         return "red"
     return "yellow"
 
@@ -160,6 +170,14 @@ def _color_verdict(verdict: str) -> str:
     emoji = {"green": "🟢", "yellow": "🟡", "red": "🔴"}[verdict]
     color = {"green": _G, "yellow": _Y, "red": _R}[verdict]
     return f"{emoji} {color}{_B}{verdict.upper()}{_RST}"
+
+
+def _merge_rec_label(merge_rec: str | None) -> str:
+    if merge_rec == "merge":
+        return f"  {_G}⚡ merge recommended{_RST}"
+    if merge_rec == "hold":
+        return f"  {_Y}⏸ hold recommended{_RST}"
+    return ""
 
 
 def _clf_name() -> str | None:
@@ -273,10 +291,10 @@ async def _triage_single(args: argparse.Namespace) -> None:
     print()
 
     result = await handle.result()
-    result_str, *url_parts = result.split("||", 1)
-    comment_url = url_parts[0] if url_parts else None
-    verdict = _verdict_from_result(result_str)
-    print(f"  {_color_verdict(verdict)}  {_dim(result_str)}")
+    result_str, comment_url, merge_rec = _parse_result(result)
+    verdict = _verdict_from_result(result)
+    mr_label = _merge_rec_label(merge_rec)
+    print(f"  {_color_verdict(verdict)}{mr_label}  {_dim(result_str)}")
     if comment_url:
         print(f"  Comment:  {comment_url}")
     elif not args.dry_run and has_github and pr_number:
@@ -417,12 +435,12 @@ async def _triage_batch(args: argparse.Namespace) -> None:
     for future in asyncio.as_completed(tasks):
         try:
             pr_data, parsed, result = await future
-            result_str, *url_parts = result.split("||", 1)
-            comment_url = url_parts[0] if url_parts else None
-            verdict = _verdict_from_result(result_str)
-            completed.append((pr_data, parsed, verdict, result_str, comment_url))
+            result_str, comment_url, merge_rec = _parse_result(result)
+            verdict = _verdict_from_result(result)
+            completed.append((pr_data, parsed, verdict, result_str, comment_url, merge_rec))
+            mr_label = _merge_rec_label(merge_rec)
             print(
-                f"  {_color_verdict(verdict)}  "
+                f"  {_color_verdict(verdict)}{mr_label}  "
                 f"#{pr_data['number']:<5}  {parsed.package:<{pkg_w}}  "
                 f"{parsed.old_version} → {parsed.new_version}"
             )
@@ -434,7 +452,7 @@ async def _triage_batch(args: argparse.Namespace) -> None:
     # Group by (package, old_version, new_version) for the summary.
     groups: dict[tuple, list] = {}
     for entry in completed:
-        pr_data, parsed, verdict, result_str, comment_url = entry
+        pr_data, parsed, verdict, result_str, comment_url, merge_rec = entry
         key = (parsed.package, parsed.old_version, parsed.new_version)
         groups.setdefault(key, []).append(entry)
 
@@ -454,7 +472,7 @@ async def _triage_batch(args: argparse.Namespace) -> None:
         ver_str = f"{old_v} → {new_v}"
         print(f"  {_color_verdict(verdict)}  {pkg:<{pkg_w}}  {ver_str:<{ver_w}}  {_dim(pr_label)}")
         rep = entries[0]
-        rep_pr_data, _, _, _, comment_url = rep
+        rep_pr_data, _, _, _, comment_url, _ = rep
         wf_id = f"pr-action-{repo_slug}-{rep_pr_data['number']}"
         wf_url = f"{ui_base}/namespaces/{ns}/workflows/{wf_id}"
         extra = f"  {_dim(f'(+{len(entries) - 1} more)')}" if len(entries) > 1 else ""
