@@ -63,9 +63,11 @@ A token with no scopes still authenticates your requests and raises the rate lim
 
 Set Repository access to **"Public repositories"** and add no permissions at all. Public repo data is always readable; the token just authenticates you and raises the rate limit from 60 to 5,000 req/hour. The Repository permissions section won't even appear — that's fine.
 
-**For the full worker (comments, auto-merge, private repos):**
+Note: `triage.py` and `triage_all.py` are local scripts — they never post PR comments. If you want the Scout to actually comment on PRs, you need the worker (see below).
 
-Set Repository access to **"Only select repositories"**, pick the repos you want the Scout to act on, then the Repository permissions section appears. Add:
+**For `start_workflow` / the worker (comments, auto-merge, private repos):**
+
+`start_workflow.py` triggers a Temporal workflow that runs through the worker — and the worker **does** post PR comments. So even when using `start_workflow` as a "test", you need write access. Set Repository access to **"Only select repositories"**, pick the repos you want the Scout to act on, then the Repository permissions section appears. Add:
 
 | Permission | Level | When needed |
 |---|---|---|

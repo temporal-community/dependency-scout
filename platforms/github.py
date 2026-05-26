@@ -242,7 +242,17 @@ class GitHubPlatformClient:
         if resp.status_code == 401:
             raise ApplicationError("GitHub auth failed", non_retryable=True)
         resp.raise_for_status()
-        unexpected = [f["filename"] for f in resp.json() if _is_ci_infra_file(f["filename"])]
+
+        def _is_unexpected(path: str) -> bool:
+            if not _is_ci_infra_file(path):
+                return False
+            # For github_actions bumps, workflow file changes ARE the dependency
+            # being updated — Dependabot edits every workflow that uses the action.
+            if pr.ecosystem == "github_actions" and path.startswith(".github/workflows/"):
+                return False
+            return True
+
+        unexpected = [f["filename"] for f in resp.json() if _is_unexpected(f["filename"])]
         return PRFilesChecks(unexpected_files=unexpected)
 
 

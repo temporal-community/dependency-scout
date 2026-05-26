@@ -243,7 +243,15 @@ class GitLabPlatformClient:
             raise ApplicationError("GitLab auth failed", non_retryable=True)
         resp.raise_for_status()
         changes = resp.json().get("changes", [])
-        unexpected = [c["new_path"] for c in changes if _is_ci_infra_file(c["new_path"])]
+
+        def _is_unexpected(path: str) -> bool:
+            if not _is_ci_infra_file(path):
+                return False
+            if pr.ecosystem == "github_actions" and path.startswith(".github/workflows/"):
+                return False
+            return True
+
+        unexpected = [c["new_path"] for c in changes if _is_unexpected(c["new_path"])]
         return PRFilesChecks(unexpected_files=unexpected)
 
 
