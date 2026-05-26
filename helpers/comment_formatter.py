@@ -6,14 +6,21 @@ _MAX_REASONING_LEN = 500
 
 
 def _sanitize_reasoning(text: str) -> str:
-    """Strip Markdown links and cap length — reasoning is LLM output influenced by
-    attacker-controlled diff content and must not render arbitrary links in PR comments."""
+    """Strip Markdown formatting and cap length — reasoning is LLM output influenced by
+    attacker-controlled diff content and must not render arbitrary links or formatting in PR comments."""
     # Replace [text](url) with just the text
     text = re.sub(r"\[([^\]]*)\]\([^)]*\)", r"\1", text)
     # Strip bare URLs
     text = re.sub(r"https?://\S+", "[url removed]", text)
+    # Strip bold/italic — LLM may use field names like **ci_workflow_changed_days_ago**
+    # which get cut off mid-span by truncation and break the comment's markdown
+    text = re.sub(r"\*\*([^*]*)\*\*", r"\1", text)
+    text = re.sub(r"\*([^*]*)\*", r"\1", text)
     if len(text) > _MAX_REASONING_LEN:
-        text = text[:_MAX_REASONING_LEN] + "…"
+        # Truncate at word boundary to avoid mid-word cutoff
+        truncated = text[:_MAX_REASONING_LEN]
+        last_space = truncated.rfind(" ")
+        text = (truncated[:last_space] if last_space > _MAX_REASONING_LEN // 2 else truncated) + "…"
     return text
 
 

@@ -45,7 +45,7 @@ temporal server start-dev
 uv run python -m worker
 
 # Terminal 3 — triage a single PR
-uv run python -m start_workflow https://github.com/temporalio/ai-cookbook/pull/127
+uv run python -m triage https://github.com/temporalio/ai-cookbook/pull/127
 ```
 
 Open **http://localhost:8233** to watch the workflow run. With `GITHUB_TOKEN` set, the Scout posts a comment directly on the PR — [here's a real example](https://github.com/temporalio/ai-cookbook/pull/127#issuecomment-4542125690).
@@ -58,10 +58,10 @@ Once the worker is running, point it at a whole repo to clear the backlog:
 
 ```bash
 # Triage every open Dependabot/Renovate PR in a repo
-uv run python triage_all.py --repo your-org/your-repo
+uv run python -m triage --repo your-org/your-repo
 
 # Or limit to a subset while you're getting a feel for it
-uv run python triage_all.py --repo your-org/your-repo --limit 5
+uv run python -m triage --repo your-org/your-repo --limit 5
 ```
 
 ### Configure your stack

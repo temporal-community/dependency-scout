@@ -21,8 +21,8 @@ SOCKET_API_KEY=op://Personal/dependency-scout/socket-key
 Then run with secrets injected at process start — they're never written to disk:
 
 ```bash
-op run --env-file=.env -- uv run python triage_all.py --repo myorg/myrepo
-op run --env-file=.env -- uv run python -m start_workflow https://github.com/myorg/myrepo/pull/123
+op run --env-file=.env -- uv run python -m triage --repo myorg/myrepo
+op run --env-file=.env -- uv run python -m triage https://github.com/myorg/myrepo/pull/123
 op run --env-file=.env -- uv run python -m worker
 ```
 
@@ -44,8 +44,8 @@ export GITHUB_TOKEN=$(security find-generic-password -s dep-scout-gh -w 2>/dev/n
 `python-dotenv` and `uv` both support `--env-file` with arbitrary paths:
 
 ```bash
-uv run --env-file ~/.config/dependency-scout/.env python -m start_workflow https://github.com/myorg/myrepo/pull/123
-uv run --env-file ~/.config/dependency-scout/.env python triage_all.py --repo myorg/myrepo
+uv run --env-file ~/.config/dependency-scout/.env python -m triage https://github.com/myorg/myrepo/pull/123
+uv run --env-file ~/.config/dependency-scout/.env python -m triage --repo myorg/myrepo
 ```
 
 A file at `~/.config/dependency-scout/.env` is outside any project directory and invisible to tools that scan the working tree.
@@ -60,13 +60,13 @@ A token with no scopes still authenticates your requests and raises the rate lim
 
 **Fine-grained PAT (preferred)** — create one at GitHub → Settings → Developer settings → Personal access tokens → Fine-grained tokens.
 
-**For `triage_all.py` on public repos only (read-only, no comments):**
+**For `triage --repo` on public repos only (read-only, no comments):**
 
 Set Repository access to **"Public repositories"** and add no permissions at all. Public repo data is always readable; the token just authenticates you and raises the rate limit from 60 to 5,000 req/hour. The Repository permissions section won't even appear — that's fine.
 
-**For `start_workflow` / the worker (comments, auto-merge, private repos):**
+**For `triage` / the worker (comments, auto-merge, private repos):**
 
-`start_workflow.py` triggers a Temporal workflow that runs through the worker — and the worker **does** post PR comments. So even when using `start_workflow` as a "test", you need write access. Set Repository access to **"Only select repositories"**, pick the repos you want the Scout to act on, then the Repository permissions section appears. Add:
+`triage` triggers a Temporal workflow that runs through the worker — and the worker **does** post PR comments. So even when using `triage` as a "test", you need write access. Set Repository access to **"Only select repositories"**, pick the repos you want the Scout to act on, then the Repository permissions section appears. Add:
 
 | Permission | Level | When needed |
 |---|---|---|

@@ -27,6 +27,7 @@ class PRContext(BaseModel):
     old_version: str
     new_version: str
     head_sha: str = ""  # PR branch HEAD SHA at webhook receipt time
+    dry_run: bool = False  # when True, skip posting comments/actions (triage --dry-run)
 
     @field_validator("ecosystem")
     @classmethod
