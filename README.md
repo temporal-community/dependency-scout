@@ -45,10 +45,10 @@ temporal server start-dev
 uv run python -m worker
 
 # Terminal 3 — triage a single PR
-uv run python -m triage https://github.com/temporalio/ai-cookbook/pull/127
+uv run python -m triage https://github.com/your-org/your-repo/pull/123
 ```
 
-Open **http://localhost:8233** to watch the workflow run. With `GITHUB_TOKEN` set, the Scout posts a comment directly on the PR — [here's a real example](https://github.com/temporalio/ai-cookbook/pull/127#issuecomment-4542125690).
+Open **http://localhost:8233** to watch the workflow run. With `GITHUB_TOKEN` set, the Scout posts a comment directly on the PR — [here's a real example](https://github.com/temporalio/ai-cookbook/pull/102#issuecomment-4543265735).
 
 No API keys needed to start — the rule-based classifier runs entirely locally. Without `GITHUB_TOKEN` it prints what it would have posted instead of actually posting it.
 
