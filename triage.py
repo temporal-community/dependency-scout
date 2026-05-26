@@ -77,6 +77,16 @@ def _info(s: str) -> str:
     return f"{_C}{s}{_RST}"
 
 
+def _link(url: str, text: str | None = None) -> str:
+    label = text or url
+    return f"\033]8;;{url}\a{label}\033]8;;\a"
+
+
+def _link_dim(url: str, text: str | None = None) -> str:
+    label = text or url
+    return f"\033]8;;{url}\a{_DIM}{label}{_RST}\033]8;;\a"
+
+
 # ---------------------------------------------------------------------------
 # Shared helpers
 # ---------------------------------------------------------------------------
@@ -268,14 +278,15 @@ async def _triage_single(args: argparse.Namespace) -> None:
     ui_base = os.environ.get("TEMPORAL_UI_BASE_URL", "http://localhost:8233")
     ns = os.environ.get("TEMPORAL_NAMESPACE", "default")
     print(f"  Workflow: {handle.id}")
-    print(f"  Temporal: {_dim(f'{ui_base}/namespaces/{ns}/workflows/{handle.id}')}")
+    wf_url = f"{ui_base}/namespaces/{ns}/workflows/{handle.id}"
+    print(f"  Temporal: {_link_dim(wf_url)}")
     print()
 
     result = await handle.result()
     verdict = _verdict_from_result(result)
     print(f"  {_color_verdict(verdict)}  {_dim(result)}")
     if not args.dry_run and has_github and pr_number:
-        print(f"  PR: https://github.com/{repo}/pull/{pr_number}")
+        print(f"  PR: {_link(f'https://github.com/{repo}/pull/{pr_number}')}")
     print()
 
 
@@ -394,8 +405,9 @@ async def _triage_batch(args: argparse.Namespace) -> None:
             f"#{pr_data['number']:<5} {parsed.package:<{pkg_w}}  "
             f"{parsed.old_version} → {parsed.new_version}"
         )
-        print(f"        PR:       {pr_url}{comment_note}")
-        print(f"        Workflow: {_dim(f'{ui_base}/namespaces/{ns}/workflows/{wf_id}')}")
+        wf_url = f"{ui_base}/namespaces/{ns}/workflows/{wf_id}"
+        print(f"        PR:       {_link(pr_url)}{comment_note}")
+        print(f"        Workflow: {_link_dim(wf_url)}")
 
     total = sum(counts.values())
     g, y, r = counts["green"], counts["yellow"], counts["red"]

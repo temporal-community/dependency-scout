@@ -127,80 +127,18 @@ def test_confidence_rendered_as_percentage(pr, green_verdict):
     assert "**Confidence:** 95%" in out
 
 
-# --- flags section ---
+# --- flags section is not rendered (signals table replaces it) ---
 
 
-def test_no_flags_section_when_empty(pr, green_verdict):
-    out = format_comment(pr, green_verdict)
-    assert "**Flags:**" not in out
-
-
-def test_flags_rendered_when_present(pr):
+def test_no_flags_section_in_output(pr):
     verdict = Verdict(
         classification="yellow",
         confidence=0.6,
         reasoning="Meh.",
-        flags=["New maintainer account", "Released <24h ago"],
+        flags=["major version bump", "release age 2 days"],
     )
     out = format_comment(pr, verdict)
-    assert "**Flags:**" in out
-    assert "- New maintainer account" in out
-    assert "- Released <24h ago" in out
-
-
-def test_yellow_many_flags_folds_tail(pr):
-    flags = ["flag one", "flag two", "flag three", "flag four", "flag five"]
-    verdict = Verdict(
-        classification="yellow", confidence=0.6, reasoning="Several issues.", flags=flags
-    )
-    out = format_comment(pr, verdict)
-    assert "- flag one" in out
-    assert "- flag two" in out
-    assert "- flag three" in out
-    assert "<details>" in out
-    assert "and 2 more checks" in out
-    assert "- flag four" in out
-    assert "- flag five" in out
-
-
-def test_yellow_three_flags_not_folded(pr):
-    flags = ["a", "b", "c"]
-    verdict = Verdict(
-        classification="yellow", confidence=0.6, reasoning="Three issues.", flags=flags
-    )
-    out = format_comment(pr, verdict)
-    assert "<details>" not in out
-    assert "- a" in out
-    assert "- c" in out
-
-
-def test_red_many_flags_never_folded(pr):
-    flags = [f"critical issue {i}" for i in range(6)]
-    verdict = Verdict(classification="red", confidence=0.95, reasoning="Bad.", flags=flags)
-    out = format_comment(pr, verdict)
-    assert "<details>" not in out
-    for flag in flags:
-        assert f"- {flag}" in out
-
-
-def test_fold_uses_singular_signal_noun(pr):
-    flags = ["flag one", "flag two", "flag three", "flag four"]
-    verdict = Verdict(classification="yellow", confidence=0.6, reasoning="Issues.", flags=flags)
-    out = format_comment(pr, verdict)
-    assert "and 1 more check" in out
-    assert "and 1 more checks" not in out
-
-
-def test_flags_are_sanitized(pr):
-    verdict = Verdict(
-        classification="red",
-        confidence=0.9,
-        reasoning="Bad.",
-        flags=["See [details](https://attacker.com)"],
-    )
-    out = format_comment(pr, verdict)
-    assert "https://attacker.com" not in out
-    assert "- See details" in out
+    assert "**Flags:**" not in out
 
 
 # --- signals table ---
@@ -222,9 +160,15 @@ def test_signals_all_checks_present(pr, green_verdict, signals):
         "Downloads",
         "Socket score",
         "Vulnerabilities",
-        "Diff scan",
+        "Install script",
+        "Network calls",
+        "New dependencies",
+        "Diff integrity",
         "Maintainer",
         "Release age",
+        "CI workflow",
+        "Tag signing",
+        "Publisher",
         "Attestation",
         "Release notes",
         "Version lineage",
@@ -285,18 +229,82 @@ def test_signals_osv_ok_when_clean(pr, green_verdict, signals):
     assert "no known vulnerabilities" in out
 
 
-def test_signals_diff_bad_when_install_script(pr, green_verdict, signals):
+def test_signals_install_script_bad_when_added(pr, green_verdict, signals):
     signals.diff.install_script_added = True
     out = format_comment(pr, green_verdict, signals)
     assert "🚨" in out
-    assert "install script added" in out
+    assert "new install hook added" in out
+
+
+def test_signals_install_script_warn_when_changed(pr, green_verdict, signals):
+    signals.diff.install_script_changed = True
+    out = format_comment(pr, green_verdict, signals)
+    assert "⚠️" in out
+    assert "install hook modified" in out
+
+
+def test_signals_network_calls_bad(pr, green_verdict, signals):
+    signals.diff.network_calls_in_lib = True
+    out = format_comment(pr, green_verdict, signals)
+    assert "🚨" in out
+    assert "new outbound network calls in library code" in out
+
+
+def test_signals_new_deps_warn_above_threshold(pr, green_verdict, signals):
+    signals.diff.new_dependency_count = 6
+    out = format_comment(pr, green_verdict, signals)
+    assert "⚠️" in out
+    assert "6 added" in out
+
+
+def test_signals_diff_integrity_bad(pr, green_verdict, signals):
+    signals.diff.obfuscated_code = True
+    out = format_comment(pr, green_verdict, signals)
+    assert "🚨" in out
+    assert "obfuscated code" in out
 
 
 def test_signals_maintainer_warn_when_changed(pr, green_verdict, signals):
     signals.maintainer.maintainer_changed = True
     out = format_comment(pr, green_verdict, signals)
     assert "⚠️" in out
-    assert "maintainer changed" in out
+    assert "changed" in out
+
+
+def test_signals_maintainer_shows_account_age(pr, green_verdict, signals):
+    signals.maintainer.maintainer_changed = True
+    signals.maintainer.new_maintainer_account_age_days = 45
+    out = format_comment(pr, green_verdict, signals)
+    assert "45 days old" in out
+
+
+def test_signals_ci_workflow_warn_when_changed(pr, green_verdict, signals):
+    signals.release.ci_workflow_changed_days_ago = 3
+    out = format_comment(pr, green_verdict, signals)
+    assert "⚠️" in out
+    assert "changed 3 days ago" in out
+
+
+def test_signals_tag_signing_warn_when_dropped(pr, green_verdict, signals):
+    signals.release.tag_was_previously_signed = True
+    out = format_comment(pr, green_verdict, signals)
+    assert "⚠️" in out
+    assert "signing dropped" in out
+
+
+def test_signals_publisher_warn_when_changed(pr, green_verdict, signals):
+    signals.attestation.publisher_changed = True
+    signals.attestation.old_publisher_repo = "old-org/repo"
+    out = format_comment(pr, green_verdict, signals)
+    assert "⚠️" in out
+    assert "old-org/repo" in out
+
+
+def test_signals_scorecard_shows_dangerous_workflow(pr, green_verdict, signals):
+    signals.scorecard.scorecard_score = 5.0
+    signals.scorecard.scorecard_dangerous_workflow = 0
+    out = format_comment(pr, green_verdict, signals)
+    assert "dangerous workflow" in out
 
 
 def test_signals_age_ok_above_168h(pr, green_verdict, signals):

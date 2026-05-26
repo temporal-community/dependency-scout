@@ -36,7 +36,8 @@ def _check_config() -> None:
         )
     if not os.environ.get("SOCKET_API_KEY"):
         logger.info(
-            "SOCKET_API_KEY not set — Socket.dev supply-chain score signal will be skipped."
+            "SOCKET_API_KEY not set — Socket.dev supply-chain score signal will be skipped. "
+            "Get a key at https://socket.dev/dashboard/settings"
         )
 
 

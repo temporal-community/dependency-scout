@@ -16,6 +16,9 @@ def _sanitize_reasoning(text: str) -> str:
     # which get cut off mid-span by truncation and break the comment's markdown
     text = re.sub(r"\*\*([^*]*)\*\*", r"\1", text)
     text = re.sub(r"\*([^*]*)\*", r"\1", text)
+    # Collapse multi-paragraph reasoning to a single paragraph — the blockquote
+    # renderer only styles the first paragraph, so numbered lists look broken
+    text = re.sub(r"\n+", " ", text).strip()
     if len(text) > _MAX_REASONING_LEN:
         # Truncate at word boundary to avoid mid-word cutoff
         truncated = text[:_MAX_REASONING_LEN]
@@ -50,9 +53,15 @@ _CHECK_LABEL = {
     "metadata": "Downloads",
     "socket": "Socket score",
     "osv": "Vulnerabilities",
-    "diff": "Diff scan",
+    "install_script": "Install script",
+    "network_calls": "Network calls",
+    "new_deps": "New dependencies",
+    "diff_integrity": "Diff integrity",
     "maintainer": "Maintainer",
     "age": "Release age",
+    "ci_workflow": "CI workflow",
+    "tag_signing": "Tag signing",
+    "publisher": "Publisher",
     "attestation": "Attestation",
     "release_notes": "Release notes",
     "version_lineage": "Version lineage",
@@ -67,6 +76,7 @@ def _signals_table(signals: PackageChecks) -> list[str]:
     def _row(name: str, status: str, text: str) -> None:
         rows.append((_CHECK_LABEL[name], _STATUS_ICON[status], text))
 
+    # Package health
     m = signals.metadata
     if m.weekly_downloads is not None:
         _row("metadata", "na", f"{m.weekly_downloads:,} weekly downloads")
@@ -75,7 +85,16 @@ def _signals_table(signals: PackageChecks) -> list[str]:
 
     if signals.socket.socket_score is not None:
         s = signals.socket.socket_score
-        _row("socket", "ok" if s >= 70 else ("warn" if s >= 40 else "bad"), f"score {s}/100")
+        alert_note = (
+            f"; {len(signals.socket.socket_alerts)} alert(s)"
+            if signals.socket.socket_alerts
+            else ""
+        )
+        _row(
+            "socket",
+            "ok" if s >= 70 else ("warn" if s >= 40 else "bad"),
+            f"score {s}/100{alert_note}",
+        )
     else:
         _row("socket", "na", "N/A — no data")
 
@@ -84,23 +103,103 @@ def _signals_table(signals: PackageChecks) -> list[str]:
     else:
         _row("osv", "ok", "no known vulnerabilities")
 
-    if signals.diff.install_script_added:
-        _row("diff", "bad", "install script added")
+    # Diff analysis
+    d = signals.diff
+    if d.install_script_added:
+        _row("install_script", "bad", "new install hook added")
+    elif d.install_script_changed:
+        _row("install_script", "warn", "install hook modified")
     else:
-        _row("diff", "ok", "no suspicious patterns")
+        _row("install_script", "ok", "none")
 
+    if d.network_calls_in_lib:
+        _row("network_calls", "bad", "new outbound network calls in library code")
+    else:
+        _row("network_calls", "ok", "none detected")
+
+    n = d.new_dependency_count
+    if n == 0:
+        _row("new_deps", "ok", "none added")
+    elif n < 5:
+        _row("new_deps", "ok", f"{n} added")
+    else:
+        _row("new_deps", "warn", f"{n} added")
+
+    integrity_issues = []
+    if d.artifact_source_mismatch:
+        integrity_issues.append("source/archive mismatch")
+    if d.persistence_mechanism_added:
+        integrity_issues.append("persistence mechanism")
+    if d.worm_propagation_pattern:
+        integrity_issues.append("worm propagation")
+    if d.binary_data_added:
+        integrity_issues.append("binary data in non-binary file")
+    if d.obfuscated_code:
+        integrity_issues.append("obfuscated code")
+    if d.git_url_dependency_added:
+        integrity_issues.append("git URL dependency")
+    if d.lockfile_integrity_downgraded:
+        integrity_issues.append("lockfile integrity downgraded")
+    if integrity_issues:
+        _row("diff_integrity", "bad", "; ".join(integrity_issues))
+    else:
+        _row("diff_integrity", "ok", "clean")
+
+    # Maintainer
     if signals.maintainer.maintainer_changed:
-        _row("maintainer", "warn", "maintainer changed")
+        age = signals.maintainer.new_maintainer_account_age_days
+        if age is not None:
+            _row("maintainer", "warn", f"changed — new account {age} days old")
+        else:
+            _row("maintainer", "warn", "changed")
     else:
         _row("maintainer", "ok", "no changes detected")
 
+    # Release signals
     h = signals.age.release_age_hours
     if h is not None:
         _row("age", "warn" if h < 168 else "ok", f"released {_format_age(h)} ago")
     else:
         _row("age", "na", "release age unknown")
 
-    if signals.attestation.has_attestation:
+    ci = signals.release.ci_workflow_changed_days_ago
+    if ci is not None:
+        _row("ci_workflow", "warn", f"changed {ci} day{'s' if ci != 1 else ''} ago")
+    else:
+        _row("ci_workflow", "ok", "no recent changes")
+
+    if signals.release.tag_was_previously_signed:
+        _row("tag_signing", "warn", "signing dropped — old version had a verified tag")
+    elif signals.release.tag_signature_verified is True:
+        _row("tag_signing", "ok", "verified")
+    elif signals.release.tag_signature_verified is False:
+        _row("tag_signing", "warn", "unverified tag")
+    else:
+        _row("tag_signing", "na", "no annotated tag")
+
+    # Attestation / publisher
+    att = signals.attestation
+    if att.publisher_changed:
+        old = f" (was {att.old_publisher_repo})" if att.old_publisher_repo else ""
+        age_note = (
+            f"; account {att.publisher_account_age_days}d old"
+            if att.publisher_account_age_days is not None
+            else ""
+        )
+        _row("publisher", "warn", f"changed{old}{age_note}")
+    elif att.publisher_repo:
+        if att.publisher_account_age_days is not None and att.publisher_account_age_days < 90:
+            _row(
+                "publisher",
+                "warn",
+                f"{att.publisher_repo} ({att.publisher_account_age_days}d old account)",
+            )
+        else:
+            _row("publisher", "ok", att.publisher_repo)
+    else:
+        _row("publisher", "na", "N/A — no attestation")
+
+    if att.has_attestation:
         _row("attestation", "ok", "build provenance verified")
     else:
         _row("attestation", "na", "N/A — no build provenance")
@@ -110,6 +209,7 @@ def _signals_table(signals: PackageChecks) -> list[str]:
     else:
         _row("release_notes", "na", "N/A — no GitHub release")
 
+    # Version & registry
     if signals.version_lineage.stale_version_line:
         _row("version_lineage", "warn", "stale version line")
     else:
@@ -123,7 +223,17 @@ def _signals_table(signals: PackageChecks) -> list[str]:
 
     if signals.scorecard.scorecard_score is not None:
         sc = signals.scorecard.scorecard_score
-        _row("scorecard", "ok" if sc >= 7 else ("warn" if sc >= 4 else "bad"), f"score {sc:.1f}/10")
+        sub_notes = []
+        if signals.scorecard.scorecard_dangerous_workflow == 0:
+            sub_notes.append("dangerous workflow")
+        if signals.scorecard.scorecard_maintained == 0:
+            sub_notes.append("unmaintained")
+        sub = f"; {', '.join(sub_notes)}" if sub_notes else ""
+        _row(
+            "scorecard",
+            "ok" if sc >= 7 else ("warn" if sc >= 4 else "bad"),
+            f"score {sc:.1f}/10{sub}",
+        )
     else:
         _row("scorecard", "na", "N/A — not in Scorecard database")
 
@@ -139,10 +249,6 @@ _BADGE = {
     "red": "🔴 RED",
 }
 
-# Flags beyond this count are folded into a <details> block for YELLOW verdicts,
-# so routine bumps with many minor signals don't drown out the important ones.
-_FLAG_FOLD_THRESHOLD = 3
-
 
 def format_comment(pr: PRContext, verdict: Verdict, signals: PackageChecks | None = None) -> str:
     badge = _BADGE.get(verdict.classification, verdict.classification.upper())
@@ -155,26 +261,6 @@ def format_comment(pr: PRContext, verdict: Verdict, signals: PackageChecks | Non
         f"> {_sanitize_reasoning(verdict.reasoning)}",
         "",
     ]
-
-    if verdict.flags:
-        sanitized = [_sanitize_reasoning(f) for f in verdict.flags]
-        # RED flags are always fully visible. YELLOW with many flags collapses the tail
-        # so the comment doesn't drown the reviewer in low-priority noise.
-        if verdict.classification == "red" or len(sanitized) <= _FLAG_FOLD_THRESHOLD:
-            lines += ["**Flags:**", *[f"- {f}" for f in sanitized], ""]
-        else:
-            visible = sanitized[:_FLAG_FOLD_THRESHOLD]
-            hidden = sanitized[_FLAG_FOLD_THRESHOLD:]
-            noun = "check" if len(hidden) == 1 else "checks"
-            lines += ["**Flags:**", *[f"- {f}" for f in visible]]
-            lines += [
-                f"<details><summary>and {len(hidden)} more {noun}</summary>",
-                "",
-                *[f"- {f}" for f in hidden],
-                "",
-                "</details>",
-                "",
-            ]
 
     if signals:
         lines += _signals_table(signals) + [""]
