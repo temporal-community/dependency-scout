@@ -342,37 +342,17 @@ def write_env(values: dict[str, str]) -> None:
 
 
 def print_repo_config() -> None:
-    _h("Repo config snippet")
+    _h("Repo config")
     print(
         textwrap.dedent("""
-  Add this file to any repo where you want the Scout to do more than comment.
-  (Without it, the Scout posts comments but never auto-merges or blocks.)
+  Add .github/dependency-scout.yml to any repo where you want the Scout to
+  do more than comment (auto-merge, block, request reviewers, etc.).
+  Without it the Scout posts comments only — safe default.
 
-  Create .github/dependency-scout.yml:
+  A ready-to-copy template is at .github/dependency-scout.yml.example
+  Full reference: docs/configuration.md
     """)
     )
-    snippet = textwrap.dedent("""\
-    # .github/dependency-scout.yml
-    # Remove or comment out any section you don't want.
-
-    # Auto-merge green verdicts (safe, well-established packages, no flags)
-    auto_merge_enabled: true
-    auto_merge_classifications: [green]
-
-    # Request human review on yellow verdicts (add your GitHub usernames)
-    # reviewers: [alice, bob]
-
-    # Minimum release age before auto-merge kicks in (default: 168h = 7 days)
-    # min_release_age_hours: 168
-
-    # Flag as yellow if a bump adds more than this many new direct dependencies
-    # max_new_dependencies: 5
-
-    # Close the PR and add a label on red verdicts
-    # block_classifications: [red]
-    """)
-    for line in snippet.splitlines():
-        print(f"    {CYAN}{line}{RESET}")
 
 
 def print_next_steps(used_app: bool, temporal_mode: str = "local") -> None:
@@ -398,30 +378,6 @@ def print_next_steps(used_app: bool, temporal_mode: str = "local") -> None:
     """)
         workflow_ui = "http://localhost:8233"
 
-    if used_app:
-        webhook_registration = textwrap.dedent("""\
-  5. Wire the webhook URL into your GitHub App:
-       a. Go to: https://github.com/settings/apps  (or your org's /settings/apps)
-       b. Click your app → "General" tab
-       c. Under "Webhook", set:
-            Webhook URL:    https://<your-ngrok-id>.ngrok-free.app/webhook
-            Webhook secret: (already set during app creation — must match GITHUB_WEBHOOK_SECRET in .env)
-       d. Save changes.
-       e. Open the "Permissions & events" tab and confirm "Pull requests" is checked under Subscribe to events.
-    """)
-    else:
-        webhook_registration = textwrap.dedent("""\
-  5. Register the webhook in each repo you want to monitor:
-       a. Go to: https://github.com/OWNER/REPO/settings/hooks/new
-          (replace OWNER/REPO with your repo — repeat for each repo)
-       b. Fill in:
-            Payload URL:    https://<your-ngrok-id>.ngrok-free.app/webhook
-            Content type:   application/json
-            Secret:         (copy GITHUB_WEBHOOK_SECRET from your .env)
-            Events:         ✓ Pull requests   (select "Let me select individual events")
-       c. Click "Add webhook". GitHub will send a ping — a ✓ means it's wired.
-    """)
-
     print(
         textwrap.dedent(f"""
   {temporal_step.strip()}
@@ -429,17 +385,13 @@ def print_next_steps(used_app: bool, temporal_mode: str = "local") -> None:
   2. Start the worker (in a separate terminal):
        uv run python -m worker
 
-  3. Test a triage run against a real Dependabot PR (no webhook needed):
+  3. Triage a real Dependabot PR:
        uv run python -m start_workflow https://github.com/your-org/your-repo/pull/123
 
      Watch the run at: {workflow_ui}
 
-  4. To receive live Dependabot webhooks, expose the API server:
-       uv run uvicorn api.webhook:app --port 8080
-       ngrok http 8080   # note the https:// URL it prints
-
+  When you're ready for continuous triage on every new PR, see docs/deployment.md.
     """)
-        + webhook_registration
     )
 
 
