@@ -3,6 +3,10 @@
 from __future__ import annotations
 
 import os
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import httpx
 
 from temporalio import activity
 from temporalio.exceptions import ApplicationError
@@ -115,10 +119,38 @@ class GitHubPlatformClient:
         if self._dry_run():
             activity.logger.info(f"[dry-run] Would post on {pr.repo}#{pr.pr_number}:\n{body}")
             return None
+        headers = await self._get_headers()
         client = get_client()
+        # Dedup: find all prior Scout comments, delete extras, update the survivor.
+        keep_url, stale_ids = await self._find_scout_comments(client, pr, headers)
+        for stale_id in stale_ids:
+            try:
+                await client.delete(
+                    f"{self._repo_url(pr)}/issues/comments/{stale_id}",
+                    headers=headers,
+                    timeout=15.0,
+                )
+            except Exception:
+                pass
+        if keep_url:
+            activity.logger.info(
+                f"Updating existing comment on {pr.repo}#{pr.pr_number}: {keep_url}"
+                + (f" (deleted {len(stale_ids)} duplicate(s))" if stale_ids else "")
+            )
+            keep_id = keep_url.split("#issuecomment-")[-1]
+            resp = await client.patch(
+                f"{self._repo_url(pr)}/issues/comments/{keep_id}",
+                headers=headers,
+                json={"body": body},
+                timeout=15.0,
+            )
+            if resp.status_code == 401:
+                raise ApplicationError("GitHub auth failed", non_retryable=True)
+            resp.raise_for_status()
+            return keep_url
         resp = await client.post(
             f"{self._repo_url(pr)}/issues/{pr.pr_number}/comments",
-            headers=await self._get_headers(),
+            headers=headers,
             json={"body": body},
             timeout=15.0,
         )
@@ -128,6 +160,29 @@ class GitHubPlatformClient:
         comment_url: str | None = resp.json().get("html_url")
         activity.logger.info(f"Posted comment on {pr.repo}#{pr.pr_number}: {comment_url}")
         return comment_url
+
+    async def _find_scout_comments(
+        self, client: "httpx.AsyncClient", pr: PRContext, headers: dict
+    ) -> tuple[str | None, list[int]]:
+        """Return (keep_url, stale_ids) for existing Dependency Scout comments.
+
+        keep_url is the html_url of the oldest Scout comment (the one to update).
+        stale_ids is the list of comment IDs for all subsequent duplicates to delete.
+        """
+        resp = await client.get(
+            f"{self._repo_url(pr)}/issues/{pr.pr_number}/comments",
+            headers=headers,
+            params={"per_page": 100},
+            timeout=15.0,
+        )
+        if resp.status_code != 200:
+            return None, []
+        scout = [c for c in resp.json() if "dependency-scout" in c.get("body", "")]
+        if not scout:
+            return None, []
+        keep = scout[0]
+        stale_ids = [c["id"] for c in scout[1:]]
+        return keep.get("html_url"), stale_ids
 
     async def merge_pr(self, pr: PRContext) -> None:
         if self._dry_run():

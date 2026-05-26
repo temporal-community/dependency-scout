@@ -25,7 +25,6 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-from datetime import date
 import os
 import re
 import sys
@@ -313,28 +312,30 @@ async def _triage_one(
     return pr_data, parsed, await handle.result()
 
 
-async def _cleanup_orphaned_triage_workflows(
-    client: Client, parseable: list[tuple[dict, ParsedPR]]
-) -> None:
-    """Terminate any still-running PackageTriageWorkflow instances for this batch.
+async def _cleanup_orphaned_triage_workflows(client: Client) -> None:
+    """Terminate all running PackageTriageWorkflow and PRActionWorkflow instances.
 
-    When a PRActionWorkflow fails mid-run its PackageTriageWorkflow children are
-    abandoned (ABANDON policy) and keep running. On re-run, execute_child_workflow
-    with the same date-keyed ID raises "already started". Terminating orphans here
-    (before starting new parents) lets the new parents start fresh children cleanly.
+    Querying by type via visibility is more reliable than guessing workflow IDs —
+    the ID-based approach silently misses children whose IDs don't match due to
+    package name encoding or timezone differences in the date key.
     """
-    date_key = date.today().isoformat()
     terminated = 0
-    for _, parsed in parseable:
-        wf_id = f"triage-{parsed.ecosystem}-{parsed.package}-{parsed.new_version}-{date_key}"
+    for wf_type in ("PackageTriageWorkflow", "PRActionWorkflow"):
         try:
-            handle = client.get_workflow_handle(wf_id)
-            await handle.terminate(reason="triage re-run cleanup")
-            terminated += 1
+            async for wf in client.list_workflows(
+                f"WorkflowType='{wf_type}' AND ExecutionStatus='Running'"
+            ):
+                try:
+                    await client.get_workflow_handle(wf.id, run_id=wf.run_id).terminate(
+                        reason="triage re-run cleanup"
+                    )
+                    terminated += 1
+                except Exception:
+                    pass
         except Exception:
-            pass  # not running / already closed — nothing to do
+            pass
     if terminated:
-        print(_dim(f"  Cleaned up {terminated} orphaned triage workflow(s) from a previous run.\n"))
+        print(_dim(f"  Cleaned up {terminated} orphaned workflow(s) from a previous run.\n"))
 
 
 async def _triage_batch(args: argparse.Namespace) -> None:
@@ -394,7 +395,7 @@ async def _triage_batch(args: argparse.Namespace) -> None:
     print(_dim("\n" + "─" * 60 + "\n"))
 
     client = await _connect()
-    await _cleanup_orphaned_triage_workflows(client, parseable)
+    await _cleanup_orphaned_triage_workflows(client)
     tasks = [
         asyncio.create_task(_triage_one(client, args.repo, pr, parsed, dry_run=args.dry_run))
         for pr, parsed in parseable

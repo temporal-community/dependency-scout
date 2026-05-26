@@ -13,9 +13,10 @@ import os
 from temporalio import activity
 
 from platforms import get_platform_client
-from models import PRContext, PackageChecks, PRFilesChecks, RepoConfig, Verdict
+from models import PRContext, PackageChecks, PRFilesChecks, RepoConfig, TriageResult, Verdict
 from helpers.config_provider import get_config_provider
 from helpers.notification import get_notification_channels
+from helpers.temporal_client import connect as temporal_connect
 
 
 @activity.defn(name="activities.platform.comment")
@@ -59,6 +60,20 @@ async def request_review(pr: PRContext, reviewers: list[str]) -> None:
 async def check_pr_files(pr: PRContext) -> PRFilesChecks:
     """Fetch the list of files changed in the PR from the GitHub or GitLab API and return basic metadata about them (e.g. whether any lock files were modified)."""
     return await get_platform_client(pr).check_pr_files(pr)
+
+
+@activity.defn(name="activities.platform.await_triage_result")
+async def await_triage_result(workflow_id: str) -> TriageResult:
+    """Attach to an already-running PackageTriageWorkflow and return its result.
+
+    Called when execute_child_workflow fails with 'already started' — a sibling
+    PRActionWorkflow (another PR in the same monorepo bumping the same package)
+    got to this triage first. We wait for its result instead of running a duplicate.
+    """
+    client = await temporal_connect()
+    handle = client.get_workflow_handle(workflow_id)
+    result = await handle.result()
+    return TriageResult.model_validate(result)
 
 
 @activity.defn(name="activities.platform.fetch_repo_config")

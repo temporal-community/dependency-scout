@@ -56,30 +56,52 @@ class PRActionWorkflow:
             "activities.platform.fetch_repo_config", pr, result_type=RepoConfig, **opts
         )
 
-        # Cross-repo dedup: multiple repos seeing the same bump share one PackageTriageWorkflow.
-        # The date suffix provides a 24-hour TTL — each UTC day produces a fresh verdict,
-        # so a stale GREEN from yesterday cannot persist indefinitely. Within a day, all
-        # repos seeing the same bump still share one triage run.
+        # Cross-repo dedup: multiple repos (or sub-projects in a monorepo) seeing the
+        # same package bump share one PackageTriageWorkflow. The date suffix gives a
+        # 24-hour TTL so stale verdicts don't persist indefinitely.
         #
-        # check_pr_files runs in parallel: it's a fast per-PR check that looks for CI
-        # workflows, Dockerfiles, or scripts in the PR — files that should never appear
-        # in a routine dep-bump. No reason to block triage while waiting for it.
+        # Race condition: when concurrent PRActionWorkflow instances race to start the
+        # same child ID, only one wins. The losers catch "already started" and fall back
+        # to await_triage_result — an activity that attaches to the running child and
+        # waits for its result. Dedup is preserved without races.
+        #
+        # check_pr_files runs in parallel: it's a fast per-PR check for CI/infra files
+        # that should never appear in a routine dep-bump.
         date_key = workflow.now().strftime("%Y-%m-%d")
+        triage_id = f"triage-{pr.ecosystem}-{pr.package_name}-{pr.new_version}-{date_key}"
+
+        async def _run_triage() -> TriageResult:
+            try:
+                return await workflow.execute_child_workflow(  # type: ignore[call-overload]
+                    PackageTriageWorkflow.run,
+                    args=[
+                        pr.ecosystem,
+                        pr.package_name,
+                        pr.old_version,
+                        pr.new_version,
+                        config.extra_check_activities,
+                    ],
+                    id=triage_id,
+                    parent_close_policy=ParentClosePolicy.ABANDON,
+                    execution_timeout=timedelta(minutes=15),
+                    result_type=TriageResult,
+                )
+            except Exception as e:
+                if "already started" in str(e).lower():
+                    workflow.logger.info(
+                        f"Triage {triage_id!r} already running — attaching to existing execution"
+                    )
+                    return await workflow.execute_activity(  # type: ignore[return-value]
+                        "activities.platform.await_triage_result",
+                        args=[triage_id],
+                        result_type=TriageResult,
+                        start_to_close_timeout=timedelta(minutes=20),
+                        retry_policy=retry,
+                    )
+                raise
+
         triage_result, pr_files = await asyncio.gather(
-            workflow.execute_child_workflow(  # type: ignore[call-overload]
-                PackageTriageWorkflow.run,
-                args=[
-                    pr.ecosystem,
-                    pr.package_name,
-                    pr.old_version,
-                    pr.new_version,
-                    config.extra_check_activities,
-                ],
-                id=f"triage-{pr.ecosystem}-{pr.package_name}-{pr.new_version}-{date_key}",
-                parent_close_policy=ParentClosePolicy.ABANDON,
-                execution_timeout=timedelta(minutes=15),
-                result_type=TriageResult,
-            ),
+            _run_triage(),
             workflow.execute_activity(
                 "activities.platform.check_pr_files",
                 pr,

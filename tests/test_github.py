@@ -108,8 +108,16 @@ async def test_comment_dry_run_makes_no_http_call(client, pr, verdict, dry_run):
     await env.run(client.comment, pr, verdict)
 
 
+def _no_existing_comments():
+    """Mock the dedup GET call with an empty list (no prior Scout comment)."""
+    respx.get(f"{BASE_URL}/issues/{PR_NUM}/comments").mock(
+        return_value=httpx.Response(200, json=[])
+    )
+
+
 @respx.mock
 async def test_comment_posts_to_correct_url(client, pr, verdict, with_pat):
+    _no_existing_comments()
     route = respx.post(f"{BASE_URL}/issues/{PR_NUM}/comments").mock(
         return_value=httpx.Response(
             201, json={"html_url": f"https://github.com/owner/repo/pull/{PR_NUM}#issuecomment-1"}
@@ -122,6 +130,7 @@ async def test_comment_posts_to_correct_url(client, pr, verdict, with_pat):
 
 @respx.mock
 async def test_comment_returns_html_url(client, pr, verdict, with_pat):
+    _no_existing_comments()
     expected_url = f"https://github.com/owner/repo/pull/{PR_NUM}#issuecomment-42"
     respx.post(f"{BASE_URL}/issues/{PR_NUM}/comments").mock(
         return_value=httpx.Response(201, json={"html_url": expected_url})
@@ -140,6 +149,7 @@ async def test_comment_returns_none_on_dry_run(client, pr, verdict, dry_run):
 
 @respx.mock
 async def test_comment_body_contains_verdict_badge(client, pr, verdict, with_pat):
+    _no_existing_comments()
     route = respx.post(f"{BASE_URL}/issues/{PR_NUM}/comments").mock(
         return_value=httpx.Response(
             201, json={"html_url": f"https://github.com/owner/repo/pull/{PR_NUM}#issuecomment-1"}
@@ -153,11 +163,73 @@ async def test_comment_body_contains_verdict_badge(client, pr, verdict, with_pat
 
 @respx.mock
 async def test_comment_401_raises_non_retryable(client, pr, verdict, with_pat):
+    _no_existing_comments()
     respx.post(f"{BASE_URL}/issues/{PR_NUM}/comments").mock(return_value=httpx.Response(401))
     env = ActivityEnvironment()
     with pytest.raises(ApplicationError) as exc_info:
         await env.run(client.comment, pr, verdict)
     assert exc_info.value.non_retryable is True
+
+
+@respx.mock
+async def test_comment_updates_existing_instead_of_posting_new(client, pr, verdict, with_pat):
+    existing_url = f"https://github.com/owner/repo/pull/{PR_NUM}#issuecomment-99"
+    respx.get(f"{BASE_URL}/issues/{PR_NUM}/comments").mock(
+        return_value=httpx.Response(
+            200,
+            json=[{"id": 99, "html_url": existing_url, "body": "dependency-scout triage result"}],
+        )
+    )
+    patch_route = respx.patch(f"{BASE_URL}/issues/comments/99").mock(
+        return_value=httpx.Response(200, json={"html_url": existing_url})
+    )
+    post_route = respx.post(f"{BASE_URL}/issues/{PR_NUM}/comments").mock(
+        return_value=httpx.Response(201, json={"html_url": "should-not-be-called"})
+    )
+    env = ActivityEnvironment()
+    url = await env.run(client.comment, pr, verdict)
+    assert url == existing_url
+    assert patch_route.called
+    assert not post_route.called
+
+
+@respx.mock
+async def test_comment_deletes_duplicates_on_update(client, pr, verdict, with_pat):
+    keep_url = f"https://github.com/owner/repo/pull/{PR_NUM}#issuecomment-10"
+    respx.get(f"{BASE_URL}/issues/{PR_NUM}/comments").mock(
+        return_value=httpx.Response(
+            200,
+            json=[
+                {"id": 10, "html_url": keep_url, "body": "dependency-scout old"},
+                {"id": 11, "html_url": "...#issuecomment-11", "body": "dependency-scout dup 1"},
+                {"id": 12, "html_url": "...#issuecomment-12", "body": "dependency-scout dup 2"},
+            ],
+        )
+    )
+    patch_route = respx.patch(f"{BASE_URL}/issues/comments/10").mock(
+        return_value=httpx.Response(200, json={})
+    )
+    del11 = respx.delete(f"{BASE_URL}/issues/comments/11").mock(return_value=httpx.Response(204))
+    del12 = respx.delete(f"{BASE_URL}/issues/comments/12").mock(return_value=httpx.Response(204))
+    env = ActivityEnvironment()
+    url = await env.run(client.comment, pr, verdict)
+    assert url == keep_url
+    assert patch_route.called
+    assert del11.called
+    assert del12.called
+
+
+@respx.mock
+async def test_comment_posts_new_when_no_existing(client, pr, verdict, with_pat):
+    _no_existing_comments()
+    expected_url = f"https://github.com/owner/repo/pull/{PR_NUM}#issuecomment-77"
+    post_route = respx.post(f"{BASE_URL}/issues/{PR_NUM}/comments").mock(
+        return_value=httpx.Response(201, json={"html_url": expected_url})
+    )
+    env = ActivityEnvironment()
+    url = await env.run(client.comment, pr, verdict)
+    assert url == expected_url
+    assert post_route.called
 
 
 # ---------------------------------------------------------------------------
@@ -551,6 +623,7 @@ async def test_platform_comment_channel_posts_to_github_pr(pr, verdict, with_pat
     from helpers.notification import PlatformCommentChannel
     from temporalio.testing import ActivityEnvironment
 
+    _no_existing_comments()
     route = respx.post(f"{BASE_URL}/issues/{PR_NUM}/comments").mock(
         return_value=httpx.Response(
             201, json={"html_url": f"https://github.com/owner/repo/pull/{PR_NUM}#issuecomment-1"}
@@ -635,6 +708,7 @@ async def test_multi_channel_fans_out_to_all_channels(pr, verdict, with_pat):
     """MultiChannel.send_verdict delivers to all configured channels."""
     from helpers.notification import MultiChannel, PlatformCommentChannel, SlackWebhookChannel
 
+    _no_existing_comments()
     comment_route = respx.post(f"{BASE_URL}/issues/{PR_NUM}/comments").mock(
         return_value=httpx.Response(201, json={})
     )
