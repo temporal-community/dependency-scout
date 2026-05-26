@@ -449,12 +449,11 @@ async def _triage_batch(args: argparse.Namespace) -> None:
         verdict = min(entries, key=lambda e: _verdict_rank.get(e[2], 9))[2]
         counts[verdict] += len(entries)
         pr_nums = sorted(e[0]["number"] for e in entries)
-        if len(pr_nums) == 1:
-            pr_label = f"#{pr_nums[0]:<5}"
-        else:
-            pr_label = "×" + str(len(pr_nums)) + "  " + "  ".join(f"#{n}" for n in pr_nums)
+        pr_label = "  ".join(f"#{n}" for n in pr_nums)
+        if len(pr_nums) > 1:
+            pr_label = f"×{len(pr_nums)}  {pr_label}"
 
-        print(f"  {_color_verdict(verdict)}  {pr_label}  {pkg:<{pkg_w}}  {old_v} → {new_v}")
+        print(f"  {_color_verdict(verdict)}  {pkg:<{pkg_w}}  {old_v} → {new_v}  {_dim(pr_label)}")
         rep = entries[0]
         rep_pr_data, _, _, _, comment_url = rep
         wf_id = f"pr-action-{repo_slug}-{rep_pr_data['number']}"
