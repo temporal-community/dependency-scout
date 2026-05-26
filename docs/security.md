@@ -59,16 +59,22 @@ A token with no scopes still authenticates your requests and raises the rate lim
 
 **Fine-grained PAT (preferred)** — create one at GitHub → Settings → Developer settings → Personal access tokens → Fine-grained tokens.
 
-On the token creation page there are two separate permission sections: **Repository permissions** and **Account permissions**. Contents, Pull requests, and Metadata are all under **Repository permissions** — ignore the Account permissions section entirely.
+**For `triage.py` / `triage_all.py` on public repos only:**
 
-| Use case | Repository permissions needed |
-|---|---|
-| `triage.py` / `triage_all.py` (read-only) | Metadata: Read-only · Contents: Read-only · Pull requests: Read-only |
-| Worker — post comments | + Pull requests: Read and write |
-| Worker — read per-repo config from private repos | + Contents: Read-only (already included above) |
-| Worker — auto-merge | + Contents: Read and write |
+Set Repository access to **"Public repositories"** and add no permissions at all. Public repo data is always readable; the token just authenticates you and raises the rate limit from 60 to 5,000 req/hour. The Repository permissions section won't even appear — that's fine.
 
-Scope the token to only the repos you want the Scout to act on. Leave everything else unchecked.
+**For the full worker (comments, auto-merge, private repos):**
+
+Set Repository access to **"Only select repositories"**, pick the repos you want the Scout to act on, then the Repository permissions section appears. Add:
+
+| Permission | Level | When needed |
+|---|---|---|
+| Contents | Read-only | Always (reads `.github/dependency-scout.yml`) |
+| Contents | Read and write | Only if `auto_merge_enabled: true` |
+| Pull requests | Read and write | Posting comments and requesting reviewers |
+| Metadata | Read-only | Auto-included, can't be removed |
+
+Leave Account permissions empty — the Scout doesn't need any.
 
 **Classic PAT:** `public_repo` is sufficient for public repos. Never use `repo` (full write) — it's far broader than anything the Scout needs.
 
