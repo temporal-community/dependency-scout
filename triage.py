@@ -401,52 +401,82 @@ async def _triage_batch(args: argparse.Namespace) -> None:
         for pr, parsed in parseable
     ]
 
-    counts: dict[str, int] = {"green": 0, "yellow": 0, "red": 0}
-    errors = 0
     ui_base = os.environ.get("TEMPORAL_UI_BASE_URL", "http://localhost:8233")
     ns = os.environ.get("TEMPORAL_NAMESPACE", "default")
+    repo_slug = args.repo.replace("/", "-")
 
     print(f"Triaging {len(tasks)} PR(s) in parallel ...\n")
 
+    # Collect all results before displaying so we can group duplicates.
+    # Each entry: (pr_data, parsed, verdict, result_str, comment_url)
+    completed: list[tuple] = []
+    failed: list[str] = []
     for future in asyncio.as_completed(tasks):
         try:
             pr_data, parsed, result = await future
+            result_str, *url_parts = result.split("||", 1)
+            comment_url = url_parts[0] if url_parts else None
+            verdict = _verdict_from_result(result_str)
+            completed.append((pr_data, parsed, verdict, result_str, comment_url))
         except Exception as exc:
-            errors += 1
-            # WorkflowFailureError wraps the real cause — unwrap it for a useful message
             cause = getattr(exc, "cause", None)
-            msg = str(cause) if cause else str(exc)
-            print(f"\n  {_r(_B + '✗  WORKFLOW FAILED' + _RST)}  {_r(msg)}\n")
-            continue
+            failed.append(str(cause) if cause else str(exc))
 
-        result_str, *url_parts = result.split("||", 1)
-        comment_url = url_parts[0] if url_parts else None
-        verdict = _verdict_from_result(result_str)
-        counts[verdict] += 1
-        pr_url = f"https://github.com/{args.repo}/pull/{pr_data['number']}"
-        wf_id = f"pr-action-{args.repo.replace('/', '-')}-{pr_data['number']}"
-        print(
-            f"  {_color_verdict(verdict)}  "
-            f"#{pr_data['number']:<5} {parsed.package:<{pkg_w}}  "
-            f"{parsed.old_version} → {parsed.new_version}"
-        )
-        wf_url = f"{ui_base}/namespaces/{ns}/workflows/{wf_id}"
-        if comment_url:
-            print(f"        Comment:  {comment_url}")
+    # Group by (package, old_version, new_version) — monorepos produce many PRs
+    # for the same bump across sub-projects; show them as one line.
+    _verdict_rank = {"red": 0, "yellow": 1, "green": 2}
+    groups: dict[tuple, list] = {}
+    for entry in completed:
+        pr_data, parsed, verdict, result_str, comment_url = entry
+        key = (parsed.package, parsed.old_version, parsed.new_version)
+        groups.setdefault(key, []).append(entry)
+
+    # Sort: worst verdict first, then alphabetically by package.
+    def _group_sort_key(item: tuple) -> tuple:
+        (pkg, old_v, new_v), entries = item
+        worst = min(_verdict_rank.get(e[2], 9) for e in entries)
+        return (worst, pkg)
+
+    counts: dict[str, int] = {"green": 0, "yellow": 0, "red": 0}
+    for (pkg, old_v, new_v), entries in sorted(groups.items(), key=_group_sort_key):
+        # Worst verdict in the group (should always be the same, but be safe).
+        verdict = min(entries, key=lambda e: _verdict_rank.get(e[2], 9))[2]
+        counts[verdict] += len(entries)
+        pr_nums = sorted(e[0]["number"] for e in entries)
+        if len(pr_nums) == 1:
+            pr_label = f"#{pr_nums[0]:<5}"
         else:
-            print(f"        PR:       {pr_url}")
-        print(f"        Workflow: {wf_url}")
+            pr_label = "×" + str(len(pr_nums)) + "  " + "  ".join(f"#{n}" for n in pr_nums)
+
+        print(f"  {_color_verdict(verdict)}  {pr_label}  {pkg:<{pkg_w}}  {old_v} → {new_v}")
+        rep = entries[0]  # representative entry for URLs
+        rep_pr_data, _, _, _, comment_url = rep
+        wf_id = f"pr-action-{repo_slug}-{rep_pr_data['number']}"
+        wf_url = f"{ui_base}/namespaces/{ns}/workflows/{wf_id}"
+        extra = f"  {_dim(f'(+{len(entries) - 1} more)')}" if len(entries) > 1 else ""
+        if comment_url:
+            print(f"        Comment:  {comment_url}{extra}")
+        else:
+            pr_url = f"https://github.com/{args.repo}/pull/{rep_pr_data['number']}"
+            print(f"        PR:       {pr_url}{extra}")
+        print(f"        Workflow: {wf_url}{extra}")
+
+    for msg in failed:
+        print(f"\n  {_r(_B + '✗  WORKFLOW FAILED' + _RST)}  {_r(msg)}\n")
 
     total = sum(counts.values())
     g, y, r = counts["green"], counts["yellow"], counts["red"]
+    unique = len(groups)
+    pr_note = f"  {_dim(f'({total} PRs across {unique} unique bumps)')}" if unique < total else ""
     summary = (
-        f"  {_bold(f'{total} done')}  ·  "
+        f"  {_bold(f'{unique} done')}  ·  "
         f"{_g(f'{g} green')}  ·  "
         f"{_y(f'{y} yellow')}  ·  "
         f"{_r(f'{r} red')}"
+        f"{pr_note}"
     )
-    if errors:
-        summary += f"  ·  {_r(_bold(f'{errors} failed'))}"
+    if failed:
+        summary += f"  ·  {_r(_bold(f'{len(failed)} failed'))}"
     print(_dim("\n" + "─" * 60))
     print(summary)
     print(_dim("─" * 60))
