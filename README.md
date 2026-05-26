@@ -23,72 +23,7 @@ Classifies GREEN / YELLOW / RED, posts a comment explaining its reasoning, and t
 
 ---
 
-## Try it on one PR right now
-
-No server setup needed. Point it at any GitHub PR and it'll run all checks and print a verdict:
-
-```bash
-git clone https://github.com/temporal-community/dependency-scout
-cd dependency-scout
-uv run python triage.py https://github.com/temporalio/ai-cookbook/pull/127
-```
-
-```
-Running the following checks:
-
-  ✓  Core checks  OSV, diff analysis, release age, maintainer history, version lineage, and more
-  ℹ  Socket.dev   Supply-chain threat intelligence — add SOCKET_API_KEY to .env  (socket.dev)
-  ✓  Classifier   Anthropic — LLM-powered GREEN/YELLOW/RED verdict
-
-  See docs/configuration.md for setup details.
-
-────────────────────────────────────────────────────────────
-
-Triaging actions/checkout  4 → 6  (github_actions)
-
-  metadata         ─  N/A — no download data for this ecosystem
-  osv              ✓  no known vulnerabilities
-  diff             ✓  no suspicious patterns
-  maintainer       ✓  no changes detected
-  age              ✓  released 3273h ago
-  attestation      ─  N/A — no build provenance
-  release_notes    ─  N/A — no GitHub release
-  version_lineage  ✓  on latest version line
-  deps_dev         ✓  not deprecated
-  scorecard        ─  N/A — not in Scorecard database
-
-Verdict: 🟡 YELLOW  (confidence 82%)
-
-  This is a major version bump (v4 → v6) for `actions/checkout`, one of the most
-  widely used GitHub Actions. Several signals warrant human review:
-
-  ⚠ major_version_bump
-  ⚠ large_diff_for_version_delta
-  ⚠ network_calls_in_lib
-  ⚠ security_sensitive_credential_handling_refactored
-  ⚠ new_outbound_data_in_http_user_agent
-  ⚠ version_tag_vs_package_json_discrepancy
-
-────────────────────────────────────────────────────────────
-dependency-scout  ·  docs/deployment.md  ·  temporal.io
-────────────────────────────────────────────────────────────
-```
-
-Or pass the details explicitly:
-
-```bash
-uv run python triage.py --ecosystem pip --package requests --old 2.31.0 --new 2.32.3
-```
-
-The classifier defaults to rule-based (entirely local, no keys needed). Set `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or `OLLAMA_HOST` to use an LLM instead. Set `GITHUB_TOKEN` for higher API rate limits and private repos.
-
-When you're ready to process all your currently open PRs at once, add Temporal.
-
----
-
-## Batch-triage your open PRs
-
-Point the Scout at a repo and it will triage every open Dependabot or Renovate PR in one shot. Temporal handles fan-out and retries; the Temporal UI shows you what happened to each one.
+## Quick start
 
 You need Python 3.10+, [`uv`](https://docs.astral.sh/uv/), and the [Temporal CLI](https://docs.temporal.io/cli).
 
@@ -98,27 +33,36 @@ cd dependency-scout
 uv run python setup.py
 ```
 
-The setup script checks prerequisites, explains the tradeoffs between a PAT and a GitHub App, lets you choose your LLM (Claude, OpenAI, Ollama, or skip), writes `.env`, and prints the repo config snippet to paste into your target repo.
+The setup script checks prerequisites, explains the tradeoffs between a PAT and a GitHub App, lets you choose your LLM (Claude, OpenAI, Ollama, or skip), and writes `.env`.
 
-The Temporal dev server runs entirely on your machine — no account or payment needed.
-
-Then:
+The Temporal dev server runs entirely on your machine — no account, no payment, no sign-up:
 
 ```bash
-# Terminal 1 — Temporal dev server (runs in memory on your machine — no sign-up, no payment)
+# Terminal 1 — Temporal dev server
 temporal server start-dev
 
 # Terminal 2 — Scout worker
 uv run python -m worker
 
+# Terminal 3 — triage a single PR
+uv run python -m start_workflow https://github.com/temporalio/ai-cookbook/pull/127
+```
+
+Open **http://localhost:8233** to watch the workflow run. With `GITHUB_TOKEN` set, the Scout posts a comment directly on the PR — [here's a real example](https://github.com/temporalio/ai-cookbook/pull/127#issuecomment-4542125690).
+
+No API keys needed to start — the rule-based classifier runs entirely locally. Without `GITHUB_TOKEN` it prints what it would have posted instead of actually posting it.
+
+### Batch-triage your open PRs
+
+Once the worker is running, point it at a whole repo to clear the backlog:
+
+```bash
 # Triage every open Dependabot/Renovate PR in a repo
 uv run python triage_all.py --repo your-org/your-repo
 
 # Or limit to a subset while you're getting a feel for it
 uv run python triage_all.py --repo your-org/your-repo --limit 5
 ```
-
-Open **http://localhost:8233** to watch each workflow run in the Temporal UI. No API keys needed — it'll use the rule-based classifier; without `GITHUB_TOKEN` it runs in dry-run mode (no PR comments posted).
 
 ### Configure your stack
 

@@ -25,4 +25,4 @@ This is the production entry point: a FastAPI application that receives webhooks
 uv run uvicorn api.webhook:app --reload
 ```
 
-Requires a running Temporal server (`temporal server start-dev`) and the worker (`uv run python worker.py`). For end-to-end local testing without a real webhook, use the `/triage-test` skill or `triage.py` directly.
+Requires a running Temporal server (`temporal server start-dev`) and the worker (`uv run python -m worker`). For end-to-end local testing without a real webhook, use `uv run python -m start_workflow <PR URL>` directly.
