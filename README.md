@@ -25,7 +25,7 @@ Classifies GREEN / YELLOW / RED, posts a comment explaining its reasoning, and t
 
 ## Try it on one PR right now
 
-No server setup needed. Point it at any GitHub PR and it'll run all 11 checks and print a verdict:
+No server setup needed. Point it at any GitHub PR and it'll run all checks and print a verdict:
 
 ```bash
 git clone https://github.com/temporal-community/dependency-scout
