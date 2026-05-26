@@ -178,11 +178,11 @@ class GitHubActionsProvider(EcosystemProviderBase):
             return_exceptions=True,
         )
         # Treat any exception as None (graceful degradation).
-        if isinstance(new_sig, Exception):
+        if isinstance(new_sig, BaseException):
             new_sig = None
-        if isinstance(old_sig, Exception):
+        if isinstance(old_sig, BaseException):
             old_sig = None
-        if isinstance(account_age, Exception):
+        if isinstance(account_age, BaseException):
             account_age = None
 
         # Signed annotated tag is the strongest available provenance signal for
@@ -208,13 +208,13 @@ class GitHubActionsProvider(EcosystemProviderBase):
             fetch_vcs_ci_workflow_changes("github", owner, repo),
             return_exceptions=True,
         )
-        if isinstance(release, Exception):
+        if isinstance(release, BaseException):
             release = None
-        if isinstance(old_sig, Exception):
+        if isinstance(old_sig, BaseException):
             old_sig = None
-        if isinstance(new_sig, Exception):
+        if isinstance(new_sig, BaseException):
             new_sig = None
-        if isinstance(ci_days, Exception):
+        if isinstance(ci_days, BaseException):
             ci_days = None
 
         if not release:

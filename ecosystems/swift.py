@@ -303,14 +303,12 @@ class SwiftProvider(EcosystemProviderBase):
             fetch_vcs_account_age(platform, owner),
             return_exceptions=True,
         )
-        if isinstance(new_sig, Exception):
+        if isinstance(new_sig, BaseException):
             new_sig = None
-        if isinstance(old_sig, Exception):
+        if isinstance(old_sig, BaseException):
             old_sig = None
-        if isinstance(account_age, Exception):
+        if isinstance(account_age, BaseException):
             account_age = None
-        # Narrow the type so mypy is happy after the Exception guard above.
-        account_age_days: int | None = account_age if isinstance(account_age, int) else None
 
         return AttestationChecks(
             has_attestation=new_sig is True,
@@ -320,7 +318,7 @@ class SwiftProvider(EcosystemProviderBase):
             old_publisher_repo=(
                 f"{owner}/{repo}" if (old_sig is True) and (new_sig is not True) else None
             ),
-            publisher_account_age_days=account_age_days,
+            publisher_account_age_days=account_age,
         )
 
     # ------------------------------------------------------------------
@@ -337,13 +335,13 @@ class SwiftProvider(EcosystemProviderBase):
             fetch_vcs_ci_workflow_changes(platform, owner, repo),
             return_exceptions=True,
         )
-        if isinstance(release, Exception):
+        if isinstance(release, BaseException):
             release = None
-        if isinstance(old_sig, Exception):
+        if isinstance(old_sig, BaseException):
             old_sig = None
-        if isinstance(new_sig, Exception):
+        if isinstance(new_sig, BaseException):
             new_sig = None
-        if isinstance(ci_days, Exception):
+        if isinstance(ci_days, BaseException):
             ci_days = None
 
         metadata_repo = f"{owner}/{repo}"
