@@ -443,6 +443,7 @@ async def _triage_batch(args: argparse.Namespace) -> None:
         worst = min(_verdict_rank.get(e[2], 9) for e in entries)
         return (worst, pkg)
 
+    ver_w = max(len(f"{old_v} → {new_v}") for pkg, old_v, new_v in groups) if groups else 0
     print(_dim("\n" + "─" * 60 + "\n"))
     counts: dict[str, int] = {"green": 0, "yellow": 0, "red": 0}
     for (pkg, old_v, new_v), entries in sorted(groups.items(), key=_group_sort_key):
@@ -450,10 +451,8 @@ async def _triage_batch(args: argparse.Namespace) -> None:
         counts[verdict] += len(entries)
         pr_nums = sorted(e[0]["number"] for e in entries)
         pr_label = "  ".join(f"#{n}" for n in pr_nums)
-        if len(pr_nums) > 1:
-            pr_label = f"×{len(pr_nums)}  {pr_label}"
-
-        print(f"  {_color_verdict(verdict)}  {pkg:<{pkg_w}}  {old_v} → {new_v}  {_dim(pr_label)}")
+        ver_str = f"{old_v} → {new_v}"
+        print(f"  {_color_verdict(verdict)}  {pkg:<{pkg_w}}  {ver_str:<{ver_w}}  {_dim(pr_label)}")
         rep = entries[0]
         rep_pr_data, _, _, _, comment_url = rep
         wf_id = f"pr-action-{repo_slug}-{rep_pr_data['number']}"
