@@ -22,14 +22,6 @@ logger = logging.getLogger(__name__)
 
 def _check_config() -> None:
     """Warn at startup about missing or suspicious configuration."""
-    has_github_secret = os.environ.get("GITHUB_WEBHOOK_SECRET")
-    has_gitlab_secret = os.environ.get("GITLAB_WEBHOOK_SECRET")
-    if not has_github_secret and not has_gitlab_secret:
-        logger.warning(
-            "Neither GITHUB_WEBHOOK_SECRET nor GITLAB_WEBHOOK_SECRET is set — "
-            "the webhook server will reject all requests. "
-            "This is fine if you're testing with start_workflow directly."
-        )
     has_github = os.environ.get("GITHUB_TOKEN") or os.environ.get("GITHUB_APP_ID")
     has_gitlab = os.environ.get("GITLAB_TOKEN")
     if not has_github and not has_gitlab:
