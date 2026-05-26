@@ -427,3 +427,93 @@ async def test_fetch_release_no_release_returns_metadata_repo(monkeypatch):
     result = await env.run(provider.fetch_release, PACKAGE_HTTPS, OLD_VER, NEW_VER)
     assert result.github_release_exists is False
     assert result.metadata_repo == f"{OWNER}/{REPO}"
+
+
+# ---------------------------------------------------------------------------
+# GitLab package URL paths
+# ---------------------------------------------------------------------------
+
+_GL_PACKAGE = "https://gitlab.com/acme/mylib"
+_GL_OWNER = "acme"
+_GL_REPO = "mylib"
+
+
+@respx.mock
+async def test_fetch_metadata_gitlab():
+    import urllib.parse
+
+    encoded = urllib.parse.quote(f"{_GL_OWNER}/{_GL_REPO}", safe="")
+    respx.get(f"https://gitlab.com/api/v4/projects/{encoded}").mock(
+        return_value=httpx.Response(
+            200, json={"description": "A GitLab Swift lib", "namespace": {"path": _GL_OWNER}}
+        )
+    )
+    env = ActivityEnvironment()
+    provider = SwiftProvider()
+    result = await env.run(provider.fetch_metadata, _GL_PACKAGE, OLD_VER, NEW_VER)
+    assert result.package_description == "A GitLab Swift lib"
+    assert result.weekly_downloads is None
+
+
+@respx.mock
+async def test_fetch_metadata_gitlab_404():
+    import urllib.parse
+    from temporalio.exceptions import ApplicationError
+
+    encoded = urllib.parse.quote(f"{_GL_OWNER}/{_GL_REPO}", safe="")
+    respx.get(f"https://gitlab.com/api/v4/projects/{encoded}").mock(
+        return_value=httpx.Response(404)
+    )
+    env = ActivityEnvironment()
+    provider = SwiftProvider()
+    with pytest.raises(ApplicationError, match="PackageNotFound"):
+        await env.run(provider.fetch_metadata, _GL_PACKAGE, OLD_VER, NEW_VER)
+
+
+@respx.mock
+async def test_get_archive_url_gitlab():
+    tag = f"v{NEW_VER}"
+    url = f"https://gitlab.com/{_GL_OWNER}/{_GL_REPO}/-/archive/{tag}/{_GL_REPO}-{tag}.tar.gz"
+    respx.head(url).mock(return_value=httpx.Response(200))
+    provider = SwiftProvider()
+    async with httpx.AsyncClient() as client:
+        result = await provider.get_archive_url(client, _GL_PACKAGE, NEW_VER)
+    assert result is not None
+    assert "gitlab.com" in result[0]
+
+
+# ---------------------------------------------------------------------------
+# Degraded modes (BaseException guards)
+# ---------------------------------------------------------------------------
+
+
+@respx.mock
+async def test_fetch_attestations_degraded(monkeypatch):
+    from unittest.mock import AsyncMock, patch
+
+    monkeypatch.setenv("GITHUB_TOKEN", "fake-token")
+    exc = RuntimeError("network error")
+    with patch("ecosystems.swift.fetch_vcs_tag_signature", new=AsyncMock(side_effect=exc)):
+        with patch("ecosystems.swift.fetch_vcs_account_age", new=AsyncMock(side_effect=exc)):
+            env = ActivityEnvironment()
+            provider = SwiftProvider()
+            result = await env.run(provider.fetch_attestations, PACKAGE_HTTPS, OLD_VER, NEW_VER)
+    assert result.has_attestation is False
+    assert result.publisher_account_age_days is None
+
+
+@respx.mock
+async def test_fetch_release_degraded(monkeypatch):
+    from unittest.mock import AsyncMock, patch
+
+    monkeypatch.setenv("GITHUB_TOKEN", "fake-token")
+    exc = RuntimeError("network error")
+    with patch("ecosystems.swift.fetch_vcs_tag_signature", new=AsyncMock(side_effect=exc)):
+        with patch("ecosystems.swift.fetch_vcs_release", new=AsyncMock(side_effect=exc)):
+            with patch(
+                "ecosystems.swift.fetch_vcs_ci_workflow_changes", new=AsyncMock(side_effect=exc)
+            ):
+                env = ActivityEnvironment()
+                provider = SwiftProvider()
+                result = await env.run(provider.fetch_release, PACKAGE_HTTPS, OLD_VER, NEW_VER)
+    assert result.github_release_exists is False

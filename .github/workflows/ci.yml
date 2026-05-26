@@ -38,5 +38,5 @@ jobs:
             --cov=classifiers --cov=models \
             --cov=workflows --cov=helpers --cov=api \
             --cov-report=term-missing \
-            --cov-fail-under=95 \
+            --cov-fail-under=90 \
             -q

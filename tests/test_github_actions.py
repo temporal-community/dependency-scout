@@ -245,6 +245,109 @@ async def test_fetch_release_no_release():
 
 
 # ---------------------------------------------------------------------------
+# get_archive_url
+# ---------------------------------------------------------------------------
+
+
+@respx.mock
+async def test_get_archive_url_success():
+    from ecosystems.github_actions import GitHubActionsProvider
+
+    respx.head("https://codeload.github.com/actions/checkout/tar.gz/refs/tags/v6").mock(
+        return_value=httpx.Response(200)
+    )
+    provider = GitHubActionsProvider()
+    async with httpx.AsyncClient() as client:
+        result = await provider.get_archive_url(client, PACKAGE, NEW)
+    assert result is not None
+    url, filename, _ = result
+    assert "actions/checkout" in url
+
+
+@respx.mock
+async def test_get_archive_url_not_found():
+    from ecosystems.github_actions import GitHubActionsProvider
+
+    respx.head("https://codeload.github.com/actions/checkout/tar.gz/refs/tags/v6").mock(
+        return_value=httpx.Response(404)
+    )
+    respx.head("https://codeload.github.com/actions/checkout/tar.gz/refs/tags/6").mock(
+        return_value=httpx.Response(404)
+    )
+    provider = GitHubActionsProvider()
+    async with httpx.AsyncClient() as client:
+        result = await provider.get_archive_url(client, PACKAGE, NEW)
+    assert result is None
+
+
+# ---------------------------------------------------------------------------
+# extract_archive
+# ---------------------------------------------------------------------------
+
+
+async def test_extract_archive(tmp_path):
+    import io as _io
+    import tarfile as _tarfile
+
+    from ecosystems.github_actions import GitHubActionsProvider
+
+    buf = _io.BytesIO()
+    with _tarfile.open(fileobj=buf, mode="w:gz") as tf:
+        data = b"hello"
+        info = _tarfile.TarInfo(name="file.txt")
+        info.size = len(data)
+        tf.addfile(info, _io.BytesIO(data))
+    provider = GitHubActionsProvider()
+    provider.extract_archive(buf.getvalue(), "test.tar.gz", str(tmp_path))
+    assert (tmp_path / "file.txt").exists()
+
+
+# ---------------------------------------------------------------------------
+# Error paths and degraded modes
+# ---------------------------------------------------------------------------
+
+
+@respx.mock
+async def test_fetch_metadata_http_500():
+    respx.get("https://api.github.com/repos/actions/checkout").mock(
+        return_value=httpx.Response(500)
+    )
+    with pytest.raises(Exception):
+        await ENV.run(metadata.fetch, "github_actions", PACKAGE, OLD, NEW)
+
+
+@respx.mock
+async def test_fetch_attestations_degraded(monkeypatch):
+    from unittest.mock import AsyncMock, patch
+
+    monkeypatch.setenv("GITHUB_TOKEN", "fake-token")
+    exc = RuntimeError("network error")
+    with patch("ecosystems.github_actions.fetch_vcs_tag_signature", new=AsyncMock(side_effect=exc)):
+        with patch(
+            "ecosystems.github_actions.fetch_vcs_account_age", new=AsyncMock(side_effect=exc)
+        ):
+            result = await ENV.run(attestation.check, "github_actions", PACKAGE, OLD, NEW)
+    assert result.has_attestation is False
+    assert result.publisher_account_age_days is None
+
+
+@respx.mock
+async def test_fetch_release_degraded(monkeypatch):
+    from unittest.mock import AsyncMock, patch
+
+    monkeypatch.setenv("GITHUB_TOKEN", "fake-token")
+    exc = RuntimeError("network error")
+    with patch("ecosystems.github_actions.fetch_vcs_tag_signature", new=AsyncMock(side_effect=exc)):
+        with patch("ecosystems.github_actions.fetch_vcs_release", new=AsyncMock(side_effect=exc)):
+            with patch(
+                "ecosystems.github_actions.fetch_vcs_ci_workflow_changes",
+                new=AsyncMock(side_effect=exc),
+            ):
+                result = await ENV.run(release_notes.check, "github_actions", PACKAGE, OLD, NEW)
+    assert result.github_release_exists is False
+
+
+# ---------------------------------------------------------------------------
 # Invalid package name
 # ---------------------------------------------------------------------------
 
