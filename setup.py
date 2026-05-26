@@ -460,8 +460,8 @@ def collect_temporal_config() -> tuple[dict[str, str], str]:
   Temporal Cloud — pick this if:
     • You want the Scout running 24/7 without a server to babysit
     • You're deploying to production
-  Paid service at https://cloud.temporal.io — free credits to start, credit
-  card required. State is durable; restarts and failures are handled for you.
+  https://cloud.temporal.io — fully managed, no infrastructure to maintain.
+  State is durable; restarts and failures are handled for you.
     """)
     )
 
@@ -469,7 +469,7 @@ def collect_temporal_config() -> tuple[dict[str, str], str]:
         "Which Temporal setup are you using?",
         [
             ("Local dev server", "temporal server start-dev — easiest to get started"),
-            ("Temporal Cloud", "fully managed, paid service — credit card required"),
+            ("Temporal Cloud", "fully managed, no infrastructure to maintain"),
         ],
         default=1,
     )
