@@ -184,39 +184,20 @@ async def run(ecosystem: str, package: str, old_version: str, new_version: str) 
         or os.environ.get("CLASSIFIER")
     )
 
-    env_rows: list[tuple[str, str, str]] = []
+    missing: list[str] = []
     if not has_socket_key:
-        env_rows.append(
-            (
-                "socket",
-                "info",
-                "supply-chain threat intelligence — set SOCKET_API_KEY to enable  https://socket.dev",
-            )
-        )
+        missing.append("SOCKET_API_KEY (Socket.dev threat intelligence)")
+    if not has_llm_key:
+        missing.append("ANTHROPIC_API_KEY (LLM-powered classification)")
 
-    if has_llm_key:
-        from classifiers import get_classifier
-
-        clf = get_classifier()
-        env_rows.append(
-            ("classifier", "ok", type(clf).__name__.replace("Classifier", " classifier"))
-        )
+    print(_dim("Running checks."), end="")
+    if missing:
+        keys = " and ".join(missing)
+        print(_dim(f" Set {keys} for deeper analysis — see docs/configuration.md"))
     else:
-        env_rows.append(
-            (
-                "classifier",
-                "info",
-                "using rule-based fallback — set ANTHROPIC_API_KEY for LLM analysis  https://console.anthropic.com",
-            )
-        )
-
-    if env_rows:
-        env_width = max(len(n) for n, _, _ in env_rows)
-        for name, status, text in env_rows:
-            icon_ansi, _, text_fn = _STATUS[status]
-            print(f"  {name:<{env_width}}  {icon_ansi}  {text_fn(text)}")  # type: ignore[operator]
-        print(_dim("─" * 60))
         print()
+    print(_dim("─" * 60))
+    print()
 
     # --- Per-release checks --------------------------------------------------
     env = ActivityEnvironment()
