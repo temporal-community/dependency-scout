@@ -23,7 +23,19 @@ Classifies 🟢 GREEN / 🟡 YELLOW / 🔴 RED, posts a comment explaining its r
 
 ## See it in action
 
+Single dependency run:
+
+<img width="1005" height="619" alt="Running against requests 2.32.0 [pip] returns RED result due to pulled release" src="https://github.com/user-attachments/assets/d1c0c081-a756-43d6-a397-c6da720196c0" />
+
+Running across PR queue:
+
 <img width="891" height="596" alt="Testing 24 PRs at once, with LLM-based classifier determining both security checks and merge-ability" src="https://github.com/user-attachments/assets/e3246410-b45b-405c-8edc-4f2e505689f3" />
+
+Temporal UI running checks:
+
+<img width="1216" height="802" alt="The Temporal UI shows each check as a discrete activity, and even if one call fails (such as Socket.dev in this case), the result returns anyway with the information it has" src="https://github.com/user-attachments/assets/a7f7e6f6-57da-4210-9faa-40fdfaa3e0e1" />
+
+Posting comment to GitHub:
 
 <img width="678" height="685" alt="Sample comment showing checks" src="https://github.com/user-attachments/assets/cba5dcac-713e-4bde-a31e-0410ff79aefa" />
 
