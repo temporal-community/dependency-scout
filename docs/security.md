@@ -21,8 +21,8 @@ SOCKET_API_KEY=op://Personal/dependency-scout/socket-key
 Then run with secrets injected at process start — they're never written to disk:
 
 ```bash
-op run --env-file=.env -- uv run python -m scout triage --repo myorg/myrepo
-op run --env-file=.env -- uv run python -m scout triage https://github.com/myorg/myrepo/pull/123
+op run --env-file=.env -- uv run dependency-scout triage --repo myorg/myrepo
+op run --env-file=.env -- uv run dependency-scout triage https://github.com/myorg/myrepo/pull/123
 op run --env-file=.env -- uv run python -m worker
 ```
 
@@ -44,8 +44,8 @@ export GITHUB_TOKEN=$(security find-generic-password -s dep-scout-gh -w 2>/dev/n
 `python-dotenv` and `uv` both support `--env-file` with arbitrary paths:
 
 ```bash
-uv run --env-file ~/.config/dependency-scout/.env python -m scout triage https://github.com/myorg/myrepo/pull/123
-uv run --env-file ~/.config/dependency-scout/.env python -m scout triage --repo myorg/myrepo
+uv run --env-file ~/.config/dependency-scout/.env dependency-scout triage https://github.com/myorg/myrepo/pull/123
+uv run --env-file ~/.config/dependency-scout/.env dependency-scout triage --repo myorg/myrepo
 ```
 
 A file at `~/.config/dependency-scout/.env` is outside any project directory and invisible to tools that scan the working tree.

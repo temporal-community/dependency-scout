@@ -3,25 +3,25 @@
 dependency-scout — vet dependencies and triage Dependabot/Renovate PRs.
 
 Check a single package version:
-    scout check requests 2.32.0
-    scout check requests 2.32.0 --from 2.31.0
-    scout check @angular/core 18.0.0 --ecosystem npm
+    dependency-scout check requests 2.32.0
+    dependency-scout check requests 2.32.0 --from 2.31.0
+    dependency-scout check @angular/core 18.0.0 --ecosystem npm
 
 Triage a single PR by URL:
-    scout triage https://github.com/owner/repo/pull/123
+    dependency-scout triage https://github.com/owner/repo/pull/123
 
 Triage all open Dependabot/Renovate PRs in a repo:
-    scout triage --repo owner/repo
+    dependency-scout triage --repo owner/repo
 
 Triage specific PRs:
-    scout triage --repo owner/repo --prs 12,33,64
+    dependency-scout triage --repo owner/repo --prs 12,33,64
 
 Triage first N PRs:
-    scout triage --repo owner/repo --limit 5
+    dependency-scout triage --repo owner/repo --limit 5
 
 Add --dry-run to any triage command to skip posting comments or taking actions.
 
-Exit codes (scout check): 0 = green, 1 = yellow, 2 = red (CI-friendly)
+Exit codes (dependency-scout check): 0 = green, 1 = yellow, 2 = red (CI-friendly)
 
 Requires a running Temporal worker:
     temporal server start-dev    # Terminal 1
@@ -529,17 +529,17 @@ def _add_triage_args(p: argparse.ArgumentParser) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        prog="scout",
+        prog="dependency-scout",
         description="Vet dependencies and triage Dependabot/Renovate PRs.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
             "examples:\n"
-            "  scout check requests 2.32.0\n"
-            "  scout check requests 2.32.0 --from 2.31.0\n"
-            "  scout triage https://github.com/owner/repo/pull/123\n"
-            "  scout triage --repo owner/repo\n"
-            "  scout triage --repo owner/repo --prs 12,33,64\n"
-            "  scout triage --repo owner/repo --limit 5 --dry-run"
+            "  dependency-scout check requests 2.32.0\n"
+            "  dependency-scout check requests 2.32.0 --from 2.31.0\n"
+            "  dependency-scout triage https://github.com/owner/repo/pull/123\n"
+            "  dependency-scout triage --repo owner/repo\n"
+            "  dependency-scout triage --repo owner/repo --prs 12,33,64\n"
+            "  dependency-scout triage --repo owner/repo --limit 5 --dry-run"
         ),
     )
     sub = parser.add_subparsers(dest="command", required=True)
@@ -572,10 +572,10 @@ def main() -> None:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
             "examples:\n"
-            "  scout triage https://github.com/owner/repo/pull/123\n"
-            "  scout triage --repo owner/repo\n"
-            "  scout triage --repo owner/repo --prs 12,33,64\n"
-            "  scout triage --repo owner/repo --limit 5 --dry-run"
+            "  dependency-scout triage https://github.com/owner/repo/pull/123\n"
+            "  dependency-scout triage --repo owner/repo\n"
+            "  dependency-scout triage --repo owner/repo --prs 12,33,64\n"
+            "  dependency-scout triage --repo owner/repo --limit 5 --dry-run"
         ),
     )
     _add_triage_args(triage_p)

@@ -21,7 +21,7 @@ dependencies = [
 ]
 
 [project.scripts]
-scout = "scout:main"
+dependency-scout = "scout:main"
 
 [project.entry-points."dependency_scout.classifiers"]
 claude = "classifiers:ClaudeClassifier"

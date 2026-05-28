@@ -63,7 +63,7 @@ temporal server start-dev
 uv run python -m worker
 
 # Terminal 3 — triage a single PR
-uv run python -m scout triage https://github.com/your-org/your-repo/pull/123
+uv run dependency-scout triage https://github.com/your-org/your-repo/pull/123
 ```
 
 Open **http://localhost:8233** to watch the workflow run. With `GITHUB_TOKEN` set, the Scout posts a comment directly on the PR — [here's a real example](https://github.com/temporalio/ai-cookbook/pull/104#issuecomment-4543267396).
@@ -76,10 +76,10 @@ Once the worker is running, point it at a whole repo to clear the backlog:
 
 ```bash
 # Triage every open Dependabot/Renovate PR in a repo
-uv run python -m scout triage --repo your-org/your-repo
+uv run dependency-scout triage --repo your-org/your-repo
 
 # Or limit to a subset while you're getting a feel for it
-uv run python -m scout triage --repo your-org/your-repo --limit 5
+uv run dependency-scout triage --repo your-org/your-repo --limit 5
 ```
 
 ### Check a package before installing it
@@ -88,14 +88,14 @@ The Scout can also vet a dependency **before** you install or upgrade it — use
 
 ```bash
 # Fresh install check (no old version)
-uv run python -m scout check requests 2.32.0
+uv run dependency-scout check requests 2.32.0
 
 # Upgrade check
-uv run python -m scout check requests 2.32.0 --from 2.31.0 --ecosystem pip
+uv run dependency-scout check requests 2.32.0 --from 2.31.0 --ecosystem pip
 
 # Different ecosystems
-uv run python -m scout check @angular/core 18.0.0 --ecosystem npm
-uv run python -m scout check serde 1.0.219 --ecosystem cargo
+uv run dependency-scout check @angular/core 18.0.0 --ecosystem npm
+uv run dependency-scout check serde 1.0.219 --ecosystem cargo
 ```
 
 Exit codes are scriptable: `0` = green, `1` = yellow, `2` = red.
