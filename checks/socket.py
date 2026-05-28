@@ -12,7 +12,7 @@ _cache: ActivityCache = ActivityCache(ttl_seconds=3600)  # scores can be updated
 
 # Cap concurrent Socket API calls to stay within rate limits.
 # 25 parallel workflows would otherwise fire 25 simultaneous requests.
-_semaphore = asyncio.Semaphore(5)
+_semaphore = asyncio.Semaphore(3)
 
 _ECOSYSTEM_MAP = {
     "pip": "pypi",
@@ -71,6 +71,9 @@ async def _fetch_socket(api_key: str, ecosystem: str, package: str, version: str
             params={"alerts": "true"},
             timeout=15.0,
         )
+        # Throttle rate across the batch — semaphore limits concurrency but
+        # without a delay each slot fires again immediately, producing bursts.
+        await asyncio.sleep(1.0)
 
     if resp.status_code == 401:
         raise ApplicationError(

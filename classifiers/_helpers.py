@@ -94,21 +94,31 @@ def _advisory_merge_recommendation(signals: PackageChecks) -> Literal["merge", "
     return "merge"
 
 
-def _rule_based(signals: PackageChecks) -> Verdict:
-    """Threshold-based fallback used when no ANTHROPIC_API_KEY is set."""
-    flags: list[str] = []
+_SOCKET_RED_TYPES = {"malware", "protestware"}
+_YANKED_KEYWORDS = {"yanked", "withdrawn", "security"}
 
-    # Hard RED: known CVEs
+
+def _hard_red(signals: PackageChecks) -> Verdict | None:
+    """Return a hard RED Verdict if any unambiguous signal is present, else None.
+
+    Used as a post-filter on LLM verdicts so no LLM can return GREEN/YELLOW
+    when hard evidence of a compromised or broken package exists. Also used as
+    the first step of the rule-based classifier to keep the logic in one place.
+    """
+    rb: dict = dict(
+        release_age_hours=signals.age.release_age_hours,
+        new_dependency_count=signals.diff.new_dependency_count,
+    )
+
     if signals.osv.osv_vulnerabilities:
         return Verdict(
             classification="red",
             confidence=0.95,
             reasoning=f"Known vulnerabilities: {', '.join(signals.osv.osv_vulnerabilities)}",
             flags=[f"CVE: {v}" for v in signals.osv.osv_vulnerabilities],
-            new_dependency_count=signals.diff.new_dependency_count,
+            **rb,
         )
 
-    # Hard RED: artifact/source mismatch (XZ-style backdoor injection)
     if signals.diff.artifact_source_mismatch:
         files = signals.diff.artifact_source_mismatch_files
         file_list = ", ".join(files[:5])
@@ -120,11 +130,9 @@ def _rule_based(signals: PackageChecks) -> Verdict:
                 f"XZ-style backdoor injection detected in: {file_list}"
             ),
             flags=[f"artifact/source mismatch: {file_list}"],
-            release_age_hours=signals.age.release_age_hours,
-            new_dependency_count=signals.diff.new_dependency_count,
+            **rb,
         )
 
-    # Hard RED: OS-level persistence mechanism in install hook (LaunchAgent, pm2, systemd, Bun)
     if signals.diff.persistence_mechanism_added:
         return Verdict(
             classification="red",
@@ -136,11 +144,9 @@ def _rule_based(signals: PackageChecks) -> Verdict:
             flags=[
                 "persistence mechanism in install hook (LaunchAgent/pm2/systemd/Bun/scorched-earth)"
             ],
-            release_age_hours=signals.age.release_age_hours,
-            new_dependency_count=signals.diff.new_dependency_count,
+            **rb,
         )
 
-    # Hard RED: npm worm self-propagation (reads npm/GitHub creds + calls publish endpoint)
     if signals.diff.worm_propagation_pattern:
         return Verdict(
             classification="red",
@@ -150,38 +156,29 @@ def _rule_based(signals: PackageChecks) -> Verdict:
                 "classic npm worm self-propagation pattern (Shai-Hulud / Mini Shai-Hulud)."
             ),
             flags=["npm worm propagation: credential theft + self-publish"],
-            release_age_hours=signals.age.release_age_hours,
-            new_dependency_count=signals.diff.new_dependency_count,
+            **rb,
         )
 
-    # Hard RED: Socket detected malware or protestware
-    _SOCKET_RED_TYPES = {"malware", "protestware"}
-    if any(t in _SOCKET_RED_TYPES for t in signals.socket.socket_alert_types):
-        matched = [t for t in signals.socket.socket_alert_types if t in _SOCKET_RED_TYPES]
+    matched_socket = [t for t in signals.socket.socket_alert_types if t in _SOCKET_RED_TYPES]
+    if matched_socket:
         return Verdict(
             classification="red",
             confidence=0.92,
-            reasoning=f"Socket security analysis flagged: {', '.join(matched)}",
-            flags=[f"Socket alert: {t}" for t in matched]
-            + [a for a in signals.socket.socket_alerts if any(t in a for t in matched)],
-            release_age_hours=signals.age.release_age_hours,
-            new_dependency_count=signals.diff.new_dependency_count,
+            reasoning=f"Socket security analysis flagged: {', '.join(matched_socket)}",
+            flags=[f"Socket alert: {t}" for t in matched_socket]
+            + [a for a in signals.socket.socket_alerts if any(t in a for t in matched_socket)],
+            **rb,
         )
 
-    # Hard RED: new install hook
     if signals.diff.install_script_added:
         return Verdict(
             classification="red",
             confidence=0.90,
             reasoning="A new install-time script was added to this version.",
             flags=["install script added"],
-            release_age_hours=signals.age.release_age_hours,
-            new_dependency_count=signals.diff.new_dependency_count,
+            **rb,
         )
 
-    # Hard RED: obfuscated code — even when there's a plausible benign explanation
-    # (e.g. minified frontend JS), human verification is required; downgrading to YELLOW
-    # based on a contextual hypothesis defeats the purpose of the signal.
     if signals.diff.obfuscated_code:
         return Verdict(
             classification="red",
@@ -195,9 +192,78 @@ def _rule_based(signals: PackageChecks) -> Verdict:
                 "machine-generated obfuscation detected (eval/atob chains, _0x vars, or >100KB single line) — "
                 "review for hidden credential harvesting or C2 payload"
             ],
-            release_age_hours=signals.age.release_age_hours,
-            new_dependency_count=signals.diff.new_dependency_count,
+            **rb,
         )
+
+    if (
+        signals.attestation.has_attestation
+        and signals.attestation.publisher_repo
+        and signals.release.metadata_repo
+        and signals.attestation.publisher_repo.lower() != signals.release.metadata_repo.lower()
+    ):
+        return Verdict(
+            classification="red",
+            confidence=0.95,
+            reasoning=(
+                f"SLSA attestation publisher repo ({signals.attestation.publisher_repo}) does not match "
+                f"the repository declared in package metadata ({signals.release.metadata_repo}) — "
+                "strong indicator of a supply chain attack."
+            ),
+            flags=[
+                f"provenance repo mismatch: attestation={signals.attestation.publisher_repo}, "
+                f"metadata={signals.release.metadata_repo}"
+            ],
+            **rb,
+        )
+
+    if signals.socket.socket_score is not None and signals.socket.socket_score < 30:
+        return Verdict(
+            classification="red",
+            confidence=0.88,
+            reasoning=f"Socket package score is critically low ({signals.socket.socket_score}/100)",
+            flags=[f"critically low socket score ({signals.socket.socket_score}/100)"],
+            **rb,
+        )
+
+    if signals.deps_dev.is_deprecated and signals.deps_dev.deprecated_reason:
+        if any(kw in signals.deps_dev.deprecated_reason.lower() for kw in _YANKED_KEYWORDS):
+            return Verdict(
+                classification="red",
+                confidence=0.95,
+                reasoning=f"Version was yanked/withdrawn: {signals.deps_dev.deprecated_reason}",
+                flags=[f"version yanked: {signals.deps_dev.deprecated_reason}"],
+                **rb,
+            )
+
+    return None
+
+
+def _apply_hard_rules(signals: PackageChecks, verdict: Verdict) -> Verdict:
+    """Post-filter for LLM verdicts: override GREEN/YELLOW if hard RED signals are present.
+
+    Preserves the LLM's reasoning as context so reviewers can see what it found.
+    """
+    if verdict.classification == "red":
+        return verdict
+    hard = _hard_red(signals)
+    if hard is None:
+        return verdict
+    return Verdict(
+        **hard.model_dump(exclude={"reasoning"}),
+        reasoning=(
+            f"{hard.reasoning}\n\n"
+            f"[LLM classified as {verdict.classification} — reasoning: {verdict.reasoning}]"
+        ),
+    )
+
+
+def _rule_based(signals: PackageChecks) -> Verdict:
+    """Threshold-based fallback used when no LLM key is set."""
+    hard = _hard_red(signals)
+    if hard:
+        return hard
+
+    flags: list[str] = []
 
     # Collect yellow signals
     if signals.metadata.is_major_bump:
@@ -264,27 +330,6 @@ def _rule_based(signals: PackageChecks) -> Verdict:
             )
         else:
             flags.append(f"trusted publisher changed{old}")
-    if (
-        signals.attestation.has_attestation
-        and signals.attestation.publisher_repo
-        and signals.release.metadata_repo
-        and signals.attestation.publisher_repo.lower() != signals.release.metadata_repo.lower()
-    ):
-        return Verdict(
-            classification="red",
-            confidence=0.95,
-            reasoning=(
-                f"SLSA attestation publisher repo ({signals.attestation.publisher_repo}) does not match "
-                f"the repository declared in package metadata ({signals.release.metadata_repo}) — "
-                "strong indicator of a supply chain attack."
-            ),
-            flags=[
-                f"provenance repo mismatch: attestation={signals.attestation.publisher_repo}, "
-                f"metadata={signals.release.metadata_repo}"
-            ],
-            release_age_hours=signals.age.release_age_hours,
-            new_dependency_count=signals.diff.new_dependency_count,
-        )
     if (
         signals.attestation.has_attestation
         and signals.attestation.source_ref
@@ -359,16 +404,6 @@ def _rule_based(signals: PackageChecks) -> Verdict:
         )
     if signals.socket.socket_alerts:
         flags.extend(signals.socket.socket_alerts)
-    if signals.socket.socket_score is not None and signals.socket.socket_score < 30:
-        # Scores this low almost always correlate with active malware — escalate to red.
-        return Verdict(
-            classification="red",
-            confidence=0.88,
-            reasoning=f"Socket package score is critically low ({signals.socket.socket_score}/100)",
-            flags=[f"critically low socket score ({signals.socket.socket_score}/100)"] + flags,
-            release_age_hours=signals.age.release_age_hours,
-            new_dependency_count=signals.diff.new_dependency_count,
-        )
     if signals.socket.socket_score is not None and signals.socket.socket_score < 50:
         flags.append(f"low socket score ({signals.socket.socket_score}/100)")
     if signals.metadata.weekly_downloads is not None and signals.metadata.weekly_downloads < 1_000:

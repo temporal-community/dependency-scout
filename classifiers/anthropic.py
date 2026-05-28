@@ -9,7 +9,7 @@ from temporalio.exceptions import ApplicationError
 
 from models import PackageChecks, Verdict
 from helpers.prompts import CLASSIFIER_SYSTEM
-from classifiers._helpers import _build_message, _rule_based
+from classifiers._helpers import _apply_hard_rules, _build_message, _rule_based
 
 _SUBMIT_VERDICT_TOOL: dict[str, Any] = {
     "name": "submit_verdict",
@@ -171,6 +171,7 @@ class AnthropicClassifier:
             updates["new_dependency_count"] = signals.diff.new_dependency_count
         if updates:
             verdict = verdict.model_copy(update=updates)
+        verdict = _apply_hard_rules(signals, verdict)
         activity.logger.info(
             f"Classified {signals.package_name} {signals.new_version} as "
             f"{verdict.classification} ({verdict.confidence:.0%})"

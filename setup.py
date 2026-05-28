@@ -386,7 +386,7 @@ def print_next_steps(used_app: bool, temporal_mode: str = "local") -> None:
        uv run python -m worker
 
   3. Triage a real Dependabot PR:
-       uv run python -m triage https://github.com/your-org/your-repo/pull/123
+       uv run python -m scout triage https://github.com/your-org/your-repo/pull/123
 
      Watch the run at: {workflow_ui}
 

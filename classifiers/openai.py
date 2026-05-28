@@ -8,7 +8,7 @@ from temporalio import activity
 
 from models import PackageChecks, Verdict
 from helpers.prompts import CLASSIFIER_SYSTEM
-from classifiers._helpers import _build_message, _rule_based
+from classifiers._helpers import _apply_hard_rules, _build_message, _rule_based
 
 _SUBMIT_VERDICT_FUNCTION: dict[str, Any] = {
     "type": "function",
@@ -161,6 +161,7 @@ class OpenAIClassifier:
             )
             return _rule_based(signals)
 
+        verdict = _apply_hard_rules(signals, verdict)
         activity.logger.info(
             "Classified %s %s as %s (%.0f%%)",
             signals.package_name,

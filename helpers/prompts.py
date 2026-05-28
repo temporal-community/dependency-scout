@@ -31,7 +31,10 @@ YELLOW — needs human eyes. ANY of:
     version bump; many new transitive dependencies can expand the attack surface significantly
     (per-repo threshold is configurable via max_new_dependencies in dependency-scout.yml)
 
-RED — likely supply chain attack. ANY of:
+RED — likely supply chain attack OR known-bad version. ANY of:
+  - osv_vulnerabilities is non-empty — the new version has unfixed CVEs. Automatic
+    RED regardless of all other signals. Do not upgrade to a version with known
+    vulnerabilities; the correct action is to redirect to a fixed version.
   - ANY entry in the "=== DANGEROUS BINARY/EXECUTABLE FILES ===" diff section —
     new or modified .so/.pyd/.dll/.pkl files execute code on load; this is an
     automatic RED regardless of all other signals
@@ -120,8 +123,10 @@ timestamp_skew_minutes, possible_rerelease, tag_signature_verified, tag_was_prev
 deps.dev and OpenSSF Scorecard signals (is_deprecated, deprecated_reason, scorecard_score,
 scorecard_maintained, scorecard_dangerous_workflow, scorecard_token_permissions,
 scorecard_branch_protection, scorecard_signed_releases, scorecard_repo):
-- is_deprecated=true: the package registry has marked this package deprecated. Always flag
-  as YELLOW at minimum — bumping a dead package is worse than no change at all.
+- is_deprecated=true: the package registry has marked this package deprecated or yanked.
+  If deprecated_reason mentions "yanked", "withdrawn", or "security": treat as RED —
+  the maintainer actively withdrew this version and installing it is never correct.
+  Otherwise flag as YELLOW at minimum — bumping a dead package is worse than no change.
 - deprecated_reason: registry-provided message. May suggest a replacement package.
 - scorecard_score: OpenSSF Scorecard overall health score (0-10) for the upstream source
   repo. null means the repo wasn't found in the Scorecard dataset (common for smaller
