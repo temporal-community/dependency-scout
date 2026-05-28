@@ -21,6 +21,8 @@ Classifies 🟢 GREEN / 🟡 YELLOW / 🔴 RED, posts a comment explaining its r
 
 > **Status:** Experimental — self-hosted, bring your own keys. No shared infrastructure, no accounts, no sign-up.
 
+## See it in action
+
 <img width="891" height="596" alt="Testing 24 PRs at once, with LLM-based classifier determining both security checks and merge-ability" src="https://github.com/user-attachments/assets/e3246410-b45b-405c-8edc-4f2e505689f3" />
 
 <img width="678" height="685" alt="Sample comment showing checks" src="https://github.com/user-attachments/assets/cba5dcac-713e-4bde-a31e-0410ff79aefa" />
