@@ -41,6 +41,23 @@ Posting comment to GitHub:
 
 ---
 
+## Install
+
+**Just want to check packages?** No clone needed — install from PyPI:
+
+```bash
+# One-off: no install required
+uvx dependency-scout check requests 2.32.0 --from 2.31.0 --ecosystem pip
+
+# Persistent install
+uv tool install dependency-scout
+dependency-scout check requests 2.32.0 --from 2.31.0 --ecosystem pip
+```
+
+**Want PR triage, auto-merge, or webhook mode?** Those require a running Temporal worker — continue with the full setup below.
+
+---
+
 ## Quick start
 
 You need Python 3.10+, [`uv`](https://docs.astral.sh/uv/), and the [Temporal CLI](https://docs.temporal.io/cli).
