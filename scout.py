@@ -87,7 +87,7 @@ async def _check(
     print(f"  classifier  {clf_desc}\n")
 
     client = await connect()
-    task_queue = os.environ.get("TEMPORAL_TASK_QUEUE", "dependency-scout")
+    task_queue = os.environ.get("TEMPORAL_TASK_QUEUE", "default")
     date_key = datetime.now().strftime("%Y-%m-%d")
     workflow_id = f"triage-{ecosystem}-{package}-{new_version}-{date_key}"
 
@@ -285,7 +285,7 @@ async def _triage_single(args: argparse.Namespace) -> None:
         PRActionWorkflow.run,
         pr,
         id=workflow_id,
-        task_queue=os.environ.get("TEMPORAL_TASK_QUEUE", "dependency-scout"),
+        task_queue=os.environ.get("TEMPORAL_TASK_QUEUE", "default"),
     )
 
     ui_base = os.environ.get("TEMPORAL_UI_BASE_URL", "http://localhost:8233")
@@ -330,7 +330,7 @@ async def _triage_one(
         PRActionWorkflow.run,
         pr,
         id=workflow_id,
-        task_queue=os.environ.get("TEMPORAL_TASK_QUEUE", "dependency-scout"),
+        task_queue=os.environ.get("TEMPORAL_TASK_QUEUE", "default"),
     )
     return pr_data, parsed, await handle.result()
 
@@ -529,7 +529,7 @@ def _add_triage_args(p: argparse.ArgumentParser) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        prog="dependency-scout",
+        prog="default",
         description="Vet dependencies and triage Dependabot/Renovate PRs.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
