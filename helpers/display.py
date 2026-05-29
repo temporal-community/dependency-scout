@@ -51,6 +51,23 @@ def _merge_rec_label(merge_rec: str | None) -> str:
     return ""
 
 
+def _outcome_label(result_str: str, merge_rec: str | None) -> str:
+    """Show what the workflow actually did, falling back to recommendation for observe-only."""
+    if result_str.startswith("auto-merged"):
+        return f"  {_G}✅ auto-merged{_RST}"
+    if result_str == "human-approved-merged":
+        return f"  {_G}✅ merged (approved){_RST}"
+    if result_str == "closed-stale-branch":
+        return f"  {_DIM}↩ closed — stale branch{_RST}"
+    if result_str.startswith("blocked-"):
+        return f"  {_R}🚫 closed — suspicious{_RST}"
+    if result_str == "human-rejected":
+        return f"  {_R}✗ rejected{_RST}"
+    if result_str == "timed-out-awaiting-review":
+        return f"  {_Y}⏱ review timed out{_RST}"
+    return _merge_rec_label(merge_rec)
+
+
 def _clf_name() -> str | None:
     if os.environ.get("ANTHROPIC_API_KEY"):
         return "Claude"

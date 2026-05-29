@@ -53,6 +53,7 @@ from helpers.display import (
     _g,
     _info,
     _merge_rec_label,
+    _outcome_label,
     _r,
     _y,
 )
@@ -306,8 +307,7 @@ async def _triage_single(args: argparse.Namespace) -> None:
     result = await handle.result()
     result_str, comment_url, merge_rec = _parse_result(result)
     verdict = _verdict_from_result(result)
-    mr_label = _merge_rec_label(merge_rec)
-    print(f"  {_color_verdict(verdict)}{mr_label}  {_dim(result_str)}")
+    print(f"  {_color_verdict(verdict)}{_outcome_label(result_str, merge_rec)}  {_dim(result_str)}")
     if comment_url:
         print(f"  Comment:  {comment_url}")
     elif not args.dry_run and has_github and pr_number:
@@ -443,9 +443,8 @@ async def _triage_batch(args: argparse.Namespace) -> None:
             result_str, comment_url, merge_rec = _parse_result(result)
             verdict = _verdict_from_result(result)
             completed.append((pr_data, parsed, verdict, result_str, comment_url, merge_rec))
-            mr_label = _merge_rec_label(merge_rec)
             print(
-                f"  {_color_verdict(verdict)}{mr_label}  "
+                f"  {_color_verdict(verdict)}{_outcome_label(result_str, merge_rec)}  "
                 f"#{pr_data['number']:<5}  {parsed.package:<{pkg_w}}  "
                 f"{parsed.old_version} → {parsed.new_version}"
             )
@@ -469,12 +468,17 @@ async def _triage_batch(args: argparse.Namespace) -> None:
     print(_dim("\n" + "─" * 60 + "\n"))
     counts: dict[str, int] = {"green": 0, "yellow": 0, "red": 0}
     for (pkg, old_v, new_v), entries in sorted(groups.items(), key=_group_sort_key):
-        verdict = min(entries, key=lambda e: _verdict_rank.get(e[2], 9))[2]
+        worst_entry = min(entries, key=lambda e: _verdict_rank.get(e[2], 9))
+        verdict = worst_entry[2]
+        worst_result_str, worst_merge_rec = worst_entry[3], worst_entry[5]
         counts[verdict] += len(entries)
         pr_nums = sorted(e[0]["number"] for e in entries)
         pr_label = "  ".join(f"#{n}" for n in pr_nums)
         ver_str = f"{old_v} → {new_v}"
-        print(f"  {_color_verdict(verdict)}  {pkg:<{pkg_w}}  {ver_str:<{ver_w}}  {_dim(pr_label)}")
+        outcome = _outcome_label(worst_result_str, worst_merge_rec)
+        print(
+            f"  {_color_verdict(verdict)}{outcome}  {pkg:<{pkg_w}}  {ver_str:<{ver_w}}  {_dim(pr_label)}"
+        )
         rep = entries[0]
         rep_pr_data, _, _, _, comment_url, _ = rep
         wf_id = f"pr-action-{repo_slug}-{rep_pr_data['number']}"
