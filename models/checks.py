@@ -26,6 +26,13 @@ class OSVChecks(BaseModel):
     osv_vulnerabilities: list[str] = []
 
 
+class NVDChecks(BaseModel):
+    # CVE IDs from NIST NVD affecting new_version. NVD frequently publishes a CVE days
+    # before it propagates into OSV's aggregated feeds, so this catches freshly-disclosed
+    # vulnerabilities that OSVChecks would still miss.
+    nvd_vulnerabilities: list[str] = []
+
+
 class PackageDiffChecks(BaseModel):
     diff_summary: str = ""
     diff_size_bytes: int = 0

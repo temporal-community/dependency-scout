@@ -6,6 +6,7 @@ from models.checks import (
     DepsDevChecks,
     MaintainerChecks,
     MetadataChecks,
+    NVDChecks,
     OSVChecks,
     PackageDiffChecks,
     ReleaseAgeChecks,
@@ -26,6 +27,7 @@ class PackageChecks(BaseModel):
     metadata: MetadataChecks = Field(default_factory=MetadataChecks)
     socket: SocketChecks = Field(default_factory=SocketChecks)
     osv: OSVChecks = Field(default_factory=OSVChecks)
+    nvd: NVDChecks = Field(default_factory=NVDChecks)
     diff: PackageDiffChecks = Field(default_factory=PackageDiffChecks)
     maintainer: MaintainerChecks = Field(default_factory=MaintainerChecks)
     age: ReleaseAgeChecks = Field(default_factory=ReleaseAgeChecks)
