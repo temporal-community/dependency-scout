@@ -28,6 +28,7 @@ from models import (
     PRContext,
     PRFilesChecks,
     MetadataChecks,
+    NVDChecks,
     ReleaseAgeChecks,
     ReleaseChecks,
     RepoConfig,
@@ -238,6 +239,14 @@ def _security_advisory():
     return fetch
 
 
+def _nvd(has_cve: bool = False):
+    @activity.defn(name="activities.nvd.check")
+    async def check(*_):
+        return NVDChecks(nvd_vulnerabilities=["CVE-2026-9999"] if has_cve else [])
+
+    return check
+
+
 def _custom_checks():
     @activity.defn(name="activities.custom_checks.run_all")
     async def run_all(_: CheckContext) -> dict:
@@ -304,6 +313,7 @@ async def _run_scenario(
         _depsdev(),
         _scorecard(),
         _security_advisory(),
+        _nvd(),
         _custom_checks(),
         _classifier(classification),
         _repo_config(config),
