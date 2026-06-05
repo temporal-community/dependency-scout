@@ -53,6 +53,14 @@ def _merge_rec_label(merge_rec: str | None) -> str:
 
 def _outcome_label(result_str: str, merge_rec: str | None) -> str:
     """Show what the workflow actually did, falling back to recommendation for observe-only."""
+    if result_str.startswith("dry-run-"):
+        if result_str.endswith("-auto-merge"):
+            return f"  {_DIM}🔍 would auto-merge{_RST}"
+        if result_str.endswith("-block"):
+            return f"  {_DIM}🔍 would close — suspicious{_RST}"
+        if result_str.endswith("-review"):
+            return f"  {_DIM}🔍 would request review{_RST}"
+        return f"  {_DIM}🔍 would comment only{_RST}"
     if result_str.startswith("auto-merged"):
         return f"  {_G}✅ auto-merged{_RST}"
     if result_str == "human-approved-merged":

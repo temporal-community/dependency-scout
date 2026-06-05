@@ -19,6 +19,8 @@ Maintainers aren’t careless — they’re exhausted. And modern supply-chain a
 
 Classifies 🟢 GREEN / 🟡 YELLOW / 🔴 RED, posts a comment explaining its reasoning, and takes action based on your config (or nothing if you haven't configured anything).
 
+**Ecosystems covered (15):** pip/uv (Python), npm (JavaScript/TypeScript), RubyGems (Ruby), Maven/Gradle (Java/Kotlin), NuGet (.NET), Cargo (Rust), Go modules, Composer (PHP), Mix (Elixir/Hex), Pub (Dart), Elm, Swift, GitHub Actions, Docker, and Terraform.
+
 > **Status:** Experimental — self-hosted, bring your own keys. No shared infrastructure, no accounts, no sign-up.
 
 ## See it in action

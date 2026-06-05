@@ -7,6 +7,7 @@ from temporalio.workflow import ParentClosePolicy
 
 with workflow.unsafe.imports_passed_through():
     from models import (
+        PackageChecks,
         PRContext,
         PRFilesChecks,
         ActionsUsageChecks,
@@ -50,6 +51,32 @@ class PRActionWorkflow:
                 )
                 return False
             raise
+
+    def _dry_run_outcome(
+        self, verdict: "Verdict", signals: "PackageChecks", config: "RepoConfig"
+    ) -> str:
+        """Report the action that would be taken, without performing it.
+
+        Mirrors the action-decision branches in ``run`` (block / auto-merge / request
+        review / comment-only) but executes no activities. Keep this in sync with the
+        real path below; the result string encodes the classification so the CLI colors
+        the verdict correctly via ``_verdict_from_result``."""
+        cls = verdict.classification
+        if cls in config.block_classifications:
+            return f"dry-run-{cls}-block"
+        normal_auto_merge = (
+            cls in config.auto_merge_classifications
+            and verdict.confidence >= config.auto_merge_min_confidence
+            and verdict.merge_recommendation != "hold"
+        )
+        recommendation_auto_merge = verdict.merge_recommendation == "merge" and bool(
+            signals.advisory.fixed_vulnerabilities
+        )
+        if config.auto_merge_enabled and (normal_auto_merge or recommendation_auto_merge):
+            return f"dry-run-{cls}-auto-merge"
+        if config.reviewers:
+            return f"dry-run-{cls}-review"
+        return f"dry-run-{cls}-comment"
 
     @workflow.signal
     def submit_decision(self, decision: str, approver: str = "") -> None:
@@ -206,6 +233,13 @@ class PRActionWorkflow:
 
         if actions_usage.flags:
             verdict = verdict.model_copy(update={"flags": verdict.flags + actions_usage.flags})
+
+        # Everything above is read-only (fetch config, run triage, file/actions checks,
+        # apply repo gates). Everything below mutates the PR — comment, label, close,
+        # merge, request review. In dry-run mode we report the action that *would* be
+        # taken and stop here, touching nothing on the platform.
+        if pr.dry_run:
+            return self._dry_run_outcome(verdict, signals, config)
 
         comment_url: str = await workflow.execute_activity(
             "activities.platform.comment", args=[pr, verdict, signals], result_type=str, **opts
