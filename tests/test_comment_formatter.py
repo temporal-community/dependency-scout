@@ -130,6 +130,12 @@ def test_green_badge(pr, green_verdict):
     assert "🟢 GREEN" in out
 
 
+def test_nvd_attribution_notice_present(pr, green_verdict):
+    """NVD API Terms of Use require this exact notice displayed prominently."""
+    out = format_comment(pr, green_verdict)
+    assert "This product uses the NVD API but is not endorsed or certified by the NVD." in out
+
+
 def test_yellow_badge(pr):
     verdict = Verdict(classification="yellow", confidence=0.7, reasoning="Uncertain.", flags=[])
     out = format_comment(pr, verdict)
