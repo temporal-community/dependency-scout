@@ -12,6 +12,7 @@ with workflow.unsafe.imports_passed_through():
         MetadataChecks,
         SocketChecks,
         OSVChecks,
+        NVDChecks,
         PackageDiffChecks,
         MaintainerChecks,
         ReleaseAgeChecks,
@@ -44,6 +45,7 @@ _CHECK_REGISTRY: list[tuple[str, str, type, bool]] = [
     ("deps_dev", "activities.depsdev.fetch", DepsDevChecks, False),
     ("scorecard", "activities.scorecard.fetch", ScorecardChecks, False),
     ("advisory", "activities.security_advisories.fetch", SecurityAdvisoryChecks, False),
+    ("nvd", "activities.nvd.check", NVDChecks, False),
 ]
 
 # Derived from the registry — used by tests/test_check_wiring.py to verify worker registration.

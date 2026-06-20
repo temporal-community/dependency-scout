@@ -16,6 +16,7 @@ import asyncio
 
 from checks.metadata import fetch as metadata_fetch
 from checks.osv import check as osv_check
+from checks.nvd import check as nvd_check
 from checks.release_age import check as release_age_check
 from checks.maintainer import history as maintainer_history
 from helpers.cache import ActivityCache
@@ -28,6 +29,7 @@ from helpers.cache import ActivityCache
 PYPI_BASE = "https://pypi.org/pypi"
 PYPISTATS_BASE = "https://pypistats.org/api/packages"
 OSV_URL = "https://api.osv.dev/v1/query"
+NVD_URL = "https://services.nvd.nist.gov/rest/json/cves/2.0"
 
 
 def _pypi_response(package: str, version: str, upload_time: str = "2025-01-01T00:00:00Z") -> dict:
@@ -147,6 +149,69 @@ async def test_osv_passes_correct_ecosystem():
 
     body = json.loads(route.calls[0].request.content)
     assert body["package"]["ecosystem"] == "PyPI"
+
+
+# ---------------------------------------------------------------------------
+# nvd
+# ---------------------------------------------------------------------------
+
+
+def _nvd_response(*cve_ids: str) -> dict:
+    return {
+        "vulnerabilities": [{"cve": {"id": cid}} for cid in cve_ids],
+        "totalResults": len(cve_ids),
+    }
+
+
+@respx.mock
+async def test_nvd_no_vulns():
+    respx.get(NVD_URL).mock(return_value=httpx.Response(200, json=_nvd_response()))
+
+    env = ActivityEnvironment()
+    result = await env.run(nvd_check, "pip", "transformers", "5.9.0", "5.10.2")
+    assert result.nvd_vulnerabilities == []
+
+
+@respx.mock
+async def test_nvd_with_cves():
+    respx.get(NVD_URL).mock(
+        return_value=httpx.Response(200, json=_nvd_response("CVE-2026-4372", "CVE-2026-5241"))
+    )
+
+    env = ActivityEnvironment()
+    result = await env.run(nvd_check, "pip", "transformers", "5.1.0", "5.2.0")
+    assert result.nvd_vulnerabilities == ["CVE-2026-4372", "CVE-2026-5241"]
+
+
+@respx.mock
+async def test_nvd_matches_on_lowercased_product_and_version():
+    route = respx.get(NVD_URL).mock(return_value=httpx.Response(200, json=_nvd_response()))
+
+    env = ActivityEnvironment()
+    await env.run(nvd_check, "pip", "Transformers", "5.1.0", "5.2.0")
+
+    match = route.calls[0].request.url.params["virtualMatchString"]
+    assert match == "cpe:2.3:a:*:transformers:5.2.0:*:*:*:*:*:*:*"
+
+
+@respx.mock
+async def test_nvd_sends_api_key_header_when_set(monkeypatch):
+    monkeypatch.setenv("NVD_API_KEY", "secret-key")
+    route = respx.get(NVD_URL).mock(return_value=httpx.Response(200, json=_nvd_response()))
+
+    env = ActivityEnvironment()
+    await env.run(nvd_check, "pip", "transformers", "5.1.0", "5.2.0")
+
+    assert route.calls[0].request.headers["apiKey"] == "secret-key"
+
+
+@respx.mock
+async def test_nvd_cache_hit():
+    respx.get(NVD_URL).mock(return_value=httpx.Response(200, json=_nvd_response("CVE-2026-4372")))
+    env = ActivityEnvironment()
+    result1 = await env.run(nvd_check, "pip", "cachedpkg", "1.0.0", "1.0.1")
+    result2 = await env.run(nvd_check, "pip", "cachedpkg", "1.0.0", "1.0.1")
+    assert result1 == result2
 
 
 # ---------------------------------------------------------------------------
