@@ -11,6 +11,25 @@ from models import PackageChecks, Verdict
 from helpers.prompts import CLASSIFIER_SYSTEM
 from classifiers._helpers import _apply_hard_rules, _build_message, _rule_based
 
+_BILLING_DEGRADE_MSG = (
+    "LLM classifier unavailable — Anthropic credits exhausted / billing issue (%s). "
+    "Falling back to rule-based classifier. Add credits at "
+    "https://console.anthropic.com/settings/billing to restore LLM verdicts."
+)
+
+
+def _is_billing_error(exc: Exception) -> bool:
+    """True if an Anthropic API error indicates insufficient credits / a billing problem.
+
+    The "credit balance is too low" error arrives as a 400 ``invalid_request_error`` (not a
+    distinct exception class), while other billing problems can surface as a 403 with error
+    type ``billing_error``. Match both — by error type and by message text."""
+    if getattr(exc, "type", "") == "billing_error":
+        return True
+    text = str(getattr(exc, "message", "") or exc).lower()
+    return "credit balance" in text or "purchase credits" in text or "billing" in text
+
+
 _SUBMIT_VERDICT_TOOL: dict[str, Any] = {
     "name": "submit_verdict",
     "description": "Submit your supply chain risk classification. Call this when you have enough context to make a confident verdict.",
@@ -158,9 +177,21 @@ class AnthropicClassifier:
                 str(exc), type="AuthenticationError", non_retryable=True
             ) from exc
         except anthropic.BadRequestError as exc:
+            # "Your credit balance is too low…" arrives as a 400 BadRequestError. That's a
+            # transient billing state, not a malformed request — degrade to rule-based like
+            # any other unavailable signal rather than failing the whole triage. A genuinely
+            # malformed request still fails loudly (non-retryable) so the bug surfaces.
+            if _is_billing_error(exc):
+                activity.logger.warning(_BILLING_DEGRADE_MSG, type(exc).__name__)
+                return _rule_based(signals)
             raise ApplicationError(str(exc), type="BadRequestError", non_retryable=True) from exc
         except Exception as exc:
-            activity.logger.warning(f"LLM classifier failed ({exc!r}), falling back to rule-based")
+            if _is_billing_error(exc):  # e.g. a 403 billing_error PermissionDeniedError
+                activity.logger.warning(_BILLING_DEGRADE_MSG, type(exc).__name__)
+            else:
+                activity.logger.warning(
+                    f"LLM classifier failed ({exc!r}), falling back to rule-based"
+                )
             return _rule_based(signals)
 
         # Pass signals through so PRActionWorkflow can enforce per-repo gates.

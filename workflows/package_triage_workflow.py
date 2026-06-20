@@ -113,17 +113,25 @@ class PackageTriageWorkflow:
             else:
                 check_kwargs[field] = result
 
-        custom_checks_result = await workflow.execute_activity(
-            "activities.custom_checks.run_all",
-            CheckContext(
-                package=package,
-                ecosystem=ecosystem,
-                old_version=old_version,
-                new_version=new_version,
-            ),
-            result_type=dict,
-            **default_opts,
-        )
+        # Like the signal checks above, a failing custom-checks runner must not sink the
+        # whole triage — degrade to "no custom checks" and carry on.
+        try:
+            custom_checks_result = await workflow.execute_activity(
+                "activities.custom_checks.run_all",
+                CheckContext(
+                    package=package,
+                    ecosystem=ecosystem,
+                    old_version=old_version,
+                    new_version=new_version,
+                ),
+                result_type=dict,
+                **default_opts,
+            )
+        except Exception as exc:
+            workflow.logger.warning(
+                f"custom_checks.run_all failed: {exc!r} — continuing with no custom checks"
+            )
+            custom_checks_result = {}
 
         if extra_check_activities:
             extra_raw = await asyncio.gather(

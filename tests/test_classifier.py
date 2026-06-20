@@ -316,6 +316,45 @@ async def test_classify_generic_exception_falls_back_to_rule_based(base_signals,
     assert verdict.classification in ("green", "yellow", "red")
 
 
+async def test_classify_credit_balance_too_low_falls_back_to_rule_based(base_signals, monkeypatch):
+    """A 400 'credit balance is too low' is a billing state, not a malformed request —
+    degrade to rule-based instead of failing the triage."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    exc = anthropic.BadRequestError(
+        "Your credit balance is too low to access the Anthropic API. "
+        "Please go to Plans & Billing to upgrade or purchase credits.",
+        response=_anthropic_response(400),
+        body={"type": "invalid_request_error"},
+    )
+    client = MagicMock()
+    client.messages.create = AsyncMock(side_effect=exc)
+
+    env = ActivityEnvironment()
+    with patch("classifiers.anthropic.anthropic.AsyncAnthropic", return_value=client):
+        verdict = await env.run(classify, base_signals)
+
+    assert verdict.classification in ("green", "yellow", "red")
+    assert "[rule-based]" in verdict.reasoning
+
+
+async def test_classify_billing_permission_denied_falls_back_to_rule_based(
+    base_signals, monkeypatch
+):
+    """A 403 billing_error (PermissionDeniedError) also degrades, not fails."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    exc = anthropic.PermissionDeniedError(
+        "Billing issue", response=_anthropic_response(403), body={"type": "billing_error"}
+    )
+    client = MagicMock()
+    client.messages.create = AsyncMock(side_effect=exc)
+
+    env = ActivityEnvironment()
+    with patch("classifiers.anthropic.anthropic.AsyncAnthropic", return_value=client):
+        verdict = await env.run(classify, base_signals)
+
+    assert verdict.classification in ("green", "yellow", "red")
+
+
 # ---------------------------------------------------------------------------
 # Classifier protocol — class-based interface
 # ---------------------------------------------------------------------------
