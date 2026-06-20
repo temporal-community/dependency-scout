@@ -1,0 +1,60 @@
+name: Publish to PyPI
+
+# Publishes to PyPI when a version tag is pushed, e.g.:
+#   git tag v0.2.0 && git push origin v0.2.0
+#
+# Auth is PyPI Trusted Publishing (OIDC) — no API token/secret. One-time setup
+# on pypi.org → the dependency-scout project → Publishing → add a GitHub
+# publisher with:
+#   owner/repo:        temporal-community/dependency-scout
+#   workflow filename: publish.yml
+#   environment:       pypi
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+
+      - name: Verify tag matches package version
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          pkg="$(grep -m1 '^version = ' pyproject.toml | sed -E 's/.*"([^"]+)".*/\1/')"
+          if [ "$tag" != "$pkg" ]; then
+            echo "::error::Tag '$GITHUB_REF_NAME' (version $tag) does not match pyproject.toml version $pkg. Bump the version, commit, then re-tag."
+            exit 1
+          fi
+          echo "Tag matches pyproject version $pkg"
+
+      - name: Build sdist + wheel
+        run: uv build
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    # Trusted Publishing must name this environment in the PyPI publisher config.
+    environment: pypi
+    permissions:
+      id-token: write   # mint the OIDC token PyPI verifies; no password needed
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Publish
+        uses: pypa/gh-action-pypi-publish@release/v1
