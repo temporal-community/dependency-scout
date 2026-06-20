@@ -214,6 +214,39 @@ async def test_nvd_cache_hit():
     assert result1 == result2
 
 
+@respx.mock
+async def test_nvd_timeout_degrades_to_empty():
+    """NVD is supplementary and "as-available" — a timeout must not fail triage."""
+    respx.get(NVD_URL).mock(side_effect=httpx.ReadTimeout("nvd slow"))
+    env = ActivityEnvironment()
+    result = await env.run(nvd_check, "pip", "slowpkg", "1.0.0", "1.0.1")
+    assert result.nvd_vulnerabilities == []
+
+
+@respx.mock
+async def test_nvd_http_error_degrades_to_empty():
+    """A 5xx/4xx (e.g. rate-limit) from NVD degrades to no-CVEs rather than raising."""
+    respx.get(NVD_URL).mock(return_value=httpx.Response(503))
+    env = ActivityEnvironment()
+    result = await env.run(nvd_check, "pip", "errpkg", "1.0.0", "1.0.1")
+    assert result.nvd_vulnerabilities == []
+
+
+@respx.mock
+async def test_nvd_failure_is_not_cached():
+    """A degraded (failed) lookup is not cached, so a later call retries and can succeed."""
+    route = respx.get(NVD_URL)
+    route.side_effect = [
+        httpx.ReadTimeout("nvd slow"),
+        httpx.Response(200, json=_nvd_response("CVE-2026-9999")),
+    ]
+    env = ActivityEnvironment()
+    first = await env.run(nvd_check, "pip", "retrypkg", "1.0.0", "1.0.1")
+    second = await env.run(nvd_check, "pip", "retrypkg", "1.0.0", "1.0.1")
+    assert first.nvd_vulnerabilities == []
+    assert second.nvd_vulnerabilities == ["CVE-2026-9999"]
+
+
 # ---------------------------------------------------------------------------
 # release_age
 # ---------------------------------------------------------------------------

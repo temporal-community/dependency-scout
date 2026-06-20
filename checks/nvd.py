@@ -13,6 +13,7 @@ vendor is wildcarded and names don't always line up), so a non-match yields an e
 
 import os
 
+import httpx
 from temporalio import activity
 
 from models import NVDChecks
@@ -30,9 +31,25 @@ async def check(ecosystem: str, package: str, old_version: str, new_version: str
 
     Caches per (package, new_version) — the NVD query depends only on those, not on the
     ecosystem. An ``NVD_API_KEY`` environment variable is optional but raises NVD's rate
-    limit from 5 to 50 requests / 30s."""
+    limit from 5 to 50 requests / 30s.
+
+    NVD is supplementary to OSV (activities.osv.check), and NVD's API is "as-is, as-
+    available" (per its Terms of Use) — frequently slow or rate-limited, especially without
+    a key on shared CI IPs. So any network/HTTP/parse error degrades to "no CVEs found"
+    rather than failing the whole triage — a miss, never a false positive. The failure is
+    not cached, so a later call retries."""
     key = (package, new_version)
-    return await _cache.get_or_compute(key, lambda: _do_check(package, new_version))
+    try:
+        return await _cache.get_or_compute(key, lambda: _do_check(package, new_version))
+    except (httpx.HTTPError, ValueError) as exc:
+        activity.logger.warning(
+            "nvd: lookup failed for %s@%s (%s) — skipping NVD signal. "
+            "Set NVD_API_KEY to raise NVD's rate limit (5→50 req/30s).",
+            package,
+            new_version,
+            type(exc).__name__,
+        )
+        return NVDChecks(nvd_vulnerabilities=[])
 
 
 async def _do_check(package: str, new_version: str) -> NVDChecks:

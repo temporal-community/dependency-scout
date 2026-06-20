@@ -306,6 +306,9 @@ def format_comment(pr: PRContext, verdict: Verdict, signals: PackageChecks | Non
         "---",
         "_[Dependency Scout](https://github.com/temporal-community/dependency-scout) — "
         "automated supply-chain vetting for Dependabot/Renovate PRs_",
+        # NVD API Terms of Use — required attribution. Must not imply NVD endorsement,
+        # and applies to the raw CVE data only, not Scout's derived verdict.
+        "_This product uses the NVD API but is not endorsed or certified by the NVD._",
         "",
         "<!-- dependency-scout-data "
         + json.dumps(

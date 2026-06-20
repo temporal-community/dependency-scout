@@ -7,7 +7,7 @@ Maintainers aren’t careless — they’re exhausted. And modern supply-chain a
 **This tool gives every dependency PR a data-backed second opinion before it merges.**
 
 **What it checks:**
-- **Known vulnerabilities** — [OSV](https://osv.dev) database (includes [OpenSSF malicious-packages](https://github.com/ossf/malicious-packages))
+- **Known vulnerabilities** — [OSV](https://osv.dev) database (includes [OpenSSF malicious-packages](https://github.com/ossf/malicious-packages)) and the [NIST NVD](https://nvd.nist.gov) (catches freshly-disclosed CVEs before OSV ingests them)
 - **Supply chain score** — [Socket.dev](https://socket.dev) for obfuscated code, install-time scripts, typosquatting
 - **What code actually changed** — diffs the package archives; flags new binaries, new install hooks, network calls, obfuscated code, git-URL dependencies
 - **Release freshness** — flags releases under 24h ("very fresh") or 7 days ("recent"); won't auto-merge anything under 7 days by default
@@ -174,6 +174,7 @@ The Scout works with zero configuration — rule-based classifier, no PR comment
 | `GITLAB_TOKEN` | Posts real MR comments on GitLab |
 | `ENABLE_PR_ACTIONS=true` | Can automatically merge GREEN PRs and/or close RED ones |
 | `SOCKET_API_KEY` | Adds Socket.dev supply-chain score check ([create token](https://socket.dev/dashboard/settings/api-tokens) — scope: `packages:list`) |
+| `NVD_API_KEY` | Raises the NIST NVD rate limit from 5 to 50 requests / 30s ([request a key](https://nvd.nist.gov/developers/request-an-api-key)). Strongly recommended on shared CI (GitHub-hosted runners share IPs, so the keyless public limit is exhausted fast). The key is per-requestor — keep it in a secret, never commit or share it. |
 
 Copy `.env.example` to `.env` and fill in what you have, or run `uv run python setup.py` to be walked through it interactively.
 
@@ -223,3 +224,5 @@ pip/uv, npm, RubyGems, Cargo, Composer, Maven/Gradle, NuGet, Go modules, GitHub 
 ---
 
 *A [Temporal Community](https://temporal.io/community) project. Credit to [Daniel Hensby](https://github.com/dhensby) for inspiration.*
+
+*This product uses data from the [OSV](https://osv.dev) and [deps.dev](https://deps.dev) APIs, [Socket.dev](https://socket.dev), and [OpenSSF Scorecard](https://securityscorecards.dev). This product uses the NVD API but is not endorsed or certified by the NVD.*
