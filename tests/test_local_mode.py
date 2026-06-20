@@ -56,7 +56,18 @@ async def test_dispatch_remote_passes_no_client():
 
 async def test_dispatch_local_boots_embedded_env_and_worker(monkeypatch):
     """With --local, an embedded env + worker wrap the command, which runs against env.client."""
-    sentinel_client = object()
+    # setenv so monkeypatch restores these even though _run_local assigns them directly.
+    monkeypatch.setenv("TEMPORAL_ADDRESS", "unused")
+    monkeypatch.setenv("TEMPORAL_NAMESPACE", "unused")
+
+    class _FakeServiceClient:
+        config = type("cfg", (), {"target_host": "127.0.0.1:54321"})()
+
+    class _FakeClient:
+        namespace = "default"
+        service_client = _FakeServiceClient()
+
+    sentinel_client = _FakeClient()
     events = []
 
     class FakeEnv:
@@ -103,6 +114,9 @@ async def test_dispatch_local_boots_embedded_env_and_worker(monkeypatch):
     # workflow-start uses (both read TEMPORAL_TASK_QUEUE), so they always match.
     expected_tq = os.environ.get("TEMPORAL_TASK_QUEUE", "default")
     assert ("build_worker", sentinel_client, expected_tq) in events
+    # Internal connect() calls (e.g. await_triage_result) are pointed at the embedded
+    # server's address, not the default localhost:7233.
+    assert os.environ["TEMPORAL_ADDRESS"] == "127.0.0.1:54321"
     # Command ran against the embedded client...
     assert ("factory", sentinel_client) in events
     # ...inside both the worker and env context managers, which tear down after.

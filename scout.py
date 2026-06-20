@@ -544,6 +544,16 @@ async def _run_local(coro_factory: Callable[[Client], Awaitable[Any]]) -> Any:
     task_queue = os.environ.get("TEMPORAL_TASK_QUEUE", "default")
     print(_dim("  Starting embedded Temporal server + worker (--local) …"))
     async with await WorkflowEnvironment.start_local(data_converter=pydantic_data_converter) as env:
+        # Point TEMPORAL_ADDRESS at the embedded server (it binds a random port) so that
+        # activities which open their own client via helpers.temporal_client.connect()
+        # — e.g. activities.platform.await_triage_result, used when a sibling PR already
+        # started the shared triage — reach this server instead of the default
+        # localhost:7233. Also drop any Temporal Cloud TLS config, which would otherwise
+        # be applied against the plaintext embedded server.
+        os.environ["TEMPORAL_ADDRESS"] = env.client.service_client.config.target_host
+        os.environ["TEMPORAL_NAMESPACE"] = env.client.namespace
+        os.environ.pop("TEMPORAL_TLS_CERT", None)
+        os.environ.pop("TEMPORAL_TLS_KEY", None)
         async with worker_mod.build_worker(env.client, task_queue):
             return await coro_factory(env.client)
 
