@@ -118,6 +118,21 @@ def _discover_activity_check_plugins() -> list:
 ACTIVITIES = _discover_activities() + _discover_activity_check_plugins()
 
 
+def build_worker(client: Client, task_queue: str) -> Worker:
+    """Construct a Worker registering all discovered activities and both workflows.
+
+    Shared by the standalone worker (``main``) and the CLI's embedded ``--local``
+    mode (``scout.py``) so both register an identical activity/workflow set — adding
+    a built-in activity file is picked up by both with no further wiring.
+    """
+    return Worker(
+        client,
+        task_queue=task_queue,
+        workflows=[PackageTriageWorkflow, PRActionWorkflow],
+        activities=ACTIVITIES,
+    )
+
+
 async def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
     _check_config()
@@ -138,12 +153,7 @@ async def main() -> None:
     client = await Client.connect(
         address, namespace=namespace, tls=tls, data_converter=pydantic_data_converter
     )
-    worker = Worker(
-        client,
-        task_queue=task_queue,
-        workflows=[PackageTriageWorkflow, PRActionWorkflow],
-        activities=ACTIVITIES,
-    )
+    worker = build_worker(client, task_queue)
     logger.info(
         "Worker started — task_queue=%s temporal=%s activities=%d",
         task_queue,
@@ -153,5 +163,10 @@ async def main() -> None:
     await worker.run()
 
 
-if __name__ == "__main__":
+def run() -> None:
+    """Console-script entry point (``dependency-scout-worker``)."""
     asyncio.run(main())
+
+
+if __name__ == "__main__":
+    run()

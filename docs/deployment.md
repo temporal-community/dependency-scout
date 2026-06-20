@@ -8,6 +8,58 @@ For a description of the three-process architecture (Temporal server, worker, we
 
 ---
 
+## Zero-infra: embedded `--local` mode (CI)
+
+The fastest way to run the Scout from CI/CD is `--local`, which boots an
+ephemeral in-process Temporal server **and** worker for a single command — no
+`temporal server start-dev`, no separate worker process, no hosting. The dev
+server binary is downloaded and cached by the Temporal SDK on first use; state
+is in-memory and torn down on exit (so there's no durability or Temporal UI —
+fine for an ephemeral CI job, not for a long-running deployment).
+
+Because the worker is bundled, a published install is fully self-contained:
+
+```bash
+uvx dependency-scout triage --repo owner/repo --local
+uvx dependency-scout check requests 2.32.0 --local
+```
+
+A scheduled GitHub Actions sweep of all open Dependabot/Renovate PRs — runs with
+a normal read-write `GITHUB_TOKEN` (unlike Dependabot-triggered `pull_request`
+runs, which get a read-only token):
+
+```yaml
+# .github/workflows/dependency-scout.yml
+name: Dependency Scout
+on:
+  schedule:
+    - cron: "0 */6 * * *"     # every 6 hours
+  workflow_dispatch: {}
+
+permissions:
+  contents: write              # only if you enable auto-merge
+  pull-requests: write         # comment / label / close
+
+jobs:
+  triage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: astral-sh/setup-uv@v5
+      - run: uvx dependency-scout triage --repo "${{ github.repository }}" --local
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}   # optional — smarter classification
+```
+
+Drop a `.github/dependency-scout.yml` in the target repo to control merge/close
+behavior (see [configuration.md](configuration.md)); start with `--dry-run` to
+preview verdicts before letting it act.
+
+For lower latency (act the moment a PR opens) or higher volume, run a persistent
+worker + webhook API instead — keep reading.
+
+---
+
 ## Temporal server
 
 ### Option A — Local dev server (start here)

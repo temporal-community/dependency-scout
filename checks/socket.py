@@ -1,4 +1,5 @@
 import asyncio
+import json
 import os
 
 from temporalio import activity
@@ -37,6 +38,28 @@ _MEDIUM_INCLUDE_TYPES = {
     "binScriptConfusion",
     "changedAuthor",
 }
+
+
+def _parse_components(body: str) -> list[dict]:
+    """Parse the Socket /v0/purl response body into a list of component objects.
+
+    The endpoint streams **NDJSON** — one component object per line — so
+    ``resp.json()`` raises ``JSONDecodeError: Extra data`` on any multi-component
+    (or multi-line) response. Parse line by line instead. Blank lines are
+    skipped; a line wrapping its results as ``{"packages": [...]}`` is unwrapped,
+    so a single non-streamed JSON document is tolerated too.
+    """
+    components: list[dict] = []
+    for line in body.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        obj = json.loads(line)
+        if isinstance(obj, dict) and "packages" in obj:
+            components.extend(obj["packages"])
+        elif isinstance(obj, dict):
+            components.append(obj)
+    return components
 
 
 @activity.defn(name="activities.socket.score")
@@ -88,7 +111,7 @@ async def _fetch_socket(api_key: str, ecosystem: str, package: str, version: str
 
     resp.raise_for_status()
 
-    packages = resp.json().get("packages", [])
+    packages = _parse_components(resp.text)
     if not packages:
         return SocketChecks(socket_score=None, socket_alerts=[])
 

@@ -1,3 +1,5 @@
+import json
+
 import httpx
 import pytest
 import respx
@@ -9,16 +11,21 @@ from checks.socket import score
 PURL_URL = "https://api.socket.dev/v0/purl"
 
 
-def _socket_response(depscore: float, alerts: list[dict]) -> dict:
+def _component(depscore: float, alerts: list[dict]) -> dict:
     return {
-        "packages": [
-            {
-                "purl": "pkg:pypi/requests@2.32.0",
-                "score": {"depscore": depscore},
-                "alerts": alerts,
-            }
-        ]
+        "purl": "pkg:pypi/requests@2.32.0",
+        "score": {"depscore": depscore},
+        "alerts": alerts,
     }
+
+
+def _socket_response(depscore: float, alerts: list[dict]) -> str:
+    """Real Socket /v0/purl response: NDJSON, one component object per line."""
+    return _ndjson(_component(depscore, alerts))
+
+
+def _ndjson(*components: dict) -> str:
+    return "\n".join(json.dumps(c) for c in components)
 
 
 async def test_no_api_key_returns_empty(monkeypatch):
@@ -35,7 +42,7 @@ async def test_score_and_alerts_parsed(monkeypatch):
     respx.post(PURL_URL).mock(
         return_value=httpx.Response(
             200,
-            json=_socket_response(
+            content=_socket_response(
                 depscore=0.72,
                 alerts=[
                     {
@@ -68,10 +75,38 @@ async def test_score_and_alerts_parsed(monkeypatch):
 
 
 @respx.mock
+async def test_ndjson_multiline_response_parsed(monkeypatch):
+    """Regression: /v0/purl streams NDJSON. A multi-line body must parse (the old
+    resp.json() raised JSONDecodeError 'Extra data' on the second line). The first
+    component is used for the score/alerts."""
+    monkeypatch.setenv("SOCKET_API_KEY", "test-key")
+    body = _ndjson(
+        _component(0.72, [{"severity": "high", "type": "installScripts", "message": "install"}]),
+        _component(0.91, []),  # a second line — what used to crash resp.json()
+    )
+    respx.post(PURL_URL).mock(return_value=httpx.Response(200, content=body))
+    env = ActivityEnvironment()
+    result = await env.run(score, "pip", "requests", "2.31.0", "2.32.0")
+    assert result.socket_score == 72
+    assert any("installScripts" in a for a in result.socket_alerts)
+
+
+@respx.mock
+async def test_empty_body_returns_empty(monkeypatch):
+    """An empty (no components) NDJSON body yields an empty result, not a crash."""
+    monkeypatch.setenv("SOCKET_API_KEY", "test-key")
+    respx.post(PURL_URL).mock(return_value=httpx.Response(200, content=""))
+    env = ActivityEnvironment()
+    result = await env.run(score, "pip", "requests", "2.31.0", "2.32.0")
+    assert result.socket_score is None
+    assert result.socket_alerts == []
+
+
+@respx.mock
 async def test_score_converted_to_0_100(monkeypatch):
     monkeypatch.setenv("SOCKET_API_KEY", "test-key")
     respx.post(PURL_URL).mock(
-        return_value=httpx.Response(200, json=_socket_response(depscore=0.856, alerts=[]))
+        return_value=httpx.Response(200, content=_socket_response(depscore=0.856, alerts=[]))
     )
     env = ActivityEnvironment()
     result = await env.run(score, "pip", "requests", "2.31.0", "2.32.0")
@@ -111,7 +146,7 @@ async def test_empty_packages_list_returns_empty(monkeypatch):
 async def test_purl_uses_correct_ecosystem(monkeypatch):
     monkeypatch.setenv("SOCKET_API_KEY", "test-key")
     route = respx.post(PURL_URL).mock(
-        return_value=httpx.Response(200, json=_socket_response(0.9, []))
+        return_value=httpx.Response(200, content=_socket_response(0.9, []))
     )
     env = ActivityEnvironment()
     await env.run(score, "npm", "express", "4.18.1", "4.18.2")
@@ -139,7 +174,7 @@ async def test_alert_types_captured(monkeypatch):
     respx.post(PURL_URL).mock(
         return_value=httpx.Response(
             200,
-            json=_socket_response(
+            content=_socket_response(
                 depscore=0.5,
                 alerts=[
                     {"severity": "critical", "type": "malware", "message": "Malicious code"},
@@ -163,7 +198,7 @@ async def test_medium_severity_high_signal_type_included(monkeypatch):
     respx.post(PURL_URL).mock(
         return_value=httpx.Response(
             200,
-            json=_socket_response(
+            content=_socket_response(
                 depscore=0.6,
                 alerts=[
                     {"severity": "medium", "type": "malware", "message": "Possible malware"},
@@ -186,7 +221,7 @@ async def test_rubygems_ecosystem_uses_gem_purl(monkeypatch):
     """rubygems ecosystem maps to 'gem' in the Socket purl."""
     monkeypatch.setenv("SOCKET_API_KEY", "test-key")
     route = respx.post(PURL_URL).mock(
-        return_value=httpx.Response(200, json=_socket_response(0.8, []))
+        return_value=httpx.Response(200, content=_socket_response(0.8, []))
     )
     env = ActivityEnvironment()
     await env.run(score, "rubygems", "rails", "7.0.0", "7.0.1")
@@ -201,7 +236,7 @@ async def test_cargo_ecosystem_uses_cargo_purl(monkeypatch):
     """cargo ecosystem maps to 'cargo' in the Socket purl."""
     monkeypatch.setenv("SOCKET_API_KEY", "test-key")
     route = respx.post(PURL_URL).mock(
-        return_value=httpx.Response(200, json=_socket_response(0.8, []))
+        return_value=httpx.Response(200, content=_socket_response(0.8, []))
     )
     env = ActivityEnvironment()
     await env.run(score, "cargo", "serde", "1.0.0", "1.0.1")
@@ -216,7 +251,7 @@ async def test_nuget_ecosystem_uses_nuget_purl(monkeypatch):
     """nuget ecosystem maps to 'nuget' in the Socket purl."""
     monkeypatch.setenv("SOCKET_API_KEY", "test-key")
     route = respx.post(PURL_URL).mock(
-        return_value=httpx.Response(200, json=_socket_response(0.8, []))
+        return_value=httpx.Response(200, content=_socket_response(0.8, []))
     )
     env = ActivityEnvironment()
     await env.run(score, "nuget", "Newtonsoft.Json", "13.0.0", "13.0.1")
@@ -229,7 +264,7 @@ async def test_nuget_ecosystem_uses_nuget_purl(monkeypatch):
 @respx.mock
 async def test_socket_cache_hit(monkeypatch):
     monkeypatch.setenv("SOCKET_API_KEY", "test-key")
-    respx.post(PURL_URL).mock(return_value=httpx.Response(200, json=_socket_response(0.8, [])))
+    respx.post(PURL_URL).mock(return_value=httpx.Response(200, content=_socket_response(0.8, [])))
     env = ActivityEnvironment()
     result1 = await env.run(score, "pip", "requests", "2.31.0", "2.32.0")
     result2 = await env.run(score, "pip", "requests", "2.31.0", "2.32.0")

@@ -23,9 +23,14 @@ Add --dry-run to any triage command to skip posting comments or taking actions.
 
 Exit codes (dependency-scout check): 0 = green, 1 = yellow, 2 = red (CI-friendly)
 
-Requires a running Temporal worker:
+By default, commands connect to an external Temporal server and worker:
     temporal server start-dev    # Terminal 1
     uv run python -m worker      # Terminal 2
+
+Add --local to any command to run a self-contained embedded Temporal server +
+worker for that single invocation — no external server or worker needed. Ideal
+for CI (e.g. `uvx dependency-scout triage --repo owner/repo --local`); state is
+in-memory and torn down on exit, so there's no durability or Temporal UI.
 """
 
 from __future__ import annotations
@@ -35,7 +40,9 @@ import asyncio
 import os
 import re
 import sys
+from collections.abc import Awaitable, Callable
 from datetime import datetime
+from typing import Any
 
 import httpx
 from dotenv import load_dotenv
@@ -74,7 +81,12 @@ _GITHUB_PR_RE = re.compile(r"github\.com/([^/]+/[^/]+)/pull/(\d+)")
 
 
 async def _check(
-    package: str, new_version: str, ecosystem: str, old_version: str, force: bool = False
+    package: str,
+    new_version: str,
+    ecosystem: str,
+    old_version: str,
+    force: bool = False,
+    client: Client | None = None,
 ) -> int:
     from_part = f"{_dim(old_version + ' → ')}" if old_version else ""
     print(f"\n  {_bold(package)}  {from_part}{new_version}  [{ecosystem}]")
@@ -87,7 +99,7 @@ async def _check(
     )
     print(f"  classifier  {clf_desc}\n")
 
-    client = await connect()
+    client = client or await connect()
     task_queue = os.environ.get("TEMPORAL_TASK_QUEUE", "default")
     date_key = datetime.now().strftime("%Y-%m-%d")
     workflow_id = f"triage-{ecosystem}-{package}-{new_version}-{date_key}"
@@ -228,7 +240,7 @@ def _env_summary(dry_run: bool, has_github: bool, clf: str | None) -> None:
 # ---------------------------------------------------------------------------
 
 
-async def _triage_single(args: argparse.Namespace) -> None:
+async def _triage_single(args: argparse.Namespace, client: Client | None = None) -> None:
     token = os.environ.get("GITHUB_TOKEN")
     has_github = bool(token)
 
@@ -288,7 +300,7 @@ async def _triage_single(args: argparse.Namespace) -> None:
         dry_run=args.dry_run,
     )
 
-    client = await connect()
+    client = client or await connect()
     workflow_id = f"pr-action-{repo.replace('/', '-')}-{pr_number}"
     handle = await client.start_workflow(
         PRActionWorkflow.run,
@@ -364,7 +376,7 @@ async def _cleanup_orphaned_triage_workflows(client: Client) -> None:
         print(_dim(f"  Cleaned up {terminated} orphaned workflow(s) from a previous run.\n"))
 
 
-async def _triage_batch(args: argparse.Namespace) -> None:
+async def _triage_batch(args: argparse.Namespace, client: Client | None = None) -> None:
     token = os.environ.get("GITHUB_TOKEN")
     has_github = bool(token)
 
@@ -420,7 +432,7 @@ async def _triage_batch(args: argparse.Namespace) -> None:
     _env_summary(args.dry_run, has_github, clf)
     print(_dim("\n" + "─" * 60 + "\n"))
 
-    client = await connect()
+    client = client or await connect()
     await _cleanup_orphaned_triage_workflows(client)
     tasks = [
         asyncio.create_task(_triage_one(client, args.repo, pr, parsed, dry_run=args.dry_run))
@@ -510,8 +522,51 @@ async def _triage_batch(args: argparse.Namespace) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Embedded (--local) mode
+# ---------------------------------------------------------------------------
+
+
+async def _run_local(coro_factory: Callable[[Client], Awaitable[Any]]) -> Any:
+    """Boot an ephemeral in-process Temporal server + worker, then run the command.
+
+    Used by ``--local`` so a single ``dependency-scout`` invocation is fully
+    self-contained — no separate ``temporal server start-dev`` and no
+    ``dependency-scout-worker`` process. The dev server binary is downloaded and
+    cached by the Temporal SDK on first use. State is in-memory and torn down on
+    exit, so there is no durability or Temporal UI — ideal for CI, not for a
+    long-running deployment.
+    """
+    from temporalio.contrib.pydantic import pydantic_data_converter
+    from temporalio.testing import WorkflowEnvironment
+
+    import worker as worker_mod
+
+    task_queue = os.environ.get("TEMPORAL_TASK_QUEUE", "default")
+    print(_dim("  Starting embedded Temporal server + worker (--local) …"))
+    async with await WorkflowEnvironment.start_local(data_converter=pydantic_data_converter) as env:
+        async with worker_mod.build_worker(env.client, task_queue):
+            return await coro_factory(env.client)
+
+
+async def _dispatch(local: bool, coro_factory: Callable[[Client | None], Awaitable[Any]]) -> Any:
+    """Run ``coro_factory`` against an embedded server (``local``) or an external one."""
+    if local:
+        return await _run_local(coro_factory)
+    return await coro_factory(None)
+
+
+# ---------------------------------------------------------------------------
 # Argument parser
 # ---------------------------------------------------------------------------
+
+
+def _add_local_arg(p: argparse.ArgumentParser) -> None:
+    p.add_argument(
+        "--local",
+        action="store_true",
+        help="run a self-contained embedded Temporal server + worker for this command "
+        "(no external 'temporal server start-dev' or worker needed)",
+    )
 
 
 def _add_triage_args(p: argparse.ArgumentParser) -> None:
@@ -537,6 +592,7 @@ def _add_triage_args(p: argparse.ArgumentParser) -> None:
         dest="installation_id",
         help="GitHub App installation ID",
     )
+    _add_local_arg(p)
 
 
 def main() -> None:
@@ -577,6 +633,7 @@ def main() -> None:
         action="store_true",
         help="Ignore cached result and run a fresh triage",
     )
+    _add_local_arg(check_p)
 
     triage_p = sub.add_parser(
         "triage",
@@ -596,7 +653,17 @@ def main() -> None:
 
     if args.command == "check":
         exit_code = asyncio.run(
-            _check(args.package, args.version, args.ecosystem, args.old_version, args.force)
+            _dispatch(
+                args.local,
+                lambda client: _check(
+                    args.package,
+                    args.version,
+                    args.ecosystem,
+                    args.old_version,
+                    args.force,
+                    client=client,
+                ),
+            )
         )
         sys.exit(exit_code)
 
@@ -609,9 +676,9 @@ def main() -> None:
         is_batch = bool(args.repo and not is_manual)
 
         if is_url or is_manual:
-            asyncio.run(_triage_single(args))
+            asyncio.run(_dispatch(args.local, lambda client: _triage_single(args, client=client)))
         elif is_batch:
-            asyncio.run(_triage_batch(args))
+            asyncio.run(_dispatch(args.local, lambda client: _triage_batch(args, client=client)))
         else:
             triage_p.print_help()
             sys.exit(1)
