@@ -180,7 +180,35 @@ Copy `.env.example` to `.env` and fill in what you have, or run `uv run python s
 
 ### What's next: continuous triage on every new PR
 
-Once you're happy with the results, you can set up the Scout as a persistent webhook listener — it triages every new Dependabot or Renovate PR automatically and can auto-merge GREEN ones or close RED ones. This requires a server that stays up when your laptop closes. See [docs/deployment.md](docs/deployment.md).
+**Zero-infra (recommended): GitHub Actions.** Triage every Dependabot/Renovate PR with no server to host — the `--local` flag boots an ephemeral in-process Temporal server + worker for the single run, so the whole thing is one `uvx` step. Drop a workflow in the repo you want to watch:
+
+```yaml
+# .github/workflows/dependency-scout.yml
+name: Dependency Scout
+on:
+  pull_request_target:
+    types: [opened, reopened, synchronize]
+  workflow_dispatch:
+permissions:
+  contents: write          # only if you enable auto-merge
+  pull-requests: write
+jobs:
+  triage:
+    runs-on: ubuntu-latest
+    if: github.actor == 'dependabot[bot]' || github.event_name == 'workflow_dispatch'
+    steps:
+      - uses: astral-sh/setup-uv@v7
+      - run: uvx 'dependency-scout>=0.2.2' triage "${{ github.event.pull_request.html_url }}" --local
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}   # optional — LLM verdicts
+          NVD_API_KEY: ${{ secrets.NVD_API_KEY }}               # optional — raises NVD rate limit
+          SOCKET_API_KEY: ${{ secrets.SOCKET_API_KEY }}         # optional — Socket.dev signal
+```
+
+Add `.github/dependency-scout.yml` (below) to let it merge/close/request review; until then it just comments. Add `--dry-run` to the step to watch verdicts before it acts. Full workflow (manual single-PR + sweep-all triggers) is in [docs/deployment.md](docs/deployment.md); a live example runs in [temporalio/ai-cookbook](https://github.com/temporalio/ai-cookbook/blob/main/.github/workflows/dependabot-triage.yml).
+
+**Higher volume / lower latency: webhook server.** For instant triage the moment a PR opens, run the Scout as a persistent webhook listener (auto-merge GREEN, close RED). This needs a server that stays up — see [docs/deployment.md](docs/deployment.md).
 
 ---
 
