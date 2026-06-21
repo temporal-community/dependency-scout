@@ -1,0 +1,119 @@
+"""uv/pip remediator — regenerate uv.lock to move a package to a safe version.
+
+`uv lock --upgrade-package <pkg>` re-resolves only that package (others stay pinned) and
+rewrites uv.lock. It performs resolution only — no install scripts run — so it's safe to run
+against a tree that may contain a compromised release. For a *transitive* package this is the
+whole fix: there's no manifest line to edit; the resolver pulls the safe version if a parent
+allows it. If a parent caps the version below the target, the lock won't reach it — we detect
+that and report the blocker rather than open a PR that doesn't actually fix anything.
+"""
+
+from __future__ import annotations
+
+import subprocess
+import tomllib
+from pathlib import Path
+
+from remediators import RemediationResult
+
+
+class UvRemediator:
+    lockfile_name = "uv.lock"
+
+    def affects(self, lockfile_text: str, package: str) -> bool:
+        # uv.lock is TOML with one [[package]] table per dependency: name = "starlette".
+        return f'name = "{package}"' in lockfile_text
+
+    def remediate(self, project_dir: Path, package: str, target_version: str) -> RemediationResult:
+        lock = project_dir / self.lockfile_name
+        old = _locked_version(lock.read_text(), package) if lock.exists() else ""
+
+        # --no-config deliberately bypasses the repo's uv config, in particular any
+        # `exclude-newer` freshness cooldown: a security remediation is exactly the case a
+        # cooldown should make an exception for (the fix is often newer than the bake window —
+        # e.g. a CVE patched 9 days ago under a 2-week cooldown). The reviewer still approves the
+        # resulting PR, so the cooldown-bypass is a human-gated decision. --upgrade-package keeps
+        # every other package pinned, so only the vulnerable one moves.
+        proc = subprocess.run(
+            ["uv", "lock", "--upgrade-package", package, "--no-config"],
+            cwd=project_dir,
+            capture_output=True,
+            text=True,
+        )
+        if proc.returncode != 0:
+            return self._result(
+                project_dir,
+                package,
+                old,
+                old,
+                target_version,
+                changed=False,
+                reached=False,
+                message=f"`uv lock` failed: {(proc.stderr or proc.stdout).strip()[:300]}",
+            )
+
+        new = _locked_version(lock.read_text(), package)
+        changed = new != old
+        reached = _ge(new, target_version)
+        if reached:
+            message = f"{package} {old} → {new} — clears the advisory (≥{target_version})."
+        elif changed:
+            message = (
+                f"{package} {old} → {new}, but that's still below the safe {target_version}: a "
+                "parent dependency caps it. The real fix is bumping that parent."
+            )
+        else:
+            message = (
+                f"{package} stayed at {old or 'unlocked'} — a parent dependency constrains it "
+                f"below {target_version}. Bump the parent to allow the fix."
+            )
+        return self._result(
+            project_dir, package, old, new, target_version, changed, reached, message
+        )
+
+    @staticmethod
+    def _result(
+        project_dir: Path,
+        package: str,
+        old: str,
+        new: str,
+        target: str,
+        changed: bool,
+        reached: bool,
+        message: str,
+    ) -> RemediationResult:
+        return RemediationResult(
+            project_dir=str(project_dir),
+            package=package,
+            old_version=old,
+            new_version=new,
+            target_version=target,
+            changed=changed,
+            reached_target=reached,
+            lockfile="uv.lock",
+            message=message,
+        )
+
+
+def _locked_version(lockfile_text: str, package: str) -> str:
+    """The version `package` is pinned to in a uv.lock's TOML, or '' if absent."""
+    try:
+        data = tomllib.loads(lockfile_text)
+    except tomllib.TOMLDecodeError:
+        return ""
+    for pkg in data.get("package", []):
+        if pkg.get("name") == package:
+            return str(pkg.get("version", ""))
+    return ""
+
+
+def _ge(version: str, target: str) -> bool:
+    """version >= target, tolerating non-PEP440 strings (fall back to string compare)."""
+    if not version:
+        return False
+    from packaging.version import InvalidVersion, Version
+
+    try:
+        return Version(version) >= Version(target)
+    except InvalidVersion:
+        return version >= target

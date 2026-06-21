@@ -571,6 +571,45 @@ async def _dispatch(local: bool, coro_factory: Callable[[Client | None], Awaitab
     return await coro_factory(None)
 
 
+async def _remediate(args: argparse.Namespace) -> int:
+    """Open a PR that regenerates the lockfile(s) to move a vulnerable package to a safe version.
+
+    Proactive counterpart to triage: fixes a vuln already sitting in a lockfile (esp. a transitive
+    one Dependabot won't bump) with no open PR. Needs no Temporal — it's a clone + lock + PR."""
+    from remediators.runner import remediate_and_open_pr
+
+    print(
+        f"\n  {_bold(args.package)} → {args.to}  in {args.repo}  "
+        f"[{args.ecosystem}]{_dim(' (dry-run)') if args.dry_run else ''}"
+    )
+    try:
+        run = await remediate_and_open_pr(
+            args.repo,
+            args.package,
+            args.to,
+            args.ecosystem,
+            project_dirs=args.project_dir or None,
+            dry_run=args.dry_run,
+        )
+    except Exception as e:
+        print(f"  {_r('error')}: {e}")
+        return 1
+
+    for r in run.results:
+        mark = "✅" if r.reached_target else ("⚠️ " if r.changed else "✗")
+        print(f"  {mark} {r.project_dir or '.'}: {r.message}")
+    if run.opened:
+        print(f"  {_g('opened')}: {run.pr_url}")
+        return 0
+    if run.pr_url:
+        print(f"  {_g('PR already open')}: {run.pr_url}")
+        return 0
+    if run.message:
+        print(f"  {_dim(run.message)}")
+    # 0 if anything was actually fixed, else 2 (nothing reached the safe version).
+    return 0 if any(r.reached_target for r in run.results) else 2
+
+
 # ---------------------------------------------------------------------------
 # Argument parser
 # ---------------------------------------------------------------------------
@@ -651,6 +690,36 @@ def main() -> None:
     )
     _add_local_arg(check_p)
 
+    remediate_p = sub.add_parser(
+        "remediate",
+        help="Open a PR that bumps a vulnerable (incl. transitive) dependency to a safe version.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "examples:\n"
+            "  dependency-scout remediate --repo owner/repo --package starlette --to 1.3.1\n"
+            "  dependency-scout remediate --repo owner/repo --package starlette --to 1.3.1 --dry-run"
+        ),
+    )
+    remediate_p.add_argument("--repo", required=True, metavar="OWNER/REPO", help="Target repo")
+    remediate_p.add_argument("--package", required=True, help="Package to bump (e.g. starlette)")
+    remediate_p.add_argument(
+        "--to", required=True, metavar="VERSION", help="Safe version to reach (e.g. 1.3.1)"
+    )
+    remediate_p.add_argument(
+        "--ecosystem", "-e", default="pip", help="Ecosystem slug (default: pip; uv/pip supported)"
+    )
+    remediate_p.add_argument(
+        "--project-dir",
+        action="append",
+        metavar="DIR",
+        help="Limit to this project dir (repeatable); omit to auto-discover affected projects",
+    )
+    remediate_p.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Regenerate the lock and report what would change, but don't push or open a PR",
+    )
+
     triage_p = sub.add_parser(
         "triage",
         help="Triage Dependabot/Renovate PRs.",
@@ -666,6 +735,9 @@ def main() -> None:
     _add_triage_args(triage_p)
 
     args = parser.parse_args()
+
+    if args.command == "remediate":
+        sys.exit(asyncio.run(_remediate(args)))
 
     if args.command == "check":
         exit_code = asyncio.run(
