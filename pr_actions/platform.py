@@ -64,6 +64,12 @@ async def request_review(pr: PRContext, reviewers: list[str]) -> None:
     await get_platform_client(pr).request_review(pr, reviewers)
 
 
+@activity.defn(name="activities.platform.get_codeowners")
+async def get_codeowners(pr: PRContext) -> list[str]:
+    """Return the repo's CODEOWNERS default owners (@-handles/teams) for escalation mentions."""
+    return await get_platform_client(pr).get_codeowners(pr)
+
+
 @activity.defn(name="activities.platform.check_pr_files")
 async def check_pr_files(pr: PRContext) -> PRFilesChecks:
     """Fetch the list of files changed in the PR from the GitHub or GitLab API and return basic metadata about them (e.g. whether any lock files were modified)."""

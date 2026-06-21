@@ -13,7 +13,12 @@ import respx
 from temporalio.exceptions import ApplicationError
 from temporalio.testing import ActivityEnvironment
 
-from platforms.github import GitHubPlatformClient, _is_ci_infra_file, _extract_action_usages
+from platforms.github import (
+    GitHubPlatformClient,
+    _is_ci_infra_file,
+    _extract_action_usages,
+    _parse_codeowners,
+)
 from models import PRContext, PRFilesChecks, ActionsUsageChecks, Verdict
 
 
@@ -508,6 +513,64 @@ async def test_close_pr_never_emits_dependabot_ignore_command(client, pr, with_p
 
     comment_body = comment_route.calls[0].request.content.decode()
     assert "@dependabot" not in comment_body
+
+
+# ---------------------------------------------------------------------------
+# CODEOWNERS
+# ---------------------------------------------------------------------------
+
+
+def test_parse_codeowners_prefers_star_owners():
+    text = "# comment\n*.py @py-team\n* @temporalio/devrel @alice\n/docs @docs-team\n"
+    assert _parse_codeowners(text) == ["@temporalio/devrel", "@alice"]
+
+
+def test_parse_codeowners_unions_when_no_star_rule():
+    text = "*.py @py-team @alice\n/docs @docs-team @alice  # alice again\n"
+    # de-duped, first-seen order, comments stripped
+    assert _parse_codeowners(text) == ["@py-team", "@alice", "@docs-team"]
+
+
+def test_parse_codeowners_empty():
+    assert _parse_codeowners("# only comments\n\n") == []
+
+
+def _contents_b64(text: str) -> dict:
+    import base64
+
+    return {"encoding": "base64", "content": base64.b64encode(text.encode()).decode()}
+
+
+@respx.mock
+async def test_get_codeowners_fetches_from_github_dir(client, pr, with_pat):
+    route = respx.get(f"{BASE_URL}/contents/.github/CODEOWNERS").mock(
+        return_value=httpx.Response(200, json=_contents_b64("* @temporalio/devrel\n"))
+    )
+    env = ActivityEnvironment()
+    owners = await env.run(client.get_codeowners, pr)
+    assert owners == ["@temporalio/devrel"]
+    assert route.called
+
+
+@respx.mock
+async def test_get_codeowners_falls_back_to_root_then_docs(client, pr, with_pat):
+    respx.get(f"{BASE_URL}/contents/.github/CODEOWNERS").mock(return_value=httpx.Response(404))
+    respx.get(f"{BASE_URL}/contents/CODEOWNERS").mock(return_value=httpx.Response(404))
+    respx.get(f"{BASE_URL}/contents/docs/CODEOWNERS").mock(
+        return_value=httpx.Response(200, json=_contents_b64("* @docs-owner\n"))
+    )
+    env = ActivityEnvironment()
+    owners = await env.run(client.get_codeowners, pr)
+    assert owners == ["@docs-owner"]
+
+
+@respx.mock
+async def test_get_codeowners_returns_empty_when_absent(client, pr, with_pat):
+    for path in (".github/CODEOWNERS", "CODEOWNERS", "docs/CODEOWNERS"):
+        respx.get(f"{BASE_URL}/contents/{path}").mock(return_value=httpx.Response(404))
+    env = ActivityEnvironment()
+    owners = await env.run(client.get_codeowners, pr)
+    assert owners == []
 
 
 @respx.mock

@@ -87,6 +87,28 @@ def _is_ci_infra_file(path: str) -> bool:
     return any(name_lower.endswith(s) for s in _CI_INFRA_SCRIPT_SUFFIXES)
 
 
+def _parse_codeowners(text: str) -> list[str]:
+    """Extract owner handles from a CODEOWNERS file. Returns the owners of the catch-all `*`
+    rule if one exists (the repo default), otherwise the de-duped union of every rule's owners,
+    preserving first-seen order. Owners are kept verbatim (`@user`, `@org/team`, or an email)."""
+    star_owners: list[str] = []
+    all_owners: list[str] = []
+    seen: set[str] = set()
+    for raw in text.splitlines():
+        line = raw.split("#", 1)[0].strip()
+        if not line:
+            continue
+        parts = line.split()
+        pattern, owners = parts[0], parts[1:]
+        for owner in owners:
+            if owner not in seen:
+                seen.add(owner)
+                all_owners.append(owner)
+        if pattern == "*":
+            star_owners = owners
+    return star_owners or all_owners
+
+
 def _extract_action_usages(content: str, action_name: str, filename: str) -> list[str]:
     """Parse workflow YAML and return one usage description per step that references action_name."""
     import yaml  # noqa: PLC0415
@@ -352,6 +374,35 @@ class GitHubPlatformClient:
             )
         close_resp.raise_for_status()
         activity.logger.info(f"Closed {pr.repo}#{pr.pr_number}: {reason}")
+
+    async def get_codeowners(self, pr: PRContext) -> list[str]:
+        """Return the default owners (@users / @org/teams) declared in the repo's CODEOWNERS,
+        for @-mention escalation. GitHub resolves CODEOWNERS from .github/, repo root, then
+        docs/ (first found wins); we mirror that order. Returns the owners of the catch-all
+        `*` rule if present, else the de-duped union of all rules. Empty on any error / no file
+        so callers can fall back to configured reviewers."""
+        import base64
+
+        headers = await self._get_headers()
+        client = get_client()
+        for path in (".github/CODEOWNERS", "CODEOWNERS", "docs/CODEOWNERS"):
+            try:
+                resp = await client.get(
+                    f"{self._repo_url(pr)}/contents/{path}", headers=headers, timeout=10.0
+                )
+            except Exception:
+                continue
+            if resp.status_code != 200:
+                continue
+            data = resp.json()
+            if data.get("encoding") != "base64" or not data.get("content"):
+                continue
+            try:
+                text = base64.b64decode(data["content"]).decode("utf-8", errors="replace")
+            except Exception:
+                continue
+            return _parse_codeowners(text)
+        return []
 
     async def request_review(self, pr: PRContext, reviewers: list[str]) -> None:
         if self._dry_run():

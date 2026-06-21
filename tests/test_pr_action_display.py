@@ -47,3 +47,30 @@ def test_observe_only_keeps_risk_color(base_signals):
     out = _displayed_verdict(_v("green", confidence=0.5), base_signals, RepoConfig())
     assert _disposition(_v("green", confidence=0.5), base_signals, RepoConfig()) == "comment"
     assert out.classification == "green"  # no action → no remap
+
+
+# ---------------------------------------------------------------------------
+# Outcome labels (helpers/display.py) — the human-facing one-liners.
+# ---------------------------------------------------------------------------
+
+
+def test_outcome_label_security_escalation():
+    from helpers.display import _outcome_label
+
+    # live escalation outcome names the recommended fix version
+    label = _outcome_label("escalated-security-1.3.1", None)
+    assert "security escalation" in label
+    assert "1.3.1" in label
+
+
+def test_outcome_label_dry_run_escalation():
+    from helpers.display import _outcome_label
+
+    label = _outcome_label("dry-run-red-escalate-security", None)
+    assert "escalate to security" in label
+
+
+def test_verdict_from_result_maps_escalation_to_red():
+    from scout import _verdict_from_result
+
+    assert _verdict_from_result("escalated-security-1.3.1||https://x||hold") == "red"

@@ -213,7 +213,7 @@ def _verdict_from_result(result: str) -> str:
     status = result.split("||")[0]
     if "green" in status or status in ("auto-merged", "human-approved-merged"):
         return "green"
-    if "red" in status:
+    if "red" in status or status.startswith("escalated-security"):
         return "red"
     return "yellow"
 

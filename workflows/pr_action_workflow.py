@@ -128,6 +128,9 @@ class PRActionWorkflow:
         (color === action) so the CLI colors the verdict to match what would happen."""
         disp = _disposition(verdict, signals, config)
         eff = _displayed_verdict(verdict, signals, config)
+        if disp == "block" and signals.osv.osv_recommended_fix:
+            # Mirror the live security-escalation branch (vulnerable target, safe fix exists).
+            return f"dry-run-{eff.classification}-escalate-security"
         return f"dry-run-{eff.classification}-{disp}"
 
     @workflow.signal
@@ -310,6 +313,36 @@ class PRActionWorkflow:
                     f"LLM set merge_recommendation='merge' for {verdict.classification.upper()} "
                     f"but that classification is in block_classifications — repo policy wins."
                 )
+            # Security-escalation case: the bump target is itself vulnerable but a safe release
+            # exists above it (osv_recommended_fix is non-empty). Rather than a bare "suspicious"
+            # close, label it `security`, @-mention CODEOWNERS to expedite, and close — which also
+            # unblocks Dependabot's cooldown-exempt security-update lane to re-open at the fixed
+            # version. (Malicious / no-fix REDs have an empty recommended fix and take the
+            # generic block path below.)
+            fix = signals.osv.osv_recommended_fix
+            if fix:
+                owners: list[str] = await workflow.execute_activity(
+                    "activities.platform.get_codeowners", pr, result_type=list, **opts
+                )
+                if not owners:
+                    owners = config.reviewers
+                await workflow.execute_activity(
+                    "activities.platform.label", args=[pr, "security"], **opts
+                )
+                mention = ("\n\ncc " + " ".join(owners)) if owners else ""
+                reason = (
+                    f"Triage agent classified this as **{verdict.classification.upper()}** — the "
+                    f"bump target `{pr.new_version}` is itself vulnerable. Recommend upgrading to "
+                    f"**{fix}** (the lowest release that clears all known advisories).\n\n"
+                    f"Reason: {', '.join(verdict.flags) or verdict.reasoning[:200]}\n\n"
+                    f"Closing so Dependabot's security-update channel can re-open this at `{fix}` "
+                    f"— security updates are exempt from the version-update cooldown. Please "
+                    f"expedite the upgrade if it doesn't reappear.{mention}"
+                )
+                await workflow.execute_activity(
+                    "activities.platform.close_pr", args=[pr, reason], **opts
+                )
+                return f"escalated-security-{fix}{url_suffix}{mr_suffix}"
             await workflow.execute_activity(
                 "activities.platform.label", args=[pr, "supply-chain-suspicious"], **opts
             )

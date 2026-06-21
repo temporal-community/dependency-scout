@@ -47,10 +47,29 @@ async def _do_check(ecosystem: str, package: str, new_version: str) -> OSVChecks
                     if event.get("fixed"):
                         fixed_versions.append(event["fixed"])
 
+    sorted_fixed = _sorted_versions(set(fixed_versions))
     return OSVChecks(
         osv_vulnerabilities=vuln_ids,
-        osv_fixed_versions=_sorted_versions(set(fixed_versions)),
+        osv_fixed_versions=sorted_fixed,
+        osv_recommended_fix=_recommended_fix(sorted_fixed, new_version),
     )
+
+
+def _recommended_fix(sorted_fixed: list[str], new_version: str) -> str:
+    """The highest fixed release (clears all advisories) if it's strictly newer than the
+    proposed version, else "". Tolerates non-PEP440 strings the same way _sorted_versions does."""
+    from packaging.version import InvalidVersion, Version
+
+    if not sorted_fixed:
+        return ""
+    highest = sorted_fixed[-1]
+    try:
+        if Version(highest) > Version(new_version):
+            return highest
+    except InvalidVersion:
+        if highest > new_version:
+            return highest
+    return ""
 
 
 def _sorted_versions(versions: set[str]) -> list[str]:

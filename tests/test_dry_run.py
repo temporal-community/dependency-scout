@@ -14,7 +14,7 @@ from temporalio.contrib.pydantic import pydantic_data_converter
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Worker
 
-from models import PRContext, RepoConfig
+from models import OSVChecks, PRContext, RepoConfig
 from workflows.package_triage_workflow import PackageTriageWorkflow
 from workflows.pr_action_workflow import PRActionWorkflow
 from tests.generate_fixtures import (
@@ -26,11 +26,13 @@ from tests.generate_fixtures import (
     _depsdev,
     _diff,
     _maintainer,
+    _merge,
     _osv,
     _pypi,
     _release_age,
     _release_notes,
     _repo_config,
+    _review,
     _scorecard,
     _security_advisory,
     _socket,
@@ -154,3 +156,91 @@ async def test_yellow_non_blocking_requests_review_and_returns():
     # Must not have merged or closed — review was requested, nothing acted on.
     assert "activities.platform.merge_pr" not in called
     assert "activities.platform.close_pr" not in called
+
+
+async def test_red_with_available_fix_escalates_to_security():
+    """A RED whose bump target is itself vulnerable but a safe release exists (osv_recommended_fix)
+    is escalated: labelled 'security', CODEOWNERS @-mentioned in the close comment, and closed —
+    not the bare 'suspicious' close."""
+    captured: dict = {}
+
+    @activity.defn(name="activities.platform.comment")
+    async def comment(*_):
+        return ""
+
+    @activity.defn(name="activities.platform.label")
+    async def label(_pr, name):
+        captured.setdefault("labels", []).append(name)
+
+    @activity.defn(name="activities.platform.close_pr")
+    async def close_pr(_pr, reason):
+        captured["close_reason"] = reason
+
+    @activity.defn(name="activities.platform.get_codeowners")
+    async def get_codeowners(_pr):
+        return ["@temporalio/devrel"]
+
+    @activity.defn(name="activities.osv.check")
+    async def osv(*_):
+        return OSVChecks(
+            osv_vulnerabilities=["CVE-2026-1", "CVE-2026-2"],
+            osv_fixed_versions=["1.1.0", "1.3.1"],
+            osv_recommended_fix="1.3.1",
+        )
+
+    acts = [
+        _pypi(),
+        _socket(),
+        osv,
+        _diff(),
+        _maintainer(),
+        _release_age(),
+        _attestation(),
+        _release_notes(),
+        _version_lineage(),
+        _depsdev(),
+        _scorecard(),
+        _security_advisory(),
+        _custom_checks(),
+        _classifier("red"),
+        _repo_config(RepoConfig(block_classifications=["red"])),
+        _check_pr_files(),
+        _check_actions_usage(),
+        comment,
+        label,
+        close_pr,
+        get_codeowners,
+        _merge(),
+        _review(),
+    ]
+    pr = PRContext(
+        repo="example/repo",
+        pr_number=7,
+        pr_author="dependabot[bot]",
+        ecosystem="pip",
+        package_name="starlette",
+        old_version="0.50.0",
+        new_version="1.0.1",
+    )
+    async with await WorkflowEnvironment.start_time_skipping(
+        data_converter=pydantic_data_converter
+    ) as env:
+        async with Worker(
+            env.client,
+            task_queue="escalation-test",
+            workflows=[PRActionWorkflow, PackageTriageWorkflow],
+            activities=acts,
+        ):
+            result = await env.client.execute_workflow(
+                PRActionWorkflow.run,
+                pr,
+                id=f"pr-action-escalation-{uuid.uuid4()}",
+                task_queue="escalation-test",
+            )
+
+    assert result.startswith("escalated-security-1.3.1"), result
+    assert captured.get("labels") == ["security"]
+    reason = captured["close_reason"]
+    assert "1.3.1" in reason  # names the safe upgrade target
+    assert "@temporalio/devrel" in reason  # CODEOWNERS @-mentioned
+    assert "security-update" in reason  # explains the cooldown-exempt re-open

@@ -190,6 +190,22 @@ async def test_osv_extracts_fixed_versions():
     result = await env.run(osv_check, "pip", "starlette", "0.50.0", "1.0.1")
     assert result.osv_fixed_versions == ["1.1.0", "1.3.1"]  # sorted low→high
     assert result.osv_fixed_versions[-1] == "1.3.1"  # highest clears all advisories
+    # The proposed bump target (1.0.1) is itself vulnerable; recommend the highest fix above it.
+    assert result.osv_recommended_fix == "1.3.1"
+
+
+def test_recommended_fix_logic():
+    from checks.osv import _recommended_fix
+
+    # Highest fix above the proposed version → recommend it.
+    assert _recommended_fix(["1.1.0", "1.3.1"], "1.0.1") == "1.3.1"
+    # No fix higher than the target (target already at/above all fixes) → no recommendation.
+    assert _recommended_fix(["1.1.0", "1.3.1"], "1.3.1") == ""
+    assert _recommended_fix(["1.1.0"], "2.0.0") == ""
+    # No fixes at all.
+    assert _recommended_fix([], "1.0.1") == ""
+    # Non-PEP440 strings fall back to text comparison without raising.
+    assert _recommended_fix(["v2", "v3"], "v1") == "v3"
 
 
 # ---------------------------------------------------------------------------

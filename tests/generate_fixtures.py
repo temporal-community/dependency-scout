@@ -191,6 +191,14 @@ def _close_pr():
     return close_pr
 
 
+def _codeowners(owners: list[str] | None = None):
+    @activity.defn(name="activities.platform.get_codeowners")
+    async def get_codeowners(*_):
+        return owners or []
+
+    return get_codeowners
+
+
 def _check_pr_files(unexpected: list[str] | None = None):
     @activity.defn(name="activities.platform.check_pr_files")
     async def check_pr_files(*_):
@@ -322,6 +330,7 @@ async def _run_scenario(
         _review(),
         _label(),
         _close_pr(),
+        _codeowners(),
         _check_pr_files(),
         _check_actions_usage(),
     ]

@@ -56,6 +56,8 @@ def _outcome_label(result_str: str, merge_rec: str | None) -> str:
     if result_str.startswith("dry-run-"):
         if result_str.endswith("-auto-merge"):
             return f"  {_DIM}🔍 would auto-merge{_RST}"
+        if result_str.endswith("-escalate-security"):
+            return f"  {_DIM}🔍 would escalate to security review{_RST}"
         if result_str.endswith("-block"):
             return f"  {_DIM}🔍 would close — suspicious{_RST}"
         if result_str.endswith("-review"):
@@ -67,6 +69,9 @@ def _outcome_label(result_str: str, merge_rec: str | None) -> str:
         return f"  {_G}✅ merged (approved){_RST}"
     if result_str == "closed-stale-branch":
         return f"  {_DIM}↩ closed — stale branch{_RST}"
+    if result_str.startswith("escalated-security-"):
+        fix = result_str.removeprefix("escalated-security-")
+        return f"  {_R}🔐 closed — security escalation (→{fix}){_RST}"
     if result_str.startswith("blocked-"):
         return f"  {_R}🚫 closed — suspicious{_RST}"
     if result_str == "human-rejected":

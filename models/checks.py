@@ -27,6 +27,12 @@ class OSVChecks(BaseModel):
     # Versions that patch the matched advisories (from OSV "fixed" range events). Lets the
     # rule-based classifier recommend "upgrade to ≥X" without an LLM in the mix.
     osv_fixed_versions: list[str] = []
+    # The highest fixed release (clears all matched advisories) when it's strictly newer than
+    # the proposed new_version — i.e. a safe upgrade target that sits *above* the bump's target.
+    # Non-empty only when the bump target itself is still vulnerable but a fix exists higher up
+    # (the "redirect to ≥X" case); empty for malicious/no-fix REDs. Computed here (not in the
+    # workflow) to keep version parsing out of the deterministic workflow sandbox.
+    osv_recommended_fix: str = ""
 
 
 class NVDChecks(BaseModel):

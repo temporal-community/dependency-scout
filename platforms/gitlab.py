@@ -194,6 +194,10 @@ class GitLabPlatformClient:
         close_resp.raise_for_status()
         activity.logger.info(f"Closed {pr.repo}!{pr.pr_number}: {reason}")
 
+    async def get_codeowners(self, pr: PRContext) -> list[str]:
+        # GitLab CODEOWNERS parsing isn't implemented; callers fall back to configured reviewers.
+        return []
+
     async def request_review(self, pr: PRContext, reviewers: list[str]) -> None:
         if self._dry_run():
             activity.logger.info(
