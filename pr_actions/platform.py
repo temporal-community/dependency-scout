@@ -58,6 +58,13 @@ async def label(pr: PRContext, label_name: str) -> None:
     await get_platform_client(pr).label(pr, label_name)
 
 
+@activity.defn(name="activities.platform.apply_verdict_label")
+async def apply_verdict_label(pr: PRContext, classification: str) -> None:
+    """Apply the exclusive `scout:` verdict label (green/yellow/red → merge recommended / needs
+    review / blocked) so the queue shows Scout's verdict at a glance."""
+    await get_platform_client(pr).apply_verdict_label(pr, classification)
+
+
 @activity.defn(name="activities.platform.request_review")
 async def request_review(pr: PRContext, reviewers: list[str]) -> None:
     """Request a review from the specified users on the pull request via the GitHub or GitLab API."""

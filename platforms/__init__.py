@@ -21,6 +21,23 @@ from typing import Protocol
 
 from models import PackageChecks, PRContext, PRFilesChecks, ActionsUsageChecks, Verdict
 
+# Canonical `scout:` verdict-label vocabulary, shared by all platforms (color === action):
+# verdict classification → (label name, hex color, description). One exclusive label is applied
+# per triaged PR so a human scanning the queue sees Scout ran and what it concluded at a glance.
+SCOUT_VERDICT_LABELS: dict[str, tuple[str, str, str]] = {
+    "green": (
+        "scout: merge recommended",
+        "0e8a16",
+        "Dependency Scout vetted this — safe to merge",
+    ),
+    "yellow": (
+        "scout: needs review",
+        "fbca04",
+        "Dependency Scout flagged this — needs human review",
+    ),
+    "red": ("scout: blocked", "d93f0b", "Dependency Scout blocked this as unsafe"),
+}
+
 
 class PlatformClient(Protocol):
     async def comment(
@@ -29,6 +46,7 @@ class PlatformClient(Protocol):
     async def merge_pr(self, pr: PRContext) -> None: ...
     async def close_pr(self, pr: PRContext, reason: str) -> None: ...
     async def label(self, pr: PRContext, label_name: str) -> None: ...
+    async def apply_verdict_label(self, pr: PRContext, classification: str) -> None: ...
     async def request_review(self, pr: PRContext, reviewers: list[str]) -> None: ...
     async def get_codeowners(self, pr: PRContext) -> list[str]: ...
     async def check_pr_files(self, pr: PRContext) -> PRFilesChecks: ...

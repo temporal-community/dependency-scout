@@ -12,6 +12,7 @@ from temporalio import activity
 from temporalio.exceptions import ApplicationError
 
 from models import PRContext, PackageChecks, PRFilesChecks, ActionsUsageChecks, Verdict
+from platforms import SCOUT_VERDICT_LABELS
 from helpers.comment_formatter import format_comment
 from helpers.http import get_client
 
@@ -323,10 +324,13 @@ class GitHubPlatformClient:
             msg = "; ".join(e.get("message", "") for e in errors)
             low = msg.lower()
             if "not allowed" in low or "not enabled" in low:
+                # Repo policy forbids bot auto-merge (a legitimate config for stricter repos).
+                # Tagged so the workflow can degrade to "merge recommended" instead of failing.
                 raise ApplicationError(
-                    f"PR #{pr.pr_number}: auto-merge is not enabled for {pr.repo}. Turn on "
-                    "'Allow auto-merge' (Settings → General → Pull Requests) so green bumps can "
-                    f"be queued to merge when checks/reviews pass. (GitHub: {msg})",
+                    f"PR #{pr.pr_number}: auto-merge is not enabled for {pr.repo} — "
+                    "leaving it for a human to merge. (GitHub: "
+                    f"{msg})",
+                    type="auto_merge_unavailable",
                     non_retryable=True,
                 )
             if "clean" in low:
@@ -435,6 +439,45 @@ class GitHubPlatformClient:
         )
         resp.raise_for_status()
         activity.logger.info(f"Added label '{label_name}' to {pr.repo}#{pr.pr_number}")
+
+    async def apply_verdict_label(self, pr: PRContext, classification: str) -> None:
+        """Apply one exclusive `scout:` verdict label so a human scanning the queue sees that
+        Scout ran and what it concluded, before opening the comment. Creates the label (with its
+        color) if the repo doesn't have it yet, then removes any *other* scout verdict label
+        before adding this one — so a re-run that flips the verdict doesn't leave both."""
+        label_name, color, description = SCOUT_VERDICT_LABELS[classification]
+        if self._dry_run():
+            activity.logger.info(f"[dry-run] Would label {pr.repo}#{pr.pr_number} '{label_name}'")
+            return
+        from urllib.parse import quote
+
+        headers = await self._get_headers()
+        client = get_client()
+        # Ensure the label exists with our color (422 = already exists → fine).
+        create = await client.post(
+            f"{self._repo_url(pr)}/labels",
+            headers=headers,
+            json={"name": label_name, "color": color, "description": description},
+            timeout=15.0,
+        )
+        if create.status_code not in (201, 422):
+            create.raise_for_status()
+        # Drop the sibling verdict labels so only the current one remains.
+        for other_name, _, _ in SCOUT_VERDICT_LABELS.values():
+            if other_name != label_name:
+                await client.delete(
+                    f"{self._repo_url(pr)}/issues/{pr.pr_number}/labels/{quote(other_name)}",
+                    headers=headers,
+                    timeout=15.0,
+                )  # 404 if not present — harmless, no raise
+        resp = await client.post(
+            f"{self._repo_url(pr)}/issues/{pr.pr_number}/labels",
+            headers=headers,
+            json={"labels": [label_name]},
+            timeout=15.0,
+        )
+        resp.raise_for_status()
+        activity.logger.info(f"Labelled {pr.repo}#{pr.pr_number} '{label_name}'")
 
     async def fetch_actions_usage(self, pr: PRContext) -> ActionsUsageChecks:
         """Fetch .github/workflows/ from the target repo and extract usage of the bumped action.

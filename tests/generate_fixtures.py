@@ -183,6 +183,14 @@ def _label():
     return label
 
 
+def _apply_verdict_label():
+    @activity.defn(name="activities.platform.apply_verdict_label")
+    async def apply_verdict_label(*_):
+        pass
+
+    return apply_verdict_label
+
+
 def _close_pr():
     @activity.defn(name="activities.platform.close_pr")
     async def close_pr(*_):
@@ -329,6 +337,7 @@ async def _run_scenario(
         _merge(),
         _review(),
         _label(),
+        _apply_verdict_label(),
         _close_pr(),
         _codeowners(),
         _check_pr_files(),

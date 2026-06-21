@@ -21,6 +21,7 @@ with workflow.unsafe.imports_passed_through():
 _DISPOSITION_COLOR = {
     "block": "red",
     "auto-merge": "green",
+    "merge-recommended": "green",  # safe, but repo policy has a human do the merge
     "review": "yellow",
 }  # "comment" → keep risk
 
@@ -40,8 +41,11 @@ def _disposition(verdict: "Verdict", signals: "PackageChecks", config: "RepoConf
     recommendation_auto_merge = verdict.merge_recommendation == "merge" and bool(
         signals.advisory.fixed_vulnerabilities
     )
-    if config.auto_merge_enabled and (normal_auto_merge or recommendation_auto_merge):
-        return "auto-merge"
+    if normal_auto_merge or recommendation_auto_merge:
+        # Safe to merge. Auto-merge it only if the repo permits bot merges; otherwise it's a
+        # "merge recommended" — labelled GREEN for a human to merge (e.g. repos that require a
+        # human/CODEOWNER to merge to a protected branch).
+        return "auto-merge" if config.auto_merge_enabled else "merge-recommended"
     if config.reviewers:
         return "review"
     return "comment"
@@ -98,16 +102,18 @@ class PRActionWorkflow:
         self._human_decision: str | None = None
         self._approver: str = ""
 
-    async def _try_merge(self, pr: "PRContext", opts: dict) -> bool:
-        """Attempt merge; if branch is stale, close the PR and return False. Re-raises all other errors."""
+    async def _try_merge(self, pr: "PRContext", opts: dict) -> str:
+        """Attempt merge. Returns 'merged' on success, 'stale' if the branch was behind (PR is
+        closed so Dependabot recreates it), or 'unavailable' if the repo forbids bot merges
+        (caller degrades to 'merge recommended'). Re-raises all other errors."""
         try:
             await workflow.execute_activity("activities.platform.merge_pr", args=[pr], **opts)
-            return True
+            return "merged"
         except ActivityError as e:
-            if (
-                isinstance(e.cause, ApplicationError)
-                and getattr(e.cause, "type", None) == "stale_branch"
-            ):
+            cause_type = (
+                getattr(e.cause, "type", None) if isinstance(e.cause, ApplicationError) else None
+            )
+            if cause_type == "stale_branch":
                 await workflow.execute_activity(
                     "activities.platform.close_pr",
                     args=[
@@ -116,7 +122,9 @@ class PRActionWorkflow:
                     ],
                     **opts,
                 )
-                return False
+                return "stale"
+            if cause_type == "auto_merge_unavailable":
+                return "unavailable"
             raise
 
     def _dry_run_outcome(
@@ -306,6 +314,13 @@ class PRActionWorkflow:
         url_suffix = f"||{comment_url}" if comment_url else ""
         mr_suffix = f"||{verdict.merge_recommendation}" if verdict.merge_recommendation else ""
 
+        # Exclusive `scout:` verdict label (green→merge recommended, yellow→needs review,
+        # red→blocked) so the queue shows Scout ran and its verdict at a glance, before anyone
+        # opens the comment. Mirrors the displayed (effective) color so label === action.
+        await workflow.execute_activity(
+            "activities.platform.apply_verdict_label", args=[pr, displayed.classification], **opts
+        )
+
         if verdict.classification in config.block_classifications:
             if verdict.merge_recommendation == "merge":
                 # Repo policy overrides the LLM's recommendation — log but still block.
@@ -313,23 +328,26 @@ class PRActionWorkflow:
                     f"LLM set merge_recommendation='merge' for {verdict.classification.upper()} "
                     f"but that classification is in block_classifications — repo policy wins."
                 )
+            # Reds are closed, so the "ping" is an @-mention of CODEOWNERS in the close comment
+            # (a review request on a closed PR is meaningless). Fetch them once for both the
+            # security-escalation and generic-block reasons.
+            owners: list[str] = await workflow.execute_activity(
+                "activities.platform.get_codeowners", pr, result_type=list, **opts
+            )
+            if not owners:
+                owners = config.reviewers
+            mention = ("\n\ncc " + " ".join(owners)) if owners else ""
+
             # Security-escalation case: the bump target is itself vulnerable but a safe release
-            # exists above it (osv_recommended_fix is non-empty). Rather than a bare "suspicious"
-            # close, label it `security`, @-mention CODEOWNERS to expedite, and close — which also
-            # unblocks Dependabot's cooldown-exempt security-update lane to re-open at the fixed
-            # version. (Malicious / no-fix REDs have an empty recommended fix and take the
-            # generic block path below.)
+            # exists above it (osv_recommended_fix is non-empty). Also label it `security` and
+            # close — which unblocks Dependabot's cooldown-exempt security-update lane to re-open
+            # at the fixed version. (Malicious / no-fix REDs have an empty recommended fix and
+            # take the generic block path below.)
             fix = signals.osv.osv_recommended_fix
             if fix:
-                owners: list[str] = await workflow.execute_activity(
-                    "activities.platform.get_codeowners", pr, result_type=list, **opts
-                )
-                if not owners:
-                    owners = config.reviewers
                 await workflow.execute_activity(
                     "activities.platform.label", args=[pr, "security"], **opts
                 )
-                mention = ("\n\ncc " + " ".join(owners)) if owners else ""
                 reason = (
                     f"Triage agent classified this as **{verdict.classification.upper()}** — the "
                     f"bump target `{pr.new_version}` is itself vulnerable. Recommend upgrading to "
@@ -343,12 +361,9 @@ class PRActionWorkflow:
                     "activities.platform.close_pr", args=[pr, reason], **opts
                 )
                 return f"escalated-security-{fix}{url_suffix}{mr_suffix}"
-            await workflow.execute_activity(
-                "activities.platform.label", args=[pr, "supply-chain-suspicious"], **opts
-            )
             reason = (
                 f"Triage agent classified this as **{verdict.classification.upper()}**. "
-                f"Reason: {', '.join(verdict.flags) or verdict.reasoning[:200]}"
+                f"Reason: {', '.join(verdict.flags) or verdict.reasoning[:200]}{mention}"
             )
             await workflow.execute_activity(
                 "activities.platform.close_pr", args=[pr, reason], **opts
@@ -368,13 +383,25 @@ class PRActionWorkflow:
         recommendation_auto_merge = verdict.merge_recommendation == "merge" and bool(
             signals.advisory.fixed_vulnerabilities
         )
-        if config.auto_merge_enabled and (normal_auto_merge or recommendation_auto_merge):
-            merged = await self._try_merge(pr, opts)
-            if not merged:
+        mergeable = normal_auto_merge or recommendation_auto_merge
+        if mergeable and config.auto_merge_enabled:
+            status = await self._try_merge(pr, opts)
+            if status == "stale":
                 return f"closed-stale-branch{url_suffix}{mr_suffix}"
+            if status == "unavailable":
+                # Repo policy forbids bot merges — degrade to "merge recommended" (labelled GREEN
+                # above) and leave it open for a human, rather than failing the triage.
+                return f"merge-recommended{url_suffix}{mr_suffix}"
             if recommendation_auto_merge and not normal_auto_merge:
                 return f"auto-merged-security-context{url_suffix}{mr_suffix}"
             return f"auto-merged{url_suffix}{mr_suffix}"
+
+        if mergeable:
+            # Safe to merge, but this repo doesn't auto-merge (auto_merge_enabled is off — e.g. a
+            # human/CODEOWNER must merge to the protected branch). It's labelled `scout: merge
+            # recommended` (GREEN) above; leave it open for a human and don't ping (GitHub already
+            # auto-requests CODEOWNERS on open).
+            return f"merge-recommended{url_suffix}{mr_suffix}"
 
         if config.reviewers:
             await workflow.execute_activity(
@@ -410,9 +437,12 @@ class PRActionWorkflow:
                 self._approver = ""
 
             if self._human_decision == "approve":
-                merged = await self._try_merge(pr, opts)
-                if not merged:
+                status = await self._try_merge(pr, opts)
+                if status == "stale":
                     return f"closed-stale-branch{url_suffix}{mr_suffix}"
+                if status == "unavailable":
+                    # Approved, but the repo forbids bot merges — the human approver merges it.
+                    return f"merge-recommended{url_suffix}{mr_suffix}"
                 return f"human-approved-merged{url_suffix}{mr_suffix}"
             return f"human-rejected{url_suffix}{mr_suffix}"
 

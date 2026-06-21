@@ -9,6 +9,7 @@ from temporalio import activity
 from temporalio.exceptions import ApplicationError
 
 from models import PRContext, PackageChecks, PRFilesChecks, ActionsUsageChecks, Verdict
+from platforms import SCOUT_VERDICT_LABELS
 from helpers.comment_formatter import format_comment
 from helpers.http import get_client
 
@@ -241,6 +242,26 @@ class GitLabPlatformClient:
         )
         resp.raise_for_status()
         activity.logger.info(f"Added label '{label_name}' to {pr.repo}!{pr.pr_number}")
+
+    async def apply_verdict_label(self, pr: PRContext, classification: str) -> None:
+        """Apply the exclusive scout verdict label, removing the sibling ones (GitLab creates
+        labels on demand, so no separate create step is needed)."""
+        label_name = SCOUT_VERDICT_LABELS[classification][0]
+        if self._dry_run():
+            activity.logger.info(f"[dry-run] Would label {pr.repo}!{pr.pr_number} '{label_name}'")
+            return
+        siblings = ",".join(
+            name for name, _, _ in SCOUT_VERDICT_LABELS.values() if name != label_name
+        )
+        client = get_client()
+        resp = await client.put(
+            f"{self._project_url(pr)}/merge_requests/{pr.pr_number}",
+            headers=self._headers(),
+            json={"add_labels": label_name, "remove_labels": siblings},
+            timeout=15.0,
+        )
+        resp.raise_for_status()
+        activity.logger.info(f"Labelled {pr.repo}!{pr.pr_number} '{label_name}'")
 
     async def check_pr_files(self, pr: PRContext) -> PRFilesChecks:
         if self._dry_run():

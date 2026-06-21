@@ -45,6 +45,7 @@ MUTATING = [
     "activities.platform.merge_pr",
     "activities.platform.request_review",
     "activities.platform.label",
+    "activities.platform.apply_verdict_label",
     "activities.platform.close_pr",
 ]
 
@@ -172,6 +173,10 @@ async def test_red_with_available_fix_escalates_to_security():
     async def label(_pr, name):
         captured.setdefault("labels", []).append(name)
 
+    @activity.defn(name="activities.platform.apply_verdict_label")
+    async def apply_verdict_label(_pr, classification):
+        captured["verdict_label"] = classification
+
     @activity.defn(name="activities.platform.close_pr")
     async def close_pr(_pr, reason):
         captured["close_reason"] = reason
@@ -208,6 +213,7 @@ async def test_red_with_available_fix_escalates_to_security():
         _check_actions_usage(),
         comment,
         label,
+        apply_verdict_label,
         close_pr,
         get_codeowners,
         _merge(),
@@ -239,8 +245,24 @@ async def test_red_with_available_fix_escalates_to_security():
             )
 
     assert result.startswith("escalated-security-1.3.1"), result
+    assert captured.get("verdict_label") == "red"  # scout: blocked
     assert captured.get("labels") == ["security"]
     reason = captured["close_reason"]
     assert "1.3.1" in reason  # names the safe upgrade target
     assert "@temporalio/devrel" in reason  # CODEOWNERS @-mentioned
     assert "security-update" in reason  # explains the cooldown-exempt re-open
+
+
+async def test_safe_green_without_auto_merge_is_merge_recommended():
+    """The @temporalio case: a safe GREEN in a repo that doesn't allow bot auto-merge
+    (auto_merge_enabled off) is labelled 'scout: merge recommended' and left open for a human —
+    not failed, not downgraded to yellow, and no review ping."""
+    config = RepoConfig(auto_merge_enabled=False, reviewers=["webchick"])
+    result, called = await _run(dry_run=False, classification="green", config=config)
+    assert result.startswith("merge-recommended"), result
+    assert "activities.platform.apply_verdict_label" in called
+    # Left open for a human: not merged, not closed, and (per "pings for yellows/reds only")
+    # no review request on a green.
+    assert "activities.platform.merge_pr" not in called
+    assert "activities.platform.close_pr" not in called
+    assert "activities.platform.request_review" not in called

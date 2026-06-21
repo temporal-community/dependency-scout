@@ -211,7 +211,11 @@ def _parse_result(result: str) -> tuple[str, str | None, str | None]:
 
 def _verdict_from_result(result: str) -> str:
     status = result.split("||")[0]
-    if "green" in status or status in ("auto-merged", "human-approved-merged"):
+    if (
+        "green" in status
+        or status.startswith(("auto-merged", "merge-recommended"))
+        or status == "human-approved-merged"
+    ):
         return "green"
     if "red" in status or status.startswith("escalated-security"):
         return "red"

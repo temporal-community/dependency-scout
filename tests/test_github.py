@@ -358,7 +358,8 @@ async def test_merge_pr_405_unknown_is_retryable(client, pr, with_pat):
 
 @respx.mock
 async def test_merge_pr_405_blocked_auto_merge_not_allowed(client, pr, with_pat):
-    # Repo hasn't turned on "Allow auto-merge" — surface an actionable, non-retryable error.
+    # Repo policy forbids bot auto-merge — the activity raises a tagged error so the workflow
+    # can degrade to "merge recommended" rather than treating it as a hard failure.
     payload = {**_open_pr_payload(), "mergeable_state": "blocked"}
     respx.get(f"{BASE_URL}/pulls/{PR_NUM}").mock(return_value=httpx.Response(200, json=payload))
     respx.put(f"{BASE_URL}/pulls/{PR_NUM}/merge").mock(
@@ -373,7 +374,8 @@ async def test_merge_pr_405_blocked_auto_merge_not_allowed(client, pr, with_pat)
     with pytest.raises(ApplicationError) as exc_info:
         await env.run(client.merge_pr, pr)
     assert exc_info.value.non_retryable is True
-    assert "Allow auto-merge" in str(exc_info.value)
+    assert exc_info.value.type == "auto_merge_unavailable"
+    assert "auto-merge is not enabled" in str(exc_info.value)
 
 
 @respx.mock
@@ -513,6 +515,59 @@ async def test_close_pr_never_emits_dependabot_ignore_command(client, pr, with_p
 
     comment_body = comment_route.calls[0].request.content.decode()
     assert "@dependabot" not in comment_body
+
+
+# ---------------------------------------------------------------------------
+# apply_verdict_label
+# ---------------------------------------------------------------------------
+
+
+@respx.mock
+async def test_apply_verdict_label_creates_replaces_and_adds(client, pr, with_pat):
+    from urllib.parse import quote
+
+    create = respx.post(f"{BASE_URL}/labels").mock(return_value=httpx.Response(201, json={}))
+    del_review = respx.delete(
+        f"{BASE_URL}/issues/{PR_NUM}/labels/{quote('scout: needs review')}"
+    ).mock(return_value=httpx.Response(200, json=[]))
+    del_blocked = respx.delete(f"{BASE_URL}/issues/{PR_NUM}/labels/{quote('scout: blocked')}").mock(
+        return_value=httpx.Response(404, json={})
+    )  # not present — harmless
+    add = respx.post(f"{BASE_URL}/issues/{PR_NUM}/labels").mock(
+        return_value=httpx.Response(200, json=[])
+    )
+    env = ActivityEnvironment()
+    await env.run(client.apply_verdict_label, pr, "green")
+
+    assert create.called
+    assert "scout: merge recommended" in create.calls[0].request.content.decode()
+    # sibling verdict labels removed, current one added
+    assert del_review.called and del_blocked.called
+    assert add.called
+    assert "scout: merge recommended" in add.calls[0].request.content.decode()
+
+
+@respx.mock
+async def test_apply_verdict_label_tolerates_existing_label(client, pr, with_pat):
+    # 422 from create = label already exists → proceed without raising.
+    respx.post(f"{BASE_URL}/labels").mock(return_value=httpx.Response(422, json={}))
+    respx.delete(url__regex=rf"{BASE_URL}/issues/{PR_NUM}/labels/.*").mock(
+        return_value=httpx.Response(200, json=[])
+    )
+    add = respx.post(f"{BASE_URL}/issues/{PR_NUM}/labels").mock(
+        return_value=httpx.Response(200, json=[])
+    )
+    env = ActivityEnvironment()
+    await env.run(client.apply_verdict_label, pr, "red")
+    assert add.called
+    assert "scout: blocked" in add.calls[0].request.content.decode()
+
+
+async def test_apply_verdict_label_dry_run_makes_no_http_call(client, pr, dry_run):
+    env = ActivityEnvironment()
+    await env.run(
+        client.apply_verdict_label, pr, "yellow"
+    )  # no respx mocks → would raise if it called out
 
 
 # ---------------------------------------------------------------------------
