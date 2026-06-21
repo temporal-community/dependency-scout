@@ -17,6 +17,73 @@ with workflow.unsafe.imports_passed_through():
     )
     from workflows.package_triage_workflow import PackageTriageWorkflow
 
+# color === action: the displayed classification is the action the Scout will take.
+_DISPOSITION_COLOR = {
+    "block": "red",
+    "auto-merge": "green",
+    "review": "yellow",
+}  # "comment" → keep risk
+
+
+def _disposition(verdict: "Verdict", signals: "PackageChecks", config: "RepoConfig") -> str:
+    """What the Scout will do: 'block' | 'auto-merge' | 'review' | 'comment'.
+
+    Single source of truth for the action decision — the dry-run report and the live path
+    both read it so they can't drift."""
+    if verdict.classification in config.block_classifications:
+        return "block"
+    normal_auto_merge = (
+        verdict.classification in config.auto_merge_classifications
+        and verdict.confidence >= config.auto_merge_min_confidence
+        and verdict.merge_recommendation != "hold"
+    )
+    recommendation_auto_merge = verdict.merge_recommendation == "merge" and bool(
+        signals.advisory.fixed_vulnerabilities
+    )
+    if config.auto_merge_enabled and (normal_auto_merge or recommendation_auto_merge):
+        return "auto-merge"
+    if config.reviewers:
+        return "review"
+    return "comment"
+
+
+def _held_for_review_reason(verdict: "Verdict", config: "RepoConfig") -> str:
+    """Explain why a GREEN-risk verdict won't auto-merge (so it's shown YELLOW)."""
+    if verdict.merge_recommendation == "hold":
+        return "shown yellow (review): the analysis recommended holding for a human"
+    if not config.auto_merge_enabled:
+        return "shown yellow (review): auto-merge is disabled for this repo"
+    if verdict.classification not in config.auto_merge_classifications:
+        return (
+            f"shown yellow (review): '{verdict.classification}' is not in this repo's "
+            f"auto-merge classifications {config.auto_merge_classifications}"
+        )
+    if verdict.confidence < config.auto_merge_min_confidence:
+        return (
+            f"shown yellow (review): analysis confidence {verdict.confidence:.0%} is below this "
+            f"repo's {config.auto_merge_min_confidence:.0%} auto-merge threshold"
+        )
+    return "shown yellow (review)"
+
+
+def _displayed_verdict(
+    verdict: "Verdict", signals: "PackageChecks", config: "RepoConfig"
+) -> "Verdict":
+    """Reclassify so the verdict's color == the action taken: GREEN auto-merges, YELLOW gets
+    reviewed, RED is blocked. A GREEN that won't auto-merge (low confidence, auto-merge off,
+    hold, …) is shown YELLOW with a note explaining why — no more confusing "green that asks
+    for review". Observe-only (no action) keeps the risk color. Flags/reasoning are preserved."""
+    disp = _disposition(verdict, signals, config)
+    target = _DISPOSITION_COLOR.get(disp)
+    if target is None or target == verdict.classification:
+        return verdict
+    note = (
+        _held_for_review_reason(verdict, config)
+        if target == "yellow"
+        else f"shown {target} to match the action taken ({disp})"
+    )
+    return verdict.model_copy(update={"classification": target, "flags": verdict.flags + [note]})
+
 
 @workflow.defn
 class PRActionWorkflow:
@@ -57,26 +124,11 @@ class PRActionWorkflow:
     ) -> str:
         """Report the action that would be taken, without performing it.
 
-        Mirrors the action-decision branches in ``run`` (block / auto-merge / request
-        review / comment-only) but executes no activities. Keep this in sync with the
-        real path below; the result string encodes the classification so the CLI colors
-        the verdict correctly via ``_verdict_from_result``."""
-        cls = verdict.classification
-        if cls in config.block_classifications:
-            return f"dry-run-{cls}-block"
-        normal_auto_merge = (
-            cls in config.auto_merge_classifications
-            and verdict.confidence >= config.auto_merge_min_confidence
-            and verdict.merge_recommendation != "hold"
-        )
-        recommendation_auto_merge = verdict.merge_recommendation == "merge" and bool(
-            signals.advisory.fixed_vulnerabilities
-        )
-        if config.auto_merge_enabled and (normal_auto_merge or recommendation_auto_merge):
-            return f"dry-run-{cls}-auto-merge"
-        if config.reviewers:
-            return f"dry-run-{cls}-review"
-        return f"dry-run-{cls}-comment"
+        Uses the same _disposition() the live path uses, and encodes the *effective* color
+        (color === action) so the CLI colors the verdict to match what would happen."""
+        disp = _disposition(verdict, signals, config)
+        eff = _displayed_verdict(verdict, signals, config)
+        return f"dry-run-{eff.classification}-{disp}"
 
     @workflow.signal
     def submit_decision(self, decision: str, approver: str = "") -> None:
@@ -241,8 +293,12 @@ class PRActionWorkflow:
         if pr.dry_run:
             return self._dry_run_outcome(verdict, signals, config)
 
+        # color === action: post the comment with the effective classification (e.g. a green
+        # that won't auto-merge is shown yellow + a note saying why) so the badge matches what
+        # the Scout actually does. Action decisions below still use the original verdict.
+        displayed = _displayed_verdict(verdict, signals, config)
         comment_url: str = await workflow.execute_activity(
-            "activities.platform.comment", args=[pr, verdict, signals], result_type=str, **opts
+            "activities.platform.comment", args=[pr, displayed, signals], result_type=str, **opts
         )
         url_suffix = f"||{comment_url}" if comment_url else ""
         mr_suffix = f"||{verdict.merge_recommendation}" if verdict.merge_recommendation else ""
@@ -264,7 +320,7 @@ class PRActionWorkflow:
             await workflow.execute_activity(
                 "activities.platform.close_pr", args=[pr, reason, True], **opts
             )
-            return f"blocked-{verdict.classification}{url_suffix}{mr_suffix}"
+            return f"blocked-{displayed.classification}{url_suffix}{mr_suffix}"
 
         # Auto-merge logic with merge_recommendation support:
         # - merge_recommendation="hold" suppresses auto-merge even for green classifications
@@ -322,4 +378,4 @@ class PRActionWorkflow:
             return f"human-rejected{url_suffix}{mr_suffix}"
 
         # Default observe-only: comment posted, no further action.
-        return f"observe-only-{verdict.classification}{url_suffix}{mr_suffix}"
+        return f"observe-only-{displayed.classification}{url_suffix}{mr_suffix}"
