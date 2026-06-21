@@ -159,6 +159,29 @@ You should get back a response somewhat like:
   the CVE regression without the breakage that caused 2.32.0 to be yanked.
 ```
 
+### Remediate a vulnerable dependency
+
+When a (often **transitive**) dependency is stuck on a vulnerable version that Dependabot won't bump — e.g. a CVE fix that's newer than your cooldown window, or an indirect dep Dependabot's security updates don't cover — the Scout can open the fix PR itself by regenerating the lockfile:
+
+```bash
+# Bump a vulnerable package to a safe version and open a PR
+uvx 'dependency-scout>=0.9.0' remediate \
+  --repo your-org/your-repo --package starlette --to 1.3.1
+
+# Limit to one project, or preview without pushing
+uvx 'dependency-scout>=0.9.0' remediate \
+  --repo your-org/your-repo --package starlette --to 1.3.1 \
+  --project-dir services/api --dry-run
+```
+
+It clones the repo, regenerates the lockfile **script-safely** (`uv lock` — resolution only, no install scripts), verifies the package actually reached the safe version (and reports the blocker — e.g. a parent constraint — if it can't), then opens a PR @-mentioning CODEOWNERS. A security remediation deliberately **bypasses the repo's `exclude-newer` freshness cooldown** — a known-CVE fix is exactly the case a cooldown should make an exception for, and the reviewer still approves the PR.
+
+**Auth (needs write access to push a branch):**
+- `GITHUB_TOKEN` with `repo`/Contents+PR write — on a SAML-SSO org, authorize the token for the org first, or
+- a **GitHub App** (`GITHUB_APP_ID` + `GITHUB_APP_PRIVATE_KEY` or `…_PATH`) — Scout mints an installation token itself, which **sidesteps the per-user SAML-SSO wall**. See [GitHub App setup](docs/github-app-setup.md).
+
+Currently supports uv/pip projects; more ecosystems are [planned](https://github.com/temporal-community/dependency-scout/issues/7).
+
 ### Configure your stack
 
 The Scout works with zero configuration — rule-based classifier, no PR comments, no auto-actions. Each addition makes it smarter or more capable:
