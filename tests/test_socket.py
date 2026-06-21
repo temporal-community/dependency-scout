@@ -173,6 +173,19 @@ async def test_rate_limited_degrades_to_empty(monkeypatch):
 
 
 @respx.mock
+async def test_unmapped_ecosystem_skips_without_api_call(monkeypatch):
+    """Ecosystems Socket doesn't map (github_actions, go, …) are skipped entirely — no
+    API call (no wasted quota), and no mis-query as a PyPI package."""
+    monkeypatch.setenv("SOCKET_API_KEY", "test-key")
+    route = respx.post(PURL_URL).mock(return_value=httpx.Response(200, content="{}"))
+    env = ActivityEnvironment()
+    result = await env.run(score, "github_actions", "actions/checkout", "4.3.1", "6.0.3")
+    assert result.socket_score is None
+    assert result.socket_alerts == []
+    assert route.call_count == 0  # never hit the Socket API
+
+
+@respx.mock
 async def test_alert_types_captured(monkeypatch):
     """socket_alert_types is populated with the raw type names of included alerts."""
     monkeypatch.setenv("SOCKET_API_KEY", "test-key")

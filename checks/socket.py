@@ -74,6 +74,18 @@ async def score(ecosystem: str, package: str, old_version: str, new_version: str
         )
         return SocketChecks(socket_score=None, socket_alerts=[])
 
+    if ecosystem not in _ECOSYSTEM_MAP:
+        # Socket scores packages from specific registries. For ecosystems we don't map
+        # (GitHub Actions, Go, Maven, …) the old code silently queried Socket as if the
+        # name were a PyPI package — wrong (a same-named PyPI package returns bogus data)
+        # and wasteful (each /v0/purl call costs ~100 quota units). Skip instead.
+        activity.logger.info(
+            "Socket has no mapping for ecosystem %r — skipping Socket signal for %s",
+            ecosystem,
+            package,
+        )
+        return SocketChecks(socket_score=None, socket_alerts=[])
+
     key = (ecosystem, package, new_version)
     return await _cache.get_or_compute(
         key,
@@ -82,7 +94,7 @@ async def score(ecosystem: str, package: str, old_version: str, new_version: str
 
 
 async def _fetch_socket(api_key: str, ecosystem: str, package: str, version: str) -> SocketChecks:
-    ecosystem_slug = _ECOSYSTEM_MAP.get(ecosystem, "pypi")
+    ecosystem_slug = _ECOSYSTEM_MAP[ecosystem]  # guaranteed present — score() guards
     purl = f"pkg:{ecosystem_slug}/{package}@{version}"
     client = get_client()
 
