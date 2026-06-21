@@ -165,11 +165,11 @@ When a (often **transitive**) dependency is stuck on a vulnerable version that D
 
 ```bash
 # Bump a vulnerable package to a safe version and open a PR
-uvx 'dependency-scout>=0.9.0' remediate \
+uvx 'dependency-scout>=0.9.1' remediate \
   --repo your-org/your-repo --package starlette --to 1.3.1
 
 # Limit to one project, or preview without pushing
-uvx 'dependency-scout>=0.9.0' remediate \
+uvx 'dependency-scout>=0.9.1' remediate \
   --repo your-org/your-repo --package starlette --to 1.3.1 \
   --project-dir services/api --dry-run
 ```

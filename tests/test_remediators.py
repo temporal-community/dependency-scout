@@ -88,10 +88,13 @@ def test_remediate_reaches_target(monkeypatch, tmp_path):
     assert res.changed is True
     assert res.reached_target is True
     assert "clears the advisory" in res.message
-    # Security remediation bypasses the repo's freshness cooldown (exclude-newer) so a fix
-    # newer than the bake window can still land. --upgrade-package keeps everything else pinned.
-    assert "--no-config" in captured["cmd"]
-    assert "--upgrade-package" in captured["cmd"]
+    # Surgical, cooldown-aware command: modern uv, target pinned exactly, freshness cooldown
+    # overridden via --exclude-newer (a security fix is the cooldown's exception), everything
+    # else kept pinned by --upgrade-package.
+    cmd = captured["cmd"]
+    assert cmd[:3] == ["uvx", "uv@latest", "lock"]
+    assert "--upgrade-package" in cmd and "starlette==1.3.1" in cmd
+    assert "--exclude-newer" in cmd
 
 
 def test_remediate_moved_but_still_below_target(monkeypatch, tmp_path):

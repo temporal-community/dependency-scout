@@ -110,3 +110,31 @@ async def get_installation_token_for_repo(repo: str) -> str:
         )
     resp.raise_for_status()
     return await get_installation_token(int(resp.json()["id"]))
+
+
+async def get_app_bot_identity(installation_token: str) -> tuple[str, str]:
+    """Return (name, email) for authoring git commits as the App's bot account, so commits are
+    attributed to e.g. 'dependency-scout[bot]' — a real account that shows the bot as author and
+    satisfies CLA checks — rather than a made-up user. Email uses GitHub's noreply form
+    '<bot-user-id>+<login>@users.noreply.github.com'.
+
+    The App JWT is only valid for /app endpoints, so the bot slug comes from `GET /app` (JWT) but
+    the user-id lookup uses the installation token."""
+    from urllib.parse import quote
+
+    json_headers = {"Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28"}
+    app_jwt = _generate_app_jwt()
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        app_resp = await client.get(
+            "https://api.github.com/app",
+            headers={"Authorization": f"Bearer {app_jwt}", **json_headers},
+        )
+        app_resp.raise_for_status()
+        login = f"{app_resp.json()['slug']}[bot]"
+        user_resp = await client.get(
+            f"https://api.github.com/users/{quote(login)}",
+            headers={"Authorization": f"Bearer {installation_token}", **json_headers},
+        )
+        user_resp.raise_for_status()
+        uid = user_resp.json()["id"]
+    return login, f"{uid}+{login}@users.noreply.github.com"

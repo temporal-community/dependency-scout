@@ -142,6 +142,21 @@ async def test_get_installation_token_for_repo_resolves_then_mints():
 
 
 @respx.mock
+async def test_get_app_bot_identity():
+    from helpers.github_app import get_app_bot_identity
+
+    respx.get("https://api.github.com/app").mock(
+        return_value=httpx.Response(200, json={"slug": "dependency-scout"})
+    )
+    respx.get(url__regex=r"https://api\.github\.com/users/dependency-scout.*bot.*").mock(
+        return_value=httpx.Response(200, json={"id": 999})
+    )
+    name, email = await get_app_bot_identity("ghs_installation_token")
+    assert name == "dependency-scout[bot]"
+    assert email == "999+dependency-scout[bot]@users.noreply.github.com"
+
+
+@respx.mock
 async def test_get_installation_token_for_repo_404_when_not_installed():
     from helpers.github_app import get_installation_token_for_repo
 

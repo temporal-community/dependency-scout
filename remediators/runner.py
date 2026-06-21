@@ -69,15 +69,18 @@ async def remediate_and_open_pr(
     # Prefer an explicit token; otherwise mint one from App creds (GITHUB_APP_ID + private key) —
     # the App path sidesteps the per-user SAML SSO wall that blocks personal tokens on SSO orgs.
     token = os.environ.get("GITHUB_TOKEN")
+    used_app = False
     if not token and os.environ.get("GITHUB_APP_ID"):
         from helpers.github_app import get_installation_token_for_repo
 
         token = await get_installation_token_for_repo(repo)
+        used_app = True
     if not token:
         raise ValueError(
             "Set GITHUB_TOKEN, or GITHUB_APP_ID + GITHUB_APP_PRIVATE_KEY[_PATH], to clone and "
             "open a remediation PR."
         )
+    commit_name, commit_email = await _commit_identity(used_app, token)
 
     run = RemediationRun(package=package, target_version=target_version)
 
@@ -118,9 +121,9 @@ async def remediate_and_open_pr(
         _git(
             [
                 "-c",
-                "user.name=dependency-scout",
+                f"user.name={commit_name}",
                 "-c",
-                "user.email=dependency-scout@users.noreply.github.com",
+                f"user.email={commit_email}",
                 "commit",
                 "-m",
                 f"Security: bump {package} to {target_version}",
@@ -134,6 +137,24 @@ async def remediate_and_open_pr(
         run.opened = True
         run.message = f"Opened {run.pr_url}"
         return run
+
+
+async def _commit_identity(used_app: bool, token: str) -> tuple[str, str]:
+    """Author commits as the acting identity so they're attributed to a real account (and pass
+    CLA checks): the App bot when minting via App creds, else the authenticated token user."""
+    if used_app:
+        from helpers.github_app import get_app_bot_identity
+
+        return await get_app_bot_identity(token)
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        r = await client.get(
+            "https://api.github.com/user",
+            headers={"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json"},
+        )
+    if r.status_code == 200:
+        u = r.json()
+        return u["login"], f"{u['id']}+{u['login']}@users.noreply.github.com"
+    return "dependency-scout", "dependency-scout@users.noreply.github.com"
 
 
 def _read_codeowners(root: Path) -> list[str]:
