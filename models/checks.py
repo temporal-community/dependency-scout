@@ -24,6 +24,9 @@ class SocketChecks(BaseModel):
 
 class OSVChecks(BaseModel):
     osv_vulnerabilities: list[str] = []
+    # Versions that patch the matched advisories (from OSV "fixed" range events). Lets the
+    # rule-based classifier recommend "upgrade to ≥X" without an LLM in the mix.
+    osv_fixed_versions: list[str] = []
 
 
 class NVDChecks(BaseModel):

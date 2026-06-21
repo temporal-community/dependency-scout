@@ -115,11 +115,23 @@ def _hard_red(signals: PackageChecks) -> Verdict | None:
     known_vulns = list(signals.osv.osv_vulnerabilities)
     known_vulns += [v for v in signals.nvd.nvd_vulnerabilities if v not in known_vulns]
     if known_vulns:
+        fixed = signals.osv.osv_fixed_versions
+        # Highest fixed version clears every matched advisory (low→high sorted). Surface the
+        # upgrade target so the recommendation is actionable even with no LLM in the mix.
+        upgrade = ""
+        extra_flags: list[str] = []
+        if fixed:
+            target = fixed[-1]
+            upgrade = (
+                f" Fixed in {', '.join(fixed)} — this version is still affected; "
+                f"retarget the bump to ≥{target} rather than merging it."
+            )
+            extra_flags = [f"patched in {', '.join(fixed)} — upgrade to ≥{target}"]
         return Verdict(
             classification="red",
             confidence=0.95,
-            reasoning=f"Known vulnerabilities: {', '.join(known_vulns)}",
-            flags=[f"CVE: {v}" for v in known_vulns],
+            reasoning=f"Known vulnerabilities in this version: {', '.join(known_vulns)}.{upgrade}",
+            flags=[f"CVE: {v}" for v in known_vulns] + extra_flags,
             **rb,
         )
 
@@ -232,27 +244,43 @@ def _hard_red(signals: PackageChecks) -> Verdict | None:
 
 
 def _apply_hard_rules(signals: PackageChecks, verdict: Verdict) -> Verdict:
-    """Post-filter for LLM verdicts: override GREEN/YELLOW if hard RED signals are present.
+    """Reconcile an LLM verdict with the hard signals.
 
-    Preserves the LLM's reasoning as context so reviewers can see what it found.
+    - GREEN is overridden to RED if hard compromise evidence is present (catches an LLM
+      fooled into calling a genuine compromise "safe"). The LLM reasoning is preserved.
+    - A YELLOW or RED verdict is trusted as-is (the LLM saw every signal and engaged) —
+      escalating it to RED-close is what wrongly closed a benign, CVE-patching bump.
+    - A YELLOW the LLM explicitly cleared for merge (merge_recommendation == "merge"), with
+      no hard compromise present, is *upgraded to GREEN* so it flows through the normal green
+      auto-merge path rather than the awkward "auto-merge a yellow" route. The flags/reasoning
+      (e.g. "breaking changes noted") are preserved so the context isn't lost.
     """
-    # Trust an engaged LLM: only override a GREEN verdict. A YELLOW or RED LLM verdict means
-    # the model already weighed the risk (it sees every signal, including obfuscation and
-    # CVEs) and routed to review/block — escalating it to RED-close is what wrongly closed a
-    # benign, CVE-patching bump. Hard evidence still overrides a GREEN, catching an LLM that
-    # was fooled into calling a genuine compromise "safe".
-    if verdict.classification != "green":
-        return verdict
-    hard = _hard_red(signals)
-    if hard is None:
-        return verdict
-    return Verdict(
-        **hard.model_dump(exclude={"reasoning"}),
-        reasoning=(
-            f"{hard.reasoning}\n\n"
-            f"[LLM classified as {verdict.classification} — reasoning: {verdict.reasoning}]"
-        ),
-    )
+    if verdict.classification == "green":
+        hard = _hard_red(signals)
+        if hard is None:
+            return verdict
+        return Verdict(
+            **hard.model_dump(exclude={"reasoning"}),
+            reasoning=(
+                f"{hard.reasoning}\n\n"
+                f"[LLM classified as {verdict.classification} — reasoning: {verdict.reasoning}]"
+            ),
+        )
+
+    if (
+        verdict.classification == "yellow"
+        and verdict.merge_recommendation == "merge"
+        and _hard_red(signals) is None
+    ):
+        return verdict.model_copy(
+            update={
+                "classification": "green",
+                "flags": verdict.flags
+                + ["upgraded yellow→green: LLM investigated the flagged concerns and cleared them"],
+            }
+        )
+
+    return verdict
 
 
 def _rule_based(signals: PackageChecks) -> Verdict:

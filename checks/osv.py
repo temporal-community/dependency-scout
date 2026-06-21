@@ -33,8 +33,34 @@ async def _do_check(ecosystem: str, package: str, new_version: str) -> OSVChecks
     data = resp.json()
 
     vuln_ids: list[str] = []
+    fixed_versions: list[str] = []
     for vuln in data.get("vulns", []):
         cves = [a for a in vuln.get("aliases", []) if a.startswith("CVE-")]
         vuln_ids.extend(cves if cves else [vuln["id"]])
+        # Collect the "fixed" version from each advisory's range events (for the queried
+        # package) so the classifier can say "upgrade to a patched release" — no LLM needed.
+        for affected in vuln.get("affected", []):
+            if affected.get("package", {}).get("name", "").lower() != package.lower():
+                continue
+            for rng in affected.get("ranges", []):
+                for event in rng.get("events", []):
+                    if event.get("fixed"):
+                        fixed_versions.append(event["fixed"])
 
-    return OSVChecks(osv_vulnerabilities=vuln_ids)
+    return OSVChecks(
+        osv_vulnerabilities=vuln_ids,
+        osv_fixed_versions=_sorted_versions(set(fixed_versions)),
+    )
+
+
+def _sorted_versions(versions: set[str]) -> list[str]:
+    """Sort version strings low→high, tolerating non-PEP440 strings (fall back to text)."""
+    from packaging.version import InvalidVersion, Version
+
+    def key(v: str) -> tuple[int, object]:
+        try:
+            return (0, Version(v))
+        except InvalidVersion:
+            return (1, v)
+
+    return sorted(versions, key=key)

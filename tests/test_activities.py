@@ -151,6 +151,47 @@ async def test_osv_passes_correct_ecosystem():
     assert body["package"]["ecosystem"] == "PyPI"
 
 
+@respx.mock
+async def test_osv_extracts_fixed_versions():
+    """Fixed versions from advisory ranges are captured so the classifier can recommend
+    an upgrade target with no LLM in the mix."""
+    respx.post(OSV_URL).mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "vulns": [
+                    {
+                        "id": "GHSA-x746-7m8f-x49c",
+                        "aliases": ["CVE-2026-48817"],
+                        "affected": [
+                            {
+                                "package": {"name": "starlette", "ecosystem": "PyPI"},
+                                "ranges": [{"events": [{"introduced": "0"}, {"fixed": "1.1.0"}]}],
+                            }
+                        ],
+                    },
+                    {
+                        "id": "GHSA-82w8-qh3p-5jfq",
+                        "aliases": ["CVE-2026-54283"],
+                        "affected": [
+                            {
+                                "package": {"name": "starlette", "ecosystem": "PyPI"},
+                                "ranges": [
+                                    {"events": [{"introduced": "0.4.1"}, {"fixed": "1.3.1"}]}
+                                ],
+                            }
+                        ],
+                    },
+                ]
+            },
+        )
+    )
+    env = ActivityEnvironment()
+    result = await env.run(osv_check, "pip", "starlette", "0.50.0", "1.0.1")
+    assert result.osv_fixed_versions == ["1.1.0", "1.3.1"]  # sorted low→high
+    assert result.osv_fixed_versions[-1] == "1.3.1"  # highest clears all advisories
+
+
 # ---------------------------------------------------------------------------
 # nvd
 # ---------------------------------------------------------------------------

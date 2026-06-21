@@ -19,6 +19,8 @@ from classifiers import (
     _build_message,
     _rule_based,
 )
+from classifiers._helpers import _apply_hard_rules
+from models import Verdict
 
 
 # ---------------------------------------------------------------------------
@@ -745,3 +747,53 @@ def test_cache_len():
     assert len(cache) == 1
     cache.set(("b",), 2)
     assert len(cache) == 2
+
+
+# ---------------------------------------------------------------------------
+# CVE upgrade guidance (rule-based, no LLM) + LLM yellow→green upgrade
+# ---------------------------------------------------------------------------
+
+
+def test_rule_based_cve_recommends_upgrade_target(base_signals):
+    """Without an LLM, a CVE-in-target still yields actionable 'upgrade to ≥X' guidance."""
+    base_signals.osv.osv_vulnerabilities = ["CVE-2026-48817", "CVE-2026-54283"]
+    base_signals.osv.osv_fixed_versions = ["1.1.0", "1.3.0", "1.3.1"]
+    verdict = _rule_based(base_signals)
+    assert verdict.classification == "red"
+    assert "1.3.1" in verdict.reasoning  # highest fix = clears all
+    assert any("upgrade to ≥1.3.1" in f for f in verdict.flags)
+
+
+def test_llm_cleared_yellow_upgraded_to_green(base_signals):
+    """A YELLOW the LLM explicitly cleared for merge is upgraded to GREEN (clean signals)."""
+    verdict = Verdict(
+        classification="yellow",
+        confidence=0.92,
+        reasoning="Breaking changes, but safe.",
+        flags=["breaking changes"],
+        merge_recommendation="merge",
+    )
+    out = _apply_hard_rules(base_signals, verdict)
+    assert out.classification == "green"
+    assert any("upgraded yellow→green" in f for f in out.flags)
+    assert "breaking changes" in out.flags  # original context preserved
+
+
+def test_llm_yellow_merge_not_upgraded_when_hard_signal_present(base_signals):
+    """The yellow→green upgrade is gated on no hard compromise — a CVE blocks it."""
+    base_signals.osv.osv_vulnerabilities = ["CVE-2026-99999"]
+    verdict = Verdict(
+        classification="yellow",
+        confidence=0.9,
+        reasoning="...",
+        flags=[],
+        merge_recommendation="merge",
+    )
+    out = _apply_hard_rules(base_signals, verdict)
+    assert out.classification == "yellow"  # not upgraded — a hard CVE is present
+
+
+def test_llm_yellow_without_merge_rec_stays_yellow(base_signals):
+    verdict = Verdict(classification="yellow", confidence=0.8, reasoning="...", flags=[])
+    out = _apply_hard_rules(base_signals, verdict)
+    assert out.classification == "yellow"

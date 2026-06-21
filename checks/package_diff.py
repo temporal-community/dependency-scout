@@ -500,7 +500,7 @@ def _build_diff(
                     network_calls_in_lib = True
             # Check for obfuscation in new files
             if not obfuscated_code and suffix in _OBFUSCATION_PATTERNS:
-                if _has_obfuscation(new_map[rel], suffix):
+                if _has_obfuscation(new_map[rel], suffix, rel):
                     obfuscated_code = True
             # Dual gzip+base64 encoding — layered evasion of text-based scanners
             if not obfuscated_code and suffix in GZIP_B64_EXTENSIONS:
@@ -770,22 +770,42 @@ def _count_new_pip_deps(old_path: Path, new_path: Path) -> int:
         return 0
 
 
-def _has_obfuscation(path: Path, suffix: str) -> bool:
+# Bundled/minified web assets: webpack/Next.js output dirs, *.min.js, source maps, and
+# content-hashed chunks. Minified JS is one giant line, which trips the long-line heuristic
+# on every package that ships a web UI (the litellm/Next.js false positive). For these paths
+# we skip the length heuristic and rely on the pattern checks (decode-and-exec, gzip+base64) —
+# the signals that actually indicate intent, which prod bundlers don't emit.
+_MINIFIED_ASSET_RE = re.compile(
+    r"(^|/)(node_modules|dist|build|static|vendor|_next|\.next|out|site-packages)/"
+    r"|\.min\.(js|mjs|css)$"
+    r"|\.(js|mjs|css)\.map$"
+    r"|[/-][0-9a-f]{8,}\.(js|mjs|css)$",
+    re.IGNORECASE,
+)
+
+
+def _is_minified_asset(rel: str) -> bool:
+    return bool(_MINIFIED_ASSET_RE.search(rel))
+
+
+def _has_obfuscation(path: Path, suffix: str, rel: str = "") -> bool:
     """Return True if the file contains strong obfuscation patterns.
 
     Checks for:
     - javascript-obfuscator _0x hex variable names
     - eval/atob decode-then-exec chains (Coruna, TanStack patterns)
     - exec(compile(...)) Python obfuscation
-    - Any single line exceeding 100 KB (machine-generated, not hand-minified)
+    - Any single line exceeding 100 KB (machine-generated) — skipped for bundled/minified
+      web assets, where one-giant-line is normal and not a signal
     """
     try:
         text = path.read_text(encoding="utf-8", errors="replace")
     except Exception:  # noqa: BLE001
         return False
-    for line in text.splitlines():
-        if len(line) > _OBFUSCATION_LINE_THRESHOLD:
-            return True
+    if not _is_minified_asset(rel):
+        for line in text.splitlines():
+            if len(line) > _OBFUSCATION_LINE_THRESHOLD:
+                return True
     for pattern in _OBFUSCATION_PATTERNS.get(suffix, []):
         if pattern.search(text):
             return True

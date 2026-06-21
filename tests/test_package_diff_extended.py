@@ -4736,3 +4736,25 @@ async def test_compare_artifact_to_source_vcs_fetch_exception_skipped(monkeypatc
     # Exception from VCS fetch → file skipped → no mismatch reported
     assert mismatch is False
     assert files == []
+
+
+def test_obfuscation_skips_long_line_for_minified_assets(tmp_path):
+    """A >100KB single line flags as obfuscation in real code, but is ignored for bundled/
+    minified web assets (the litellm/Next.js false positive) — only patterns count there."""
+    from checks.package_diff import _has_obfuscation, _is_minified_asset
+
+    f = tmp_path / "chunk.js"
+    f.write_text("var a=" + "x" * 200_000 + ";")  # one giant line, no malicious patterns
+
+    # Real executable code path → flagged on length.
+    assert _has_obfuscation(f, ".js", "litellm/utils.js") is True
+    # Bundled/minified web-asset paths → not flagged on length alone.
+    assert (
+        _has_obfuscation(f, ".js", "litellm/proxy/_experimental/out/_next/static/chunks/x.js")
+        is False
+    )
+    assert _has_obfuscation(f, ".js", "dist/app.min.js") is False
+
+    assert _is_minified_asset("pkg/_next/static/chunks/abc.js") is True
+    assert _is_minified_asset("dist/bundle.min.js") is True
+    assert _is_minified_asset("src/index.js") is False
