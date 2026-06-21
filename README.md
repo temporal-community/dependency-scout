@@ -195,16 +195,26 @@ permissions:
 jobs:
   triage:
     runs-on: ubuntu-latest
-    if: github.actor == 'dependabot[bot]' || github.event_name == 'workflow_dispatch'
+    if: github.actor == 'dependabot[bot]' || github.actor == 'renovate[bot]' || github.event_name == 'workflow_dispatch'
     steps:
       - uses: astral-sh/setup-uv@v7
-      - run: uvx 'dependency-scout>=0.2.2' triage "${{ github.event.pull_request.html_url }}" --local
+      - run: uvx 'dependency-scout>=0.8.0' triage "${{ github.event.pull_request.html_url }}" --local
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}   # optional — LLM verdicts
           NVD_API_KEY: ${{ secrets.NVD_API_KEY }}               # optional — raises NVD rate limit
           SOCKET_API_KEY: ${{ secrets.SOCKET_API_KEY }}         # optional — Socket.dev signal
 ```
+
+**What it does to each PR.** Alongside the verdict comment, Scout applies one at-a-glance label so you can clear the queue by color:
+
+| Verdict | Label | Action |
+|---|---|---|
+| 🟢 safe | `scout: merge recommended` | auto-merged if you opt in, otherwise left open for you to merge |
+| 🟡 needs a look | `scout: needs review` | requests review |
+| 🔴 unsafe | `scout: blocked` | @-mentions CODEOWNERS, then closes |
+
+For repos where a human must merge to a protected branch (no bot auto-merge), keep `auto_merge_enabled: false` (the default): safe bumps are labelled `scout: merge recommended` and left open for you — no failed merge attempts. Flip it to `true` only where bot auto-merge is allowed, and GREENs queue via GitHub's native auto-merge once required checks/reviews pass.
 
 Add `.github/dependency-scout.yml` (below) to let it merge/close/request review; until then it just comments. Add `--dry-run` to the step to watch verdicts before it acts. Full workflow (manual single-PR + sweep-all triggers) is in [docs/deployment.md](docs/deployment.md); a live example runs in [temporalio/ai-cookbook](https://github.com/temporalio/ai-cookbook/blob/main/.github/workflows/dependabot-triage.yml).
 

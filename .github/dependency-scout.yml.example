@@ -38,8 +38,11 @@ min_release_age_hours: 168
 # Human review
 # ---------------------------------------------------------------------------
 
-# GitHub usernames to @-mention for review when a PR is classified YELLOW.
-# Leave empty (or omit) to skip review requests.
+# GitHub usernames to request review from when a PR is classified YELLOW, and to
+# @-mention when a PR is blocked (RED). GitHub already auto-requests CODEOWNERS on
+# PR open, so this is for pinging additional/specific people; the RED path also reads
+# .github/CODEOWNERS and falls back to it when this list is empty. Leave empty (or
+# omit) to rely on CODEOWNERS alone.
 # reviewers: [alice, bob]
 reviewers: []
 
