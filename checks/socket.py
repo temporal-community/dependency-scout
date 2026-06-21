@@ -107,7 +107,23 @@ async def _fetch_socket(api_key: str, ecosystem: str, package: str, version: str
         activity.logger.info(f"{package}@{version} not found in Socket database")
         return SocketChecks(socket_score=None, socket_alerts=[])
     if resp.status_code == 429:
-        raise ApplicationError("Socket API rate limited", non_retryable=False)
+        # Socket meters /v0/purl against a quota window (GET /v0/quota), so a 429 is
+        # almost always quota exhaustion that won't clear within a retry budget — retrying
+        # 5× per package just hammers an already-limited key. Degrade to "no Socket signal"
+        # and log the reason; the quota refreshes on Socket's own schedule.
+        retry_after = resp.headers.get("retry-after")
+        # Log Socket's own reason — it distinguishes per-key quota exhaustion from a
+        # per-IP limit (the latter common on shared GitHub-hosted runner IPs even when
+        # the key's quota is fine). Check the key directly with:
+        #   curl https://api.socket.dev/v0/quota -H 'Authorization: Bearer $SOCKET_API_KEY'
+        activity.logger.warning(
+            "Socket API 429 for %s@%s (retry-after=%s) — skipping Socket signal. Reason: %s",
+            package,
+            version,
+            retry_after or "unset",
+            resp.text[:300] or "(empty body)",
+        )
+        return SocketChecks(socket_score=None, socket_alerts=[])
 
     resp.raise_for_status()
 

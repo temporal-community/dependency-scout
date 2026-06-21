@@ -157,14 +157,19 @@ async def test_purl_uses_correct_ecosystem(monkeypatch):
 
 
 @respx.mock
-async def test_rate_limited_raises_retryable(monkeypatch):
+async def test_rate_limited_degrades_to_empty(monkeypatch):
+    """A 429 (quota exhausted) degrades to no-signal rather than raising/retrying —
+    a quota-window 429 won't clear within a retry budget, and retrying just hammers
+    an already-limited key."""
     monkeypatch.setenv("SOCKET_API_KEY", "test-key")
-    respx.post(PURL_URL).mock(return_value=httpx.Response(429))
+    route = respx.post(PURL_URL).mock(
+        return_value=httpx.Response(429, headers={"retry-after": "3600"})
+    )
     env = ActivityEnvironment()
-    with pytest.raises(ApplicationError) as exc_info:
-        await env.run(score, "pip", "requests", "2.31.0", "2.32.0")
-    assert exc_info.value.non_retryable is False
-    assert "rate limited" in str(exc_info.value).lower()
+    result = await env.run(score, "pip", "requests", "2.31.0", "2.32.0")
+    assert result.socket_score is None
+    assert result.socket_alerts == []
+    assert route.call_count == 1  # no retry storm
 
 
 @respx.mock
