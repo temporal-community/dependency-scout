@@ -84,3 +84,29 @@ async def get_installation_token(installation_id: int) -> str:
     exp = datetime.fromisoformat(data["expires_at"].replace("Z", "+00:00")).timestamp()
     _token_cache[installation_id] = (new_token, exp)
     return new_token
+
+
+async def get_installation_token_for_repo(repo: str) -> str:
+    """Resolve the App's installation on ``repo`` ('owner/name') and return an installation token.
+
+    Lets a caller that only knows the repo (e.g. ``scout remediate``) use App auth without first
+    having to look up the installation id — it asks GitHub which installation covers the repo,
+    then mints a token for it."""
+    app_jwt = _generate_app_jwt()
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        resp = await client.get(
+            f"https://api.github.com/repos/{repo}/installation",
+            headers={
+                "Authorization": f"Bearer {app_jwt}",
+                "Accept": "application/vnd.github+json",
+                "X-GitHub-Api-Version": "2022-11-28",
+            },
+        )
+    if resp.status_code == 404:
+        raise ApplicationError(
+            f"The GitHub App isn't installed on {repo} (or has no access to it). Install it on "
+            "the repo and try again.",
+            non_retryable=True,
+        )
+    resp.raise_for_status()
+    return await get_installation_token(int(resp.json()["id"]))

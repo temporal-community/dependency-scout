@@ -66,9 +66,18 @@ async def remediate_and_open_pr(
         raise ValueError(
             f"No remediator for ecosystem {ecosystem!r} yet — remediation is available for: pip/uv."
         )
+    # Prefer an explicit token; otherwise mint one from App creds (GITHUB_APP_ID + private key) —
+    # the App path sidesteps the per-user SAML SSO wall that blocks personal tokens on SSO orgs.
     token = os.environ.get("GITHUB_TOKEN")
+    if not token and os.environ.get("GITHUB_APP_ID"):
+        from helpers.github_app import get_installation_token_for_repo
+
+        token = await get_installation_token_for_repo(repo)
     if not token:
-        raise ValueError("GITHUB_TOKEN is required to clone and open a remediation PR.")
+        raise ValueError(
+            "Set GITHUB_TOKEN, or GITHUB_APP_ID + GITHUB_APP_PRIVATE_KEY[_PATH], to clone and "
+            "open a remediation PR."
+        )
 
     run = RemediationRun(package=package, target_version=target_version)
 

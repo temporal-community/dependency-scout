@@ -123,6 +123,38 @@ async def test_404_raises_non_retryable():
 
 
 # ---------------------------------------------------------------------------
+# Resolve installation by repo
+# ---------------------------------------------------------------------------
+
+
+@respx.mock
+async def test_get_installation_token_for_repo_resolves_then_mints():
+    from helpers.github_app import get_installation_token_for_repo
+
+    respx.get("https://api.github.com/repos/owner/repo/installation").mock(
+        return_value=httpx.Response(200, json={"id": 12345})
+    )
+    respx.post(INSTALL_URL).mock(
+        return_value=httpx.Response(200, json=_token_response("ghs_for_repo"))
+    )
+    token = await get_installation_token_for_repo("owner/repo")
+    assert token == "ghs_for_repo"
+
+
+@respx.mock
+async def test_get_installation_token_for_repo_404_when_not_installed():
+    from helpers.github_app import get_installation_token_for_repo
+
+    respx.get("https://api.github.com/repos/owner/repo/installation").mock(
+        return_value=httpx.Response(404)
+    )
+    with pytest.raises(ApplicationError) as exc_info:
+        await get_installation_token_for_repo("owner/repo")
+    assert exc_info.value.non_retryable is True
+    assert "isn't installed" in str(exc_info.value)
+
+
+# ---------------------------------------------------------------------------
 # Private key loading
 # ---------------------------------------------------------------------------
 
