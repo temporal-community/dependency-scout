@@ -244,28 +244,40 @@ def _hard_red(signals: PackageChecks) -> Verdict | None:
 
 
 def _apply_hard_rules(signals: PackageChecks, verdict: Verdict) -> Verdict:
-    """Reconcile an LLM verdict with the hard signals.
+    """Reconcile an LLM verdict with the hard signals so that color == action.
 
-    - GREEN is overridden to RED if hard compromise evidence is present (catches an LLM
-      fooled into calling a genuine compromise "safe"). The LLM reasoning is preserved.
-    - A YELLOW or RED verdict is trusted as-is (the LLM saw every signal and engaged) —
-      escalating it to RED-close is what wrongly closed a benign, CVE-patching bump.
-    - A YELLOW the LLM explicitly cleared for merge (merge_recommendation == "merge"), with
-      no hard compromise present, is *upgraded to GREEN* so it flows through the normal green
-      auto-merge path rather than the awkward "auto-merge a yellow" route. The flags/reasoning
-      (e.g. "breaking changes noted") are preserved so the context isn't lost.
+    GREEN → will auto-merge, YELLOW → will request review, RED → will close/block. The LLM's
+    merge_recommendation is folded into the color rather than living as a second axis (which
+    produced confusing "GREEN but review" / "YELLOW but auto-merge" outcomes):
+
+    - GREEN is overridden to RED if hard compromise evidence is present (catches an LLM fooled
+      into calling a genuine compromise "safe"); the LLM reasoning is preserved.
+    - GREEN + merge_recommendation == "hold" is downgraded to YELLOW — the LLM wants a human
+      to look, so the color should say "review", not masquerade as an auto-merge.
+    - YELLOW + merge_recommendation == "merge" (no hard compromise) is upgraded to GREEN — the
+      LLM investigated and cleared it, so it flows through the normal green auto-merge path.
+    - Otherwise the verdict is trusted as-is. Flags/reasoning are always preserved, so the
+      nuance behind an up/downgrade isn't lost.
     """
     if verdict.classification == "green":
         hard = _hard_red(signals)
-        if hard is None:
-            return verdict
-        return Verdict(
-            **hard.model_dump(exclude={"reasoning"}),
-            reasoning=(
-                f"{hard.reasoning}\n\n"
-                f"[LLM classified as {verdict.classification} — reasoning: {verdict.reasoning}]"
-            ),
-        )
+        if hard is not None:
+            return Verdict(
+                **hard.model_dump(exclude={"reasoning"}),
+                reasoning=(
+                    f"{hard.reasoning}\n\n"
+                    f"[LLM classified as {verdict.classification} — reasoning: {verdict.reasoning}]"
+                ),
+            )
+        if verdict.merge_recommendation == "hold":
+            return verdict.model_copy(
+                update={
+                    "classification": "yellow",
+                    "flags": verdict.flags
+                    + ["downgraded green→yellow: LLM recommended holding for human review"],
+                }
+            )
+        return verdict
 
     if (
         verdict.classification == "yellow"

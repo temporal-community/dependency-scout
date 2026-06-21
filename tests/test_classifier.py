@@ -797,3 +797,23 @@ def test_llm_yellow_without_merge_rec_stays_yellow(base_signals):
     verdict = Verdict(classification="yellow", confidence=0.8, reasoning="...", flags=[])
     out = _apply_hard_rules(base_signals, verdict)
     assert out.classification == "yellow"
+
+
+def test_llm_green_hold_downgraded_to_yellow(base_signals):
+    """color == action: a GREEN the LLM wants to hold is shown as YELLOW (review)."""
+    verdict = Verdict(
+        classification="green",
+        confidence=0.9,
+        reasoning="Low risk but major version.",
+        flags=["major version bump"],
+        merge_recommendation="hold",
+    )
+    out = _apply_hard_rules(base_signals, verdict)
+    assert out.classification == "yellow"
+    assert any("downgraded green→yellow" in f for f in out.flags)
+
+
+def test_llm_green_no_recommendation_stays_green(base_signals):
+    verdict = Verdict(classification="green", confidence=0.9, reasoning="Clean.", flags=[])
+    out = _apply_hard_rules(base_signals, verdict)
+    assert out.classification == "green"
