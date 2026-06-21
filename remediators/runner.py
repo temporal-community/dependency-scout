@@ -32,7 +32,18 @@ class RemediationRun:
 
 
 def _git(args: list[str], cwd: str | Path) -> subprocess.CompletedProcess[str]:
-    proc = subprocess.run(["git", *args], cwd=str(cwd), capture_output=True, text=True)
+    # `credential.helper=` disables credential helpers for these calls: the token is supplied in
+    # the clone URL, so git needs no helper — and this stops it from persisting an `x-access-token`
+    # entry to the OS keychain (which would otherwise make every later `git push` prompt the user
+    # to pick between accounts). GIT_TERMINAL_PROMPT=0 ensures it never blocks on an interactive
+    # prompt either.
+    proc = subprocess.run(
+        ["git", "-c", "credential.helper=", *args],
+        cwd=str(cwd),
+        capture_output=True,
+        text=True,
+        env={**os.environ, "GIT_TERMINAL_PROMPT": "0"},
+    )
     if proc.returncode != 0:
         raise RuntimeError(f"git {args[0]} failed: {(proc.stderr or proc.stdout).strip()[:300]}")
     return proc
