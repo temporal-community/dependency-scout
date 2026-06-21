@@ -403,9 +403,18 @@ class PRActionWorkflow:
             # auto-requests CODEOWNERS on open).
             return f"merge-recommended{url_suffix}{mr_suffix}"
 
-        if config.reviewers:
+        # YELLOW: request review. Source reviewers from config, falling back to .github/CODEOWNERS
+        # when none are configured — symmetric with the RED @-mention, so a repo can rely on
+        # CODEOWNERS alone (no duplicated reviewer list). GitHub already auto-requests CODEOWNERS
+        # on PR open; this also re-requests after a dismiss and makes the outcome explicit.
+        reviewers: list[str] = config.reviewers
+        if not reviewers:
+            reviewers = await workflow.execute_activity(
+                "activities.platform.get_codeowners", pr, result_type=list, **opts
+            )
+        if reviewers:
             await workflow.execute_activity(
-                "activities.platform.request_review", args=[pr, config.reviewers], **opts
+                "activities.platform.request_review", args=[pr, reviewers], **opts
             )
 
             # Non-blocking path (CLI / --local): an ephemeral Temporal can't receive the later

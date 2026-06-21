@@ -414,15 +414,30 @@ class GitHubPlatformClient:
                 f"[dry-run] Would request review on {pr.repo}#{pr.pr_number} from {reviewers}"
             )
             return
+        # Accept plain usernames, @users, and @org/team handles (CODEOWNERS uses all three).
+        # GitHub's requested_reviewers endpoint needs teams in a separate `team_reviewers` field
+        # (as the bare team slug) and users in `reviewers`; email entries can't be review-requested.
+        users: list[str] = []
+        teams: list[str] = []
+        for entry in reviewers:
+            handle = entry.lstrip("@")
+            if "@" in handle:  # an email address — not requestable, skip
+                continue
+            if "/" in handle:  # @org/team → team slug
+                teams.append(handle.split("/", 1)[1])
+            else:
+                users.append(handle)
+        if not users and not teams:
+            return
         client = get_client()
         resp = await client.post(
             f"{self._repo_url(pr)}/pulls/{pr.pr_number}/requested_reviewers",
             headers=await self._get_headers(),
-            json={"reviewers": reviewers},
+            json={"reviewers": users, "team_reviewers": teams},
             timeout=15.0,
         )
         resp.raise_for_status()
-        activity.logger.info(f"Requested review on {pr.repo}#{pr.pr_number} from {reviewers}")
+        activity.logger.info(f"Requested review on {pr.repo}#{pr.pr_number} from {users + teams}")
 
     async def label(self, pr: PRContext, label_name: str) -> None:
         if self._dry_run():

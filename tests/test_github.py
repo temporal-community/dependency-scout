@@ -449,6 +449,34 @@ async def test_request_review_posts_reviewers(client, pr, with_pat):
 
     body = json.loads(route.calls[0].request.content)
     assert body["reviewers"] == ["alice", "bob"]
+    assert body["team_reviewers"] == []
+
+
+@respx.mock
+async def test_request_review_splits_users_teams_and_skips_emails(client, pr, with_pat):
+    # CODEOWNERS-style entries: @user, @org/team, plain user, and an email (not requestable).
+    route = respx.post(f"{BASE_URL}/pulls/{PR_NUM}/requested_reviewers").mock(
+        return_value=httpx.Response(201, json={})
+    )
+    env = ActivityEnvironment()
+    await env.run(
+        client.request_review,
+        pr,
+        ["@alice", "@temporalio/devrel", "bob", "ops@example.com"],
+    )
+    body = json.loads(route.calls[0].request.content)
+    assert sorted(body["reviewers"]) == ["alice", "bob"]  # @ stripped, email skipped
+    assert body["team_reviewers"] == ["devrel"]  # @org/team → bare slug
+
+
+@respx.mock
+async def test_request_review_noop_when_only_emails(client, pr, with_pat):
+    route = respx.post(f"{BASE_URL}/pulls/{PR_NUM}/requested_reviewers").mock(
+        return_value=httpx.Response(201, json={})
+    )
+    env = ActivityEnvironment()
+    await env.run(client.request_review, pr, ["ops@example.com"])
+    assert not route.called  # nothing requestable → no API call
 
 
 # ---------------------------------------------------------------------------

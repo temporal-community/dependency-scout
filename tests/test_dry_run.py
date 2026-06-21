@@ -60,13 +60,23 @@ def _spy(name: str, recorder: list[str], result=None):
 
 
 async def _run(
-    dry_run: bool, classification: str, config: RepoConfig, wait_for_review: bool = True
+    dry_run: bool,
+    classification: str,
+    config: RepoConfig,
+    wait_for_review: bool = True,
+    codeowners: list[str] | None = None,
 ) -> tuple[str, list[str]]:
     called: list[str] = []
     # comment returns a URL string; the others return None.
     spies = [_spy("activities.platform.comment", called, "")] + [
         _spy(name, called) for name in MUTATING if name != "activities.platform.comment"
     ]
+
+    @activity.defn(name="activities.platform.get_codeowners")
+    async def get_codeowners(*_):
+        called.append("activities.platform.get_codeowners")
+        return codeowners or []
+
     acts = [
         _pypi(),
         _socket(),
@@ -85,6 +95,7 @@ async def _run(
         _repo_config(config),
         _check_pr_files(),
         _check_actions_usage(),
+        get_codeowners,
         *spies,
     ]
     pr = PRContext(
@@ -157,6 +168,35 @@ async def test_yellow_non_blocking_requests_review_and_returns():
     # Must not have merged or closed — review was requested, nothing acted on.
     assert "activities.platform.merge_pr" not in called
     assert "activities.platform.close_pr" not in called
+
+
+async def test_yellow_falls_back_to_codeowners_when_no_reviewers():
+    """A YELLOW with no explicit reviewers configured falls back to .github/CODEOWNERS for the
+    review request (symmetric with the RED @-mention path)."""
+    config = RepoConfig(reviewers=[])  # no explicit list → should use CODEOWNERS
+    result, called = await _run(
+        dry_run=False,
+        classification="yellow",
+        config=config,
+        wait_for_review=False,
+        codeowners=["@temporalio/devrel"],
+    )
+    assert result.startswith("review-requested-yellow"), result
+    assert "activities.platform.get_codeowners" in called  # consulted the fallback
+    assert "activities.platform.request_review" in called  # and requested review from it
+
+
+async def test_yellow_no_reviewers_and_no_codeowners_is_observe_only():
+    """No reviewers and no CODEOWNERS → nothing to request, so it's observe-only (just comment +
+    label), not a review request."""
+    result, called = await _run(
+        dry_run=False,
+        classification="yellow",
+        config=RepoConfig(reviewers=[]),
+        codeowners=[],
+    )
+    assert result.startswith("observe-only-yellow"), result
+    assert "activities.platform.request_review" not in called
 
 
 async def test_red_with_available_fix_escalates_to_security():
