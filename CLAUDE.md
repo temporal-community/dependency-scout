@@ -41,6 +41,8 @@ This is required for determinism. Never import activity functions directly into 
 
 **Non-retryable errors:** use `ApplicationError(..., non_retryable=True)` for permanent failures (404, auth errors). Retryable errors just raise normally.
 
+**Batch rate-limited APIs with the coalescer.** For a check that hits a metered/rate-limited upstream (Socket is the example), don't fire one request per package across a sweep — wrap the call in a `helpers.batcher.CoalescingBatcher` (module-level instance) so concurrent per-package activities collapse into one batched request per window. `checks/socket.py` is the reference. OSV/deps.dev are built for volume and NVD can't batch, so they stay per-call.
+
 **Graceful degradation is structural — don't let a paid/external check sink the triage.** `PackageTriageWorkflow` gathers all `_CHECK_REGISTRY` signal checks with `return_exceptions=True` and substitutes each failed check's `model()` defaults, so a new signal check that fails (timeout, rate-limit, bad/missing key, billing) never fails the run. Anything awaited *directly* in the workflow (custom-checks runner, classifier) is the exception — wrap it so it degrades too. New paid integrations should also handle "no key → return empty" inside the check itself, and the classifier degrades to rule-based on transient/billing errors (auth errors still fail loudly so misconfig surfaces). `tests/test_triage_resilience.py` enforces this — it fails each registered check in turn and asserts the triage still returns a verdict, so new `_CHECK_REGISTRY` entries are covered automatically.
 
 **Config filename:** `.github/dependency-scout.yml` in user repos was intentionally NOT renamed when the project was renamed — that would be a breaking change for existing installs.

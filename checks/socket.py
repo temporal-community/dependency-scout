@@ -1,4 +1,3 @@
-import asyncio
 import json
 import os
 
@@ -6,14 +5,11 @@ from temporalio import activity
 from temporalio.exceptions import ApplicationError
 
 from models import SocketChecks
+from helpers.batcher import CoalescingBatcher
 from helpers.cache import ActivityCache
 from helpers.http import get_client
 
 _cache: ActivityCache = ActivityCache(ttl_seconds=3600)  # scores can be updated; refresh hourly
-
-# Cap concurrent Socket API calls to stay within rate limits.
-# 25 parallel workflows would otherwise fire 25 simultaneous requests.
-_semaphore = asyncio.Semaphore(3)
 
 _ECOSYSTEM_MAP = {
     "pip": "pypi",
@@ -86,64 +82,14 @@ async def score(ecosystem: str, package: str, old_version: str, new_version: str
         )
         return SocketChecks(socket_score=None, socket_alerts=[])
 
+    # Coalesced across the sweep: many concurrent score() calls become ONE /v0/purl
+    # request (see _socket_batch). The cache still dedups identical bumps across windows.
     key = (ecosystem, package, new_version)
-    return await _cache.get_or_compute(
-        key,
-        lambda: _fetch_socket(api_key, ecosystem, package, new_version),
-    )
+    return await _cache.get_or_compute(key, lambda: _socket_batcher.load(key))
 
 
-async def _fetch_socket(api_key: str, ecosystem: str, package: str, version: str) -> SocketChecks:
-    ecosystem_slug = _ECOSYSTEM_MAP[ecosystem]  # guaranteed present — score() guards
-    purl = f"pkg:{ecosystem_slug}/{package}@{version}"
-    client = get_client()
-
-    async with _semaphore:
-        resp = await client.post(
-            "https://api.socket.dev/v0/purl",
-            headers={"Authorization": f"Bearer {api_key}"},
-            json={"components": [{"purl": purl}]},
-            params={"alerts": "true"},
-            timeout=15.0,
-        )
-        # Throttle rate across the batch — semaphore limits concurrency but
-        # without a delay each slot fires again immediately, producing bursts.
-        await asyncio.sleep(1.0)
-
-    if resp.status_code == 401:
-        raise ApplicationError(
-            "Socket API auth failed — check SOCKET_API_KEY",
-            non_retryable=True,
-        )
-    if resp.status_code == 404:
-        activity.logger.info(f"{package}@{version} not found in Socket database")
-        return SocketChecks(socket_score=None, socket_alerts=[])
-    if resp.status_code == 429:
-        # Socket meters /v0/purl against a quota window (GET /v0/quota), so a 429 is
-        # almost always quota exhaustion that won't clear within a retry budget — retrying
-        # 5× per package just hammers an already-limited key. Degrade to "no Socket signal"
-        # and log the reason; the quota refreshes on Socket's own schedule.
-        retry_after = resp.headers.get("retry-after")
-        # Log Socket's own reason — it distinguishes per-key quota exhaustion from a
-        # per-IP limit (the latter common on shared GitHub-hosted runner IPs even when
-        # the key's quota is fine). Check the key directly with:
-        #   curl https://api.socket.dev/v0/quota -H 'Authorization: Bearer $SOCKET_API_KEY'
-        activity.logger.warning(
-            "Socket API 429 for %s@%s (retry-after=%s) — skipping Socket signal. Reason: %s",
-            package,
-            version,
-            retry_after or "unset",
-            resp.text[:300] or "(empty body)",
-        )
-        return SocketChecks(socket_score=None, socket_alerts=[])
-
-    resp.raise_for_status()
-
-    packages = _parse_components(resp.text)
-    if not packages:
-        return SocketChecks(socket_score=None, socket_alerts=[])
-
-    pkg = packages[0]
+def _component_to_checks(pkg: dict) -> SocketChecks:
+    """Build a SocketChecks from one Socket component object (score + filtered alerts)."""
     depscore = pkg.get("score", {}).get("depscore")
     socket_score = round(depscore * 100) if depscore is not None else None
 
@@ -158,10 +104,73 @@ async def _fetch_socket(api_key: str, ecosystem: str, package: str, version: str
         for a in included
     ]
     alert_types = list({a.get("type", "unknown") for a in included})
-
-    activity.logger.info(f"Socket: {package}@{version} score={socket_score} alerts={len(alerts)}")
     return SocketChecks(
-        socket_score=socket_score,
-        socket_alerts=alerts,
-        socket_alert_types=alert_types,
+        socket_score=socket_score, socket_alerts=alerts, socket_alert_types=alert_types
     )
+
+
+async def _socket_batch(
+    keys: list[tuple[str, str, str]],
+) -> dict[tuple[str, str, str], SocketChecks]:
+    """Score every (ecosystem, package, version) key in a SINGLE /v0/purl request.
+
+    Coalesced by _socket_batcher so a whole sweep makes one Socket call instead of one per
+    package — Socket meters /v0/purl against a quota window, so per-package calls exhaust it
+    fast. On a batch-wide failure (429 quota / network) every key degrades to an empty
+    result rather than failing the triage; auth errors still surface."""
+    api_key = os.environ.get("SOCKET_API_KEY", "")
+    components = [
+        {"purl": f"pkg:{_ECOSYSTEM_MAP[eco]}/{package}@{version}"}
+        for (eco, package, version) in keys
+    ]
+    resp = await get_client().post(
+        "https://api.socket.dev/v0/purl",
+        headers={"Authorization": f"Bearer {api_key}"},
+        json={"components": components},
+        params={"alerts": "true"},
+        timeout=20.0,
+    )
+
+    empty = {k: SocketChecks(socket_score=None, socket_alerts=[]) for k in keys}
+
+    if resp.status_code == 401:
+        raise ApplicationError("Socket API auth failed — check SOCKET_API_KEY", non_retryable=True)
+    if resp.status_code == 429:
+        # Socket meters /v0/purl against a quota window (GET /v0/quota); a 429 is almost
+        # always quota exhaustion that won't clear within a retry budget. Degrade (not retry)
+        # and log Socket's own reason — it distinguishes per-key quota from a per-IP limit
+        # (the latter common on shared GitHub-hosted runner IPs even when quota is fine).
+        activity.logger.warning(
+            "Socket API 429 for %d package(s) (retry-after=%s) — skipping Socket signal. Reason: %s",
+            len(keys),
+            resp.headers.get("retry-after") or "unset",
+            resp.text[:300] or "(empty body)",
+        )
+        return empty
+    if resp.status_code == 404:
+        return empty
+
+    resp.raise_for_status()
+    parsed = _parse_components(resp.text)
+
+    # If we asked for one and got one back, it's unambiguous. Otherwise map each component
+    # to its key by (type, lowercased name, version) regardless of response order; a miss
+    # degrades to empty (a miss, never a wrong package's data).
+    if len(keys) == 1 and len(parsed) == 1:
+        return {keys[0]: _component_to_checks(parsed[0])}
+
+    by_id: dict[tuple[str, str, str], dict] = {
+        (obj.get("type", ""), str(obj.get("name", "")).lower(), str(obj.get("version", ""))): obj
+        for obj in parsed
+    }
+    out: dict[tuple[str, str, str], SocketChecks] = {}
+    for eco, package, version in keys:
+        obj = by_id.get((_ECOSYSTEM_MAP[eco], package.lower(), version))
+        out[(eco, package, version)] = (
+            _component_to_checks(obj) if obj else empty[(eco, package, version)]
+        )
+    return out
+
+
+# Coalesce concurrent per-package score() calls into one Socket request per ~150ms window.
+_socket_batcher = CoalescingBatcher(_socket_batch, max_batch=100, window_seconds=0.15)

@@ -1,6 +1,7 @@
 import socket as _socket
 
 import pytest
+from helpers.batcher import reset_all_batchers
 from helpers.cache import clear_all_caches
 from models import (
     AttestationChecks,
@@ -53,8 +54,10 @@ def reset_activity_caches():
     or error paths in later tests.
     """
     clear_all_caches()
+    reset_all_batchers()
     yield
     clear_all_caches()
+    reset_all_batchers()
 
 
 @pytest.fixture

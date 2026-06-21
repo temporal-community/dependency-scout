@@ -1,3 +1,4 @@
+import asyncio
 import json
 
 import httpx
@@ -11,9 +12,20 @@ from checks.socket import score
 PURL_URL = "https://api.socket.dev/v0/purl"
 
 
-def _component(depscore: float, alerts: list[dict]) -> dict:
+def _component(
+    depscore: float,
+    alerts: list[dict],
+    *,
+    name: str = "requests",
+    version: str = "2.32.0",
+    ptype: str = "pypi",
+) -> dict:
+    # Mirror a real Socket component: type/name/version are what the batch mapping keys on.
     return {
-        "purl": "pkg:pypi/requests@2.32.0",
+        "type": ptype,
+        "name": name,
+        "version": version,
+        "purl": f"pkg:{ptype}/{name}@{version}",
         "score": {"depscore": depscore},
         "alerts": alerts,
     }
@@ -75,20 +87,30 @@ async def test_score_and_alerts_parsed(monkeypatch):
 
 
 @respx.mock
-async def test_ndjson_multiline_response_parsed(monkeypatch):
-    """Regression: /v0/purl streams NDJSON. A multi-line body must parse (the old
-    resp.json() raised JSONDecodeError 'Extra data' on the second line). The first
-    component is used for the score/alerts."""
+async def test_batch_coalesces_concurrent_packages_into_one_request(monkeypatch):
+    """Concurrent score() calls for distinct packages coalesce into ONE /v0/purl request,
+    and each package is mapped back to its own component (by type/name/version). Also
+    exercises multi-line NDJSON parsing — the original resp.json() crashed on line 2."""
     monkeypatch.setenv("SOCKET_API_KEY", "test-key")
     body = _ndjson(
-        _component(0.72, [{"severity": "high", "type": "installScripts", "message": "install"}]),
-        _component(0.91, []),  # a second line — what used to crash resp.json()
+        _component(0.72, [], name="requests", version="2.32.0"),
+        _component(0.50, [], name="flask", version="3.0.0"),
+        _component(0.90, [], name="django", version="5.0.0"),
     )
-    respx.post(PURL_URL).mock(return_value=httpx.Response(200, content=body))
+    route = respx.post(PURL_URL).mock(return_value=httpx.Response(200, content=body))
+
     env = ActivityEnvironment()
-    result = await env.run(score, "pip", "requests", "2.31.0", "2.32.0")
-    assert result.socket_score == 72
-    assert any("installScripts" in a for a in result.socket_alerts)
+    results = await asyncio.gather(
+        env.run(score, "pip", "requests", "2.31.0", "2.32.0"),
+        env.run(score, "pip", "flask", "2.0.0", "3.0.0"),
+        env.run(score, "pip", "django", "4.0.0", "5.0.0"),
+    )
+
+    assert route.call_count == 1  # one Socket request for all three packages
+    sent = json.loads(route.calls[0].request.content)
+    assert len(sent["components"]) == 3
+    by_score = sorted(r.socket_score for r in results)
+    assert by_score == [50, 72, 90]  # each package mapped to its own component
 
 
 @respx.mock
