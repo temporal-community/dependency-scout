@@ -1463,7 +1463,9 @@ def test_classifier_flags_obfuscated_code():
         ),
     )
     verdict = _rule_based(signals)
-    assert verdict.classification == "red"
+    # Obfuscated/minified code is a YELLOW review signal, not a hard RED — it false-positives
+    # on legitimate minified/bundled assets, so it flags for review rather than auto-closing.
+    assert verdict.classification == "yellow"
     assert any("obfuscat" in f.lower() for f in verdict.flags)
 
 

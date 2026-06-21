@@ -183,21 +183,10 @@ def _hard_red(signals: PackageChecks) -> Verdict | None:
             **rb,
         )
 
-    if signals.diff.obfuscated_code:
-        return Verdict(
-            classification="red",
-            confidence=0.88,
-            reasoning=(
-                "Obfuscated code detected in the diff — eval/atob chains, _0x vars, "
-                "gzip+base64 payloads, or >100KB single lines. "
-                "Human review required to confirm this is benign (e.g. minified frontend JS)."
-            ),
-            flags=[
-                "machine-generated obfuscation detected (eval/atob chains, _0x vars, or >100KB single line) — "
-                "review for hidden credential harvesting or C2 payload"
-            ],
-            **rb,
-        )
+    # NOTE: obfuscated_code is intentionally NOT a hard-RED. It false-positives constantly on
+    # legitimate minified/bundled assets (a package's web UI, vendored JS), and as a hard RED
+    # it overrode correct LLM verdicts — closing benign, even CVE-patching, bumps. It is a
+    # YELLOW review signal instead (see _rule_based) and is in the LLM's signal set.
 
     if (
         signals.attestation.has_attestation
@@ -247,7 +236,12 @@ def _apply_hard_rules(signals: PackageChecks, verdict: Verdict) -> Verdict:
 
     Preserves the LLM's reasoning as context so reviewers can see what it found.
     """
-    if verdict.classification == "red":
+    # Trust an engaged LLM: only override a GREEN verdict. A YELLOW or RED LLM verdict means
+    # the model already weighed the risk (it sees every signal, including obfuscation and
+    # CVEs) and routed to review/block — escalating it to RED-close is what wrongly closed a
+    # benign, CVE-patching bump. Hard evidence still overrides a GREEN, catching an LLM that
+    # was fooled into calling a genuine compromise "safe".
+    if verdict.classification != "green":
         return verdict
     hard = _hard_red(signals)
     if hard is None:
@@ -280,6 +274,11 @@ def _rule_based(signals: PackageChecks) -> Verdict:
         flags.append(f"recent release ({signals.age.release_age_hours:.0f}h old)")
     if signals.diff.install_script_changed:
         flags.append("install script modified")
+    if signals.diff.obfuscated_code:
+        flags.append(
+            "obfuscated or minified code in the diff — usually benign bundled/minified assets "
+            "(e.g. a package's web UI), but review to rule out a hidden payload"
+        )
     if signals.diff.network_calls_in_lib:
         flags.append(
             "new outbound network calls added to library code — "
