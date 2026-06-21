@@ -318,7 +318,7 @@ class PRActionWorkflow:
                 f"Reason: {', '.join(verdict.flags) or verdict.reasoning[:200]}"
             )
             await workflow.execute_activity(
-                "activities.platform.close_pr", args=[pr, reason, True], **opts
+                "activities.platform.close_pr", args=[pr, reason], **opts
             )
             return f"blocked-{displayed.classification}{url_suffix}{mr_suffix}"
 
@@ -347,6 +347,12 @@ class PRActionWorkflow:
             await workflow.execute_activity(
                 "activities.platform.request_review", args=[pr, config.reviewers], **opts
             )
+
+            # Non-blocking path (CLI / --local): an ephemeral Temporal can't receive the later
+            # review webhook → submit_decision signal, so don't wait — request review and return.
+            # The reviewer acts on GitHub (and native auto-merge, if enabled, completes the merge).
+            if not pr.wait_for_review:
+                return f"review-requested-{displayed.classification}{url_suffix}{mr_suffix}"
 
             # Wait for a decision from an authorized reviewer (max 7 days).
             # Re-check authorization each time a signal arrives in case an

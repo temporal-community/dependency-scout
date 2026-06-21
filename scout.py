@@ -298,6 +298,7 @@ async def _triage_single(args: argparse.Namespace, client: Client | None = None)
         old_version=old_version,
         new_version=new_version,
         dry_run=args.dry_run,
+        wait_for_review=False,  # CLI awaits the result; can't receive a later review signal
     )
 
     client = client or await connect()
@@ -344,6 +345,7 @@ async def _triage_one(
         old_version=parsed.old_version,
         new_version=parsed.new_version,
         dry_run=dry_run,
+        wait_for_review=False,  # CLI awaits the result; can't receive a later review signal
     )
     workflow_id = f"pr-action-{repo.replace('/', '-')}-{pr_data['number']}"
     handle = await client.start_workflow(

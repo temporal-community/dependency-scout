@@ -260,16 +260,18 @@ class GitHubPlatformClient:
             timeout=15.0,
         )
         if merge_resp.status_code == 405:
-            if mergeable_state == "blocked":
-                reason = "required checks have not passed yet"
-            elif mergeable_state == "unknown":
-                reason = "mergeability is still being computed — will retry"
-            else:
-                reason = f"mergeable_state={mergeable_state!r}"
-            raise ApplicationError(
-                f"PR #{pr.pr_number} not mergeable — {reason}",
-                non_retryable=False,
-            )
+            if mergeable_state == "unknown":
+                # Mergeability still being computed by GitHub — let Temporal retry shortly.
+                raise ApplicationError(
+                    f"PR #{pr.pr_number} mergeability still being computed — will retry",
+                    non_retryable=False,
+                )
+            # "blocked": required checks/reviews aren't satisfied yet. Don't force a merge now
+            # (it would just fail) and don't block waiting — queue GitHub's NATIVE auto-merge,
+            # which merges the PR automatically once branch-protection requirements pass. This
+            # works under branch protection and returns immediately.
+            await self._enable_auto_merge(pr, pr_data["node_id"], headers)
+            return
         if merge_resp.status_code == 422:
             raise ApplicationError(
                 f"PR #{pr.pr_number} merge failed: {merge_resp.json().get('message')}",
@@ -278,10 +280,54 @@ class GitHubPlatformClient:
         merge_resp.raise_for_status()
         activity.logger.info(f"Merged {pr.repo}#{pr.pr_number} (squash)")
 
-    async def close_pr(self, pr: PRContext, reason: str, ignore_bot: bool = False) -> None:
+    async def _enable_auto_merge(self, pr: PRContext, node_id: str, headers: dict) -> None:
+        """Enable GitHub's native auto-merge (GraphQL) so the PR merges once branch-protection
+        requirements pass. Used when an immediate merge is blocked by pending checks/reviews."""
+        client = get_client()
+        mutation = (
+            "mutation($id:ID!){enablePullRequestAutoMerge("
+            "input:{pullRequestId:$id,mergeMethod:SQUASH})"
+            "{pullRequest{autoMergeRequest{enabledAt}}}}"
+        )
+        resp = await client.post(
+            "https://api.github.com/graphql",
+            headers=headers,
+            json={"query": mutation, "variables": {"id": node_id}},
+            timeout=15.0,
+        )
+        resp.raise_for_status()
+        errors = resp.json().get("errors") or []
+        if errors:
+            msg = "; ".join(e.get("message", "") for e in errors)
+            low = msg.lower()
+            if "not allowed" in low or "not enabled" in low:
+                raise ApplicationError(
+                    f"PR #{pr.pr_number}: auto-merge is not enabled for {pr.repo}. Turn on "
+                    "'Allow auto-merge' (Settings → General → Pull Requests) so green bumps can "
+                    f"be queued to merge when checks/reviews pass. (GitHub: {msg})",
+                    non_retryable=True,
+                )
+            if "clean" in low:
+                # PR is already mergeable but the REST merge raced — let Temporal retry it.
+                raise ApplicationError(
+                    f"PR #{pr.pr_number} is already mergeable — retrying direct merge ({msg})",
+                    non_retryable=False,
+                )
+            raise ApplicationError(
+                f"PR #{pr.pr_number} enable auto-merge failed: {msg}", non_retryable=True
+            )
+        activity.logger.info(
+            f"Enabled auto-merge for {pr.repo}#{pr.pr_number} — GitHub will merge it "
+            "automatically once required checks and reviews pass"
+        )
+
+    async def close_pr(self, pr: PRContext, reason: str) -> None:
+        # We intentionally do NOT append "@dependabot ignore this dependency": that command tells
+        # Dependabot to ignore the package forever (blocking the very security upgrade we usually
+        # recommend), and it's rejected anyway when this comment is authored by github-actions[bot]
+        # ("only users with push access can use that command"). Closing alone already makes
+        # Dependabot skip this version and re-propose the next available one.
         body = f"**Dependency Scout — closing this PR.**\n\n{reason}"
-        if ignore_bot:
-            body += "\n\n@dependabot ignore this dependency"
         if self._dry_run():
             activity.logger.info(f"[dry-run] Would close {pr.repo}#{pr.pr_number}: {reason}")
             return

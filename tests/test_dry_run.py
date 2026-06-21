@@ -56,7 +56,9 @@ def _spy(name: str, recorder: list[str], result=None):
     return fn
 
 
-async def _run(dry_run: bool, classification: str, config: RepoConfig) -> tuple[str, list[str]]:
+async def _run(
+    dry_run: bool, classification: str, config: RepoConfig, wait_for_review: bool = True
+) -> tuple[str, list[str]]:
     called: list[str] = []
     # comment returns a URL string; the others return None.
     spies = [_spy("activities.platform.comment", called, "")] + [
@@ -91,6 +93,7 @@ async def _run(dry_run: bool, classification: str, config: RepoConfig) -> tuple[
         old_version="2.31.0",
         new_version="2.32.0",
         dry_run=dry_run,
+        wait_for_review=wait_for_review,
     )
     async with await WorkflowEnvironment.start_time_skipping(
         data_converter=pydantic_data_converter
@@ -137,3 +140,17 @@ async def test_non_dry_run_still_comments():
     result, called = await _run(dry_run=False, classification="green", config=RepoConfig())
     assert "activities.platform.comment" in called
     assert not result.startswith("dry-run-")
+
+
+async def test_yellow_non_blocking_requests_review_and_returns():
+    """The CLI/--local path (wait_for_review=False): a YELLOW PR requests review and returns
+    immediately instead of blocking on the 7-day human-decision wait."""
+    config = RepoConfig(reviewers=["alice"])
+    result, called = await _run(
+        dry_run=False, classification="yellow", config=config, wait_for_review=False
+    )
+    assert result.startswith("review-requested-yellow"), result
+    assert "activities.platform.request_review" in called
+    # Must not have merged or closed — review was requested, nothing acted on.
+    assert "activities.platform.merge_pr" not in called
+    assert "activities.platform.close_pr" not in called

@@ -47,9 +47,9 @@ async def merge_pr(pr: PRContext) -> None:
 
 
 @activity.defn(name="activities.platform.close_pr")
-async def close_pr(pr: PRContext, reason: str, ignore_bot: bool = False) -> None:
+async def close_pr(pr: PRContext, reason: str) -> None:
     """Close the pull request without merging, posting the given reason as a comment via the GitHub or GitLab API."""
-    await get_platform_client(pr).close_pr(pr, reason, ignore_bot)
+    await get_platform_client(pr).close_pr(pr, reason)
 
 
 @activity.defn(name="activities.platform.label")

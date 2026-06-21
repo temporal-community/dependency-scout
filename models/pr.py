@@ -28,6 +28,11 @@ class PRContext(BaseModel):
     new_version: str
     head_sha: str = ""  # PR branch HEAD SHA at webhook receipt time
     dry_run: bool = False  # when True, skip posting comments/actions (triage --dry-run)
+    # When True (the persistent webhook deployment), a YELLOW PR's workflow waits for a human
+    # review decision (delivered later by a review webhook → submit_decision signal). The CLI
+    # sets this False: it awaits the workflow result and an ephemeral/--local Temporal can't
+    # receive that signal, so YELLOW just requests review and returns (non-blocking).
+    wait_for_review: bool = True
 
     @field_validator("ecosystem")
     @classmethod

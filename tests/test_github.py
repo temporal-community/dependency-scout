@@ -71,7 +71,13 @@ def dry_run(monkeypatch):
 
 
 def _open_pr_payload(sha: str = "abc123") -> dict:
-    return {"state": "open", "head": {"sha": sha}, "mergeable": True, "mergeable_state": "clean"}
+    return {
+        "state": "open",
+        "head": {"sha": sha},
+        "mergeable": True,
+        "mergeable_state": "clean",
+        "node_id": "PR_node123",
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -304,8 +310,36 @@ async def test_merge_pr_dirty_raises_non_retryable(client, pr, with_pat):
 
 
 @respx.mock
-async def test_merge_pr_405_blocked_is_retryable(client, pr, with_pat):
+async def test_merge_pr_405_blocked_enables_native_auto_merge(client, pr, with_pat):
+    # "blocked" = branch-protection requirements (checks/reviews) not yet satisfied.
+    # We don't error or wait — we queue GitHub's native auto-merge and return.
     payload = {**_open_pr_payload(), "mergeable_state": "blocked"}
+    respx.get(f"{BASE_URL}/pulls/{PR_NUM}").mock(return_value=httpx.Response(200, json=payload))
+    respx.put(f"{BASE_URL}/pulls/{PR_NUM}/merge").mock(
+        return_value=httpx.Response(405, json={"message": "not mergeable"})
+    )
+    graphql = respx.post("https://api.github.com/graphql").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "data": {
+                    "enablePullRequestAutoMerge": {
+                        "pullRequest": {"autoMergeRequest": {"enabledAt": "2026-06-21T00:00:00Z"}}
+                    }
+                }
+            },
+        )
+    )
+    env = ActivityEnvironment()
+    await env.run(client.merge_pr, pr)  # no exception — auto-merge queued
+    assert graphql.called
+    assert graphql.calls.last.request.read().decode().__contains__("PR_node123")
+
+
+@respx.mock
+async def test_merge_pr_405_unknown_is_retryable(client, pr, with_pat):
+    # Mergeability still being computed by GitHub — let Temporal retry shortly.
+    payload = {**_open_pr_payload(), "mergeable_state": "unknown"}
     respx.get(f"{BASE_URL}/pulls/{PR_NUM}").mock(return_value=httpx.Response(200, json=payload))
     respx.put(f"{BASE_URL}/pulls/{PR_NUM}/merge").mock(
         return_value=httpx.Response(405, json={"message": "not mergeable"})
@@ -314,16 +348,41 @@ async def test_merge_pr_405_blocked_is_retryable(client, pr, with_pat):
     with pytest.raises(ApplicationError) as exc_info:
         await env.run(client.merge_pr, pr)
     assert exc_info.value.non_retryable is False
-    assert "required checks" in str(exc_info.value)
+    assert "still being computed" in str(exc_info.value)
 
 
 @respx.mock
-async def test_merge_pr_405_is_retryable(client, pr, with_pat):
-    respx.get(f"{BASE_URL}/pulls/{PR_NUM}").mock(
-        return_value=httpx.Response(200, json=_open_pr_payload())
-    )
+async def test_merge_pr_405_blocked_auto_merge_not_allowed(client, pr, with_pat):
+    # Repo hasn't turned on "Allow auto-merge" — surface an actionable, non-retryable error.
+    payload = {**_open_pr_payload(), "mergeable_state": "blocked"}
+    respx.get(f"{BASE_URL}/pulls/{PR_NUM}").mock(return_value=httpx.Response(200, json=payload))
     respx.put(f"{BASE_URL}/pulls/{PR_NUM}/merge").mock(
         return_value=httpx.Response(405, json={"message": "not mergeable"})
+    )
+    respx.post("https://api.github.com/graphql").mock(
+        return_value=httpx.Response(
+            200, json={"errors": [{"message": "Auto merge is not allowed for this repository"}]}
+        )
+    )
+    env = ActivityEnvironment()
+    with pytest.raises(ApplicationError) as exc_info:
+        await env.run(client.merge_pr, pr)
+    assert exc_info.value.non_retryable is True
+    assert "Allow auto-merge" in str(exc_info.value)
+
+
+@respx.mock
+async def test_merge_pr_405_blocked_auto_merge_clean_is_retryable(client, pr, with_pat):
+    # GraphQL says the PR is already clean — the REST merge raced; let Temporal retry it.
+    payload = {**_open_pr_payload(), "mergeable_state": "blocked"}
+    respx.get(f"{BASE_URL}/pulls/{PR_NUM}").mock(return_value=httpx.Response(200, json=payload))
+    respx.put(f"{BASE_URL}/pulls/{PR_NUM}/merge").mock(
+        return_value=httpx.Response(405, json={"message": "not mergeable"})
+    )
+    respx.post("https://api.github.com/graphql").mock(
+        return_value=httpx.Response(
+            200, json={"errors": [{"message": "Pull request is in clean status"}]}
+        )
     )
     env = ActivityEnvironment()
     with pytest.raises(ApplicationError) as exc_info:
@@ -437,19 +496,18 @@ async def test_close_pr_posts_comment_then_patches_pr(client, pr, with_pat):
 
 
 @respx.mock
-async def test_close_pr_with_ignore_bot_includes_magic_phrase(client, pr, with_pat):
-    respx.post(f"{BASE_URL}/issues/{PR_NUM}/comments").mock(
-        return_value=httpx.Response(201, json={})
-    )
-    respx.patch(f"{BASE_URL}/pulls/{PR_NUM}").mock(return_value=httpx.Response(200, json={}))
+async def test_close_pr_never_emits_dependabot_ignore_command(client, pr, with_pat):
+    # The "@dependabot ignore this dependency" command is rejected when authored by
+    # github-actions[bot] and would block the security upgrade we recommend — so we never send it.
     comment_route = respx.post(f"{BASE_URL}/issues/{PR_NUM}/comments").mock(
         return_value=httpx.Response(201, json={})
     )
+    respx.patch(f"{BASE_URL}/pulls/{PR_NUM}").mock(return_value=httpx.Response(200, json={}))
     env = ActivityEnvironment()
-    await env.run(client.close_pr, pr, "Blocked.", ignore_bot=True)
+    await env.run(client.close_pr, pr, "Blocked.")
 
     comment_body = comment_route.calls[0].request.content.decode()
-    assert "@dependabot ignore this dependency" in comment_body
+    assert "@dependabot" not in comment_body
 
 
 @respx.mock
